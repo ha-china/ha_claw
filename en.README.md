@@ -1,6 +1,3 @@
-以下是将你的“火天大有 · 聚合AI”插件说明文档完整翻译成英文的版本，保留了原有的结构与风格，并做了适度本地化优化：
-
----
 
 <div align="center">
 
@@ -134,6 +131,3 @@ If you enjoy this project, feel free to leave a ⭐️ and share your feedback!
 
 </div>
 
----
-
-如果你有需要添加 **README.md 英文文件结构化版本** 或生成 **文档自动部署页面（如 GitHub Pages）**，也可以告诉我。需要我接着帮你生成 README 或 HTML 吗？
