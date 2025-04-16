@@ -3,7 +3,7 @@
 <div align="center">
 
 🔥  
-###  火天大有 For Home Assistant
+###  火天大有 for Home Assistant
 
 ![Home Assistant](https://img.shields.io/badge/Home%20Assistant-2024.8.0-blue.svg?color=red)
 ![Latest Release](https://img.shields.io/github/v/release/knoop7/HuoTianDaYou?color=red)
