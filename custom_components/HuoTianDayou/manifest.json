@@ -1,0 +1,18 @@
+{
+    "domain": "kadermanager",
+    "name": "火天大有 (聚合AI)",
+    "codeowners": [
+      "@knoop7"
+    ],
+    "config_flow": true,
+    "dependencies": [
+      "conversation"
+    ],
+    "after_dependencies": ["assist_pipeline"],
+    "documentation": "https://github.com/knoop7/kadermanager",
+    "integration_type": "service",
+    "iot_class": "local_polling",
+    "issue_tracker": "https://github.com/knoop7/kadermanager/issues",
+    "requirements": [],
+    "version": "3.5.0-stable"
+  }
