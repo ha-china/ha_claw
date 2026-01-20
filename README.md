@@ -9,7 +9,7 @@
 ![Latest Release](https://img.shields.io/github/v/release/knoop7/HuoTianDaYou?color=red)
 
 
-<h3 align="center">「外挂」 - 智能对话破解器</h3>
+<h3 align="center">「外挂」 - 智能对话劫持器</h3>
 
 
 
@@ -21,7 +21,7 @@
 [+] 多AI代理聚合............ INJECTED ✓<br>
 [+] 智能回退机制............ INJECTED ✓<br>
 [+] 深度思考模式............ INJECTED ✓<br>
-[+] 联网搜索破解............ INJECTED ✓<br>
+[+] 联网搜索玩具............ INJECTED ✓<br>
 [+] 语音输出劫持............ INJECTED ✓<br>
 [+] 意图技能包.............. INJECTED ✓
 </p>
@@ -36,7 +36,7 @@
 |:----:|:----:|:----:|
 | conversation.py | HOOKED | 对话入口劫持 |
 | ai_manager.py | PATCHED | AI代理调度器 |
-| web_search.py | CRACKED | 搜索引擎破解 |
+| web_search.py | CRACKED | 搜索引擎玩具 |
 | prompt_manager.py | INJECTED | 提示词注入器 |
 | content_processor.py | BYPASSED | 内容过滤绕过 |
 | ai_skills.py | LOADED | 技能包加载器 |
@@ -78,9 +78,3 @@
 </p>
 
 
-<p align="center">
-╔══════════════════════════════════╗<br>
-║   CRACKED WITH ❤️ BY KNOOP      ║<br>
-║   github.com/knoop7/ha_crack     ║<br>
-╚══════════════════════════════════╝
-</p> 
