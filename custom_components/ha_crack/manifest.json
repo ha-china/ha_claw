@@ -1,0 +1,21 @@
+{
+    "domain": "kadermanager",
+    "name": "AI外挂",
+    "codeowners": [
+      "@knoop7"
+    ],
+    "config_flow": true,
+    "dependencies": [
+      "conversation",
+      "intent",
+      "frontend",
+      "websocket_api"
+    ],
+    "after_dependencies": ["assist_pipeline"],
+    "documentation": "https://github.com/knoop7/ha_crack",
+    "integration_type": "service",
+    "iot_class": "local_polling",
+    "issue_tracker": "https://github.com/knoop7/ha_crack/issues",
+    "requirements": [],
+    "version": "4.2.0-beta"
+  }
