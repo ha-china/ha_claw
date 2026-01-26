@@ -1,0 +1,144 @@
+{
+  "config": {
+    "title": "外挂",
+    "step": {
+      "user": {
+        "title": "首次设置",
+        "description": "## 欢迎使用AI外挂破解集成！\n\n本集成旨在聚合管理您的 AI 对话实体，提供更灵活的交互体验。开源代码由 KNOOP 提供制作，欢迎提交 PR 和使用建议。\n\n### 使用指南\n- 支持所有经 Home Assistant 认证的对话实体\n- 可添加最多三种不同的对话代理实体\n- 支持多级对话代理回退机制\n- 支持深度思考智能总结\n- 支持语音输出文本内容\n- 支持属性值直接输出文本内容\n\n### 注意事项\n- 我们不生产 AI，只是 AI 的搬运工\n- 不会增加系统额外内存负担\n- 不会添加其他联网方式\n\n请设置您的集成名称，然后点击提交进入下一步配置",
+        "data": {
+          "name": "集成名称"
+        }
+      }
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "配置中心",
+        "description": "以下是相关说明书：\n\n### 主要功能\n\n- **对话代理设置**：您可以根据不同AI的特长灵活组合，例如将擅长控制的AI（例如 Home Assistant）设为主要代理，将擅长问答的AI设为备用代理，将本地大模型设为次要备用代理。\n\n- **对话模式设置**：自定义AI回复的显示格式和处理逻辑。可选择精简模式、前后备推荐模式或深度思考模式。智能总结功能可将多个AI的回答整合为一个综合性回复。\n\n### 扩展功能\n\n- **语音输出设置**：将AI的文本回复转换为语音输出，增强交互体验。支持小米音箱和各类媒体播放器，可配置多种TTS服务。\n\n\n\n`注意：在对话模式选项中选择开关智能总结功能之后，必须需要回到第一步再次勾选第三个AI实体才视为保存成功。目前集成，现已支持多配置条目火天大有实体。`\n\n请选择一个选项继续配置",
+        "data": {
+          "next_step": "选择菜单"
+        }
+      },
+      "agent_settings": {
+        "title": "对话代理设置",
+        "description": "设置三级对话代理：\n\n- **首要 AI 实体**：主要使用的对话代理（建议选择 Home Assistant 内置对话实体）\n- **后备 AI 实体**：当首选 AI 无法响应时使用的备用对话代理\n- **二级后备 AI 实体**：当前两级对话代理都无法响应时使用的对话代理，如果开启深度思考，将由最后一个AI处理\n\n如果不需要某级对话代理，可以点击选项后的 (X) 取消选择",
+        "data": {
+          "back": "返回主菜单",
+          "save_and_exit": "保存并完成",
+          "next_step": "下一步",
+          "primary_agent": "首要 AI 实体",
+          "fallback_agent": "后备 AI 实体",
+          "secondary_fallback_agent": "二级后备 AI 实体（可选）"
+        }
+      },
+      "conversation_settings": {
+        "title": "对话模式设置",
+        "description": "配置 AI 回复的显示方式和错误响应模板：\n\n- **对话模式**：选择 AI 回复的显示格式\n- **错误过滤字段**：设置当 AI 无法响应时的错误提示模板\n- **最终AI智能总结**：启用后，将前面AI的输出交给最后一个AI处理，由最后一个AI统一总结输出，推荐最后AI实体配置 Ollama 本地模型处理体验更佳\n\n错误过滤字段支持Jinja2 模板语法等",
+        "data": {
+          "back": "返回主菜单",
+          "save_and_exit": "保存并完成",
+          "next_step": "下一步",
+          "conversation_mode": "对话模式",
+          "error_responses": "错误过滤字段",
+          "enable_ai_summary": "深度思考 - DeepSeek版 智能总结",
+          "enable_web_search": "联网搜索"
+        }
+      },
+      "speaker_settings": {
+        "title": "语音输出设置",
+        "description": "您希望使用的语音输出设备类型：\n\n- **关闭语音输出**：仅使用文本对话\n- **小米音箱**：使用小米音箱作为语音输出设备\n- **其他音箱**：使用其他支持的媒体播放器和 TTS 服务\n\n选择后点击下一步进行详细配置",
+        "data": {
+          "back": "返回主菜单",
+          "save_and_exit": "保存并完成",
+          "next_step": "下一步",
+          "speaker_type": "音箱类型"
+        }
+      },
+      "xiaomi_speaker": {
+        "title": "小米音箱设置",
+        "description": "选择要用于语音输出的小米音箱设备。系统将自动检测您环境中的小米音箱设备。\n\n如果没有检测到可用的小米音箱，请确保您的设备已正确接入 Home Assistant。",
+        "data": {
+          "info": "未检测到可用的小米音箱",
+          "back": "返回上一步",
+          "speaker_entity": "音箱设备"
+        }
+      },
+      "other_speaker": {
+        "title": "其他音箱设置",
+        "description": "选择要用于语音输出的设备和 TTS 服务：\n\n- **音箱设备**：选择支持的媒体播放器实体\n- **TTS 服务**：选择用于文本转语音的服务\n\n如果没有检测到可用的设备或服务，请确保您已安装并配置相关集成",
+        "data": {
+          "info": "未检测到可用的音箱或 TTS 服务",
+          "back": "返回上一步",
+          "save_and_exit": "保存并完成",
+          "speaker_entity": "音箱设备",
+          "tts_service": "TTS 服务"
+        }
+      }
+    },
+    "error": {
+      "invalid_conversation_mode": "对话模式选择无效",
+      "invalid_error_responses": "错误过滤字段格式错误",
+      "invalid_speaker": "音箱设备选择无效",
+      "invalid_tts_service": "TTS 服务选择无效",
+      "no_speakers_available": "没有可用的音箱设备",
+      "no_tts_available": "没有可用的 TTS 服务",
+      "invalid_agent": "请选择有效的对话代理实体",
+      "no_agents_available": "未找到有效的对话代理，请确保至少有一个对话代理可用"
+    }
+  },
+  "selector": {
+    "config_sections": {
+      "label": "配置选项",
+      "description": "请选择要配置的部分",
+      "options": {
+        "agent_settings": "对话代理设置",
+        "conversation_settings": "对话模式设置",
+        "speaker_settings": "语音输出设置"
+      }
+    },
+    "conversation_mode": {
+      "label": "显示模式",
+      "description": "选择AI回复的显示格式",
+      "options": {
+        "no_name": "不显示名称",
+        "add_name": "显示 AI 名称（推荐）",
+        "detailed": "详细显示内容（不推荐）"
+      }
+    },
+    "speaker_type": {
+      "label": "音箱类型",
+      "description": "请选择音箱设备类型",
+      "options": {
+        "disabled": "关闭语音输出",
+        "xiaomi": "小米音箱",
+        "other": "其他音箱"
+      }
+    },
+    "primary_agent": {
+      "label": "首要 AI 实体",
+      "description": "选择首选对话助手 AI"
+    },
+    "fallback_agent": {
+      "label": "后备 AI 实体",
+      "description": "当首选 AI 无法响应时使用的备用 AI"
+    },
+    "secondary_fallback_agent": {
+      "label": "二级后备 AI 实体",
+      "description": "当后备 AI 也无法响应时使用的 AI"
+    },
+    "speaker_entity": {
+      "label": "音箱设备",
+      "description": "选择用于语音输出的设备"
+    },
+    "tts_service": {
+      "label": "TTS 服务",
+      "description": "选择用于文本转语音的服务"
+    }
+  },
+  "navigation": {
+    "save_and_exit": "保存并完成",
+    "next_step": "下一步",
+    "previous_step": "上一步"
+  }
+}

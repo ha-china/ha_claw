@@ -1,0 +1,144 @@
+{
+  "config": {
+    "title": "Fire sky is great",
+    "step": {
+      "user": {
+        "title": "First time setting",
+        "description": "## Welcome to Huotian Dayou integration!\n\nThis integration is designed to aggregate and manage your AI conversation entities to provide a more flexible interactive experience. The open source code is provided by KNOOP, and you are welcome to submit PR and usage suggestions.\n\n### User Guide\n- Supports all Home Assistant certified conversation entities\n- Up to three different conversation proxy entities can be added\n- Support multi-level dialogue proxy fallback mechanism\n- Support in-depth thinking intelligent summary\n- Support voice output text content\n- Supports the output of text content directly from attribute values\n\n### Notes\n- We don't produce AI, we are just porters of AI\n- No additional memory burden on the system\n- No other networking methods will be added\n\nPlease set your integration name and click Submit to proceed to the next configuration",
+        "data": {
+          "name": "Integration Name"
+        }
+      }
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Configuration Center",
+        "description": "The following are the relevant instructions:\n\n### Main functions\n\n- **Dialogue Agent Settings**: You can flexibly combine according to the strengths of different AIs, such as setting AI that is good at control (such as Home Assistant) as the primary agent, setting AI that is good at Q&A as the backup agent, and setting the local big model as the secondary backup agent.\n\n- **Dialogue Mode Settings**: Customize the display format and processing logic of AI reply. You can choose streamlined mode, front and back recommendation mode or deep thinking mode. The intelligent summary function can integrate multiple AI responses into one comprehensive response.\n\n### Extended Features\n\n- **Voice Output Settings**: Convert AI's text reply to voice output to enhance interactive experience. Supports Xiaomi speakers and various media players, and can be configured with a variety of TTS services.\n\n\n\n`Note: After selecting the switch intelligent summary function in the dialogue mode option, you must go back to the first step and check the third AI entity again before it is considered to be saved successfully. Currently integrated, it now supports multiple configuration entries. `\n\nPlease select an option to continue the configuration",
+        "data": {
+          "next_step": "Select Menu"
+        }
+      },
+      "agent_settings": {
+        "title": "Dialogue Agent Settings",
+        "description": "Set up a three-level dialogue agent:\n\n- **Primary AI Entity**: The dialogue agent that is mainly used (it is recommended to choose Home Assistant built-in dialogue entity)\n- **Backup AI Entity**: Alternate dialogue agent used when the preferred AI cannot respond\n- **Level 2 backup AI entity**: The dialogue agent used when neither level 2 dialogue agent can respond. If deep thinking is enabled, it will be processed by the last AI\n\nIf a certain level of dialogue agent is not required, you can click (X) after the option to cancel the selection",
+        "data": {
+          "back": "Return to main menu",
+          "save_and_exit": "Save and complete",
+          "next_step": "Next step",
+          "primary_agent": "Primary AI entity",
+          "fallback_agent": "Backup AI entity",
+          "secondary_fallback_agent": "Level 2 backup AI entity (optional)"
+        }
+      },
+      "conversation_settings": {
+        "title": "Dialogue Mode Settings",
+        "description": "Configure how AI reply is displayed and error response templates:\n\n- **Dialogue Mode**: Select the display format of AI reply\n- **Error filtering field**: Set the error prompt template when AI cannot respond\n- **Finally AI Intelligent Summary**: After enabled, the output of the previous AI is handed over to the last AI to process, and the output is uniformly summarized and outputted by the last AI. The final AI entity configuration is recommended. The Ollama local model processing experience is better\n\nError filtering fields support Jinja2 template syntax, etc.",
+        "data": {
+          "back": "Return to main menu",
+          "save_and_exit": "Save and complete",
+          "next_step": "Next step",
+          "conversation_mode": "Dialogue Mode",
+          "error_responses": "Error filtering fields",
+          "enable_ai_summary": "Deep Thinking - DeepSeek Edition Intelligent Summary",
+          "enable_web_search": "Web Search"
+        }
+      },
+      "speaker_settings": {
+        "title": "Voice output settings",
+        "description": "The type of voice output device you want to use:\n\n- **Close voice output**: Use text conversation only\n- **Xiaomi speaker**: Use Xiaomi speaker as voice output device\n- **Other speakers**: Use other supported media players and TTS services\n\nAfter selecting, click Next to configure it in detail",
+        "data": {
+          "back": "Return to main menu",
+          "save_and_exit": "Save and complete",
+          "next_step": "Next step",
+          "speaker_type": "Speaker type"
+        }
+      },
+      "xiaomi_speaker": {
+        "title": "Xiaomi speaker settings",
+        "description": "Select the Xiaomi speaker device to use for voice output. The system will automatically detect Xiaomi speaker equipment in your environment.\n\nIf no available Xiaomi speakers are detected, make sure your device is properly connected to Home Assistant.",
+        "data": {
+          "info": "No available Xiaomi speakers were detected",
+          "back": "Return to the previous step",
+          "speaker_entity": "Speaker equipment"
+        }
+      },
+      "other_speaker": {
+        "title": "Other speaker settings",
+        "description": "Select the device and TTS service to use for voice output:\n\n- **Speaker Device**: Select the supported media player entity\n- **TTS Service**: Select a service for text to voice\n\nIf no available devices or services are detected, make sure you have installed and configured the relevant integration",
+        "data": {
+          "info": "No available speakers or TTS services were detected",
+          "back": "Return to the previous step",
+          "save_and_exit": "Save and complete",
+          "speaker_entity": "Speaker equipment",
+          "tts_service": "TTS Services"
+        }
+      }
+    },
+    "error": {
+      "invalid_conversation_mode": "Dialogue mode selection is invalid",
+      "invalid_error_responses": "Error filtering field format error",
+      "invalid_speaker": "Speaker device selection is invalid",
+      "invalid_tts_service": "TTS service selection is invalid",
+      "no_speakers_available": "No speaker equipment available",
+      "no_tts_available": "No TTS service available",
+      "invalid_agent": "Please select a valid dialogue proxy entity",
+      "no_agents_available": "No valid conversation proxy was found, make sure at least one conversation proxy is available"
+    }
+  },
+  "selector": {
+    "config_sections": {
+      "label": "Configuration Options",
+      "description": "Please select the part to configure",
+      "options": {
+        "agent_settings": "Dialogue Agent Settings",
+        "conversation_settings": "Dialogue Mode Settings",
+        "speaker_settings": "Voice output settings"
+      }
+    },
+    "conversation_mode": {
+      "label": "Display mode",
+      "description": "Select the display format of AI reply",
+      "options": {
+        "no_name": "No name displayed",
+        "add_name": "Show AI name (recommended)",
+        "detailed": "Detailed display of content (not recommended)"
+      }
+    },
+    "speaker_type": {
+      "label": "Speaker type",
+      "description": "Please select the speaker equipment type",
+      "options": {
+        "disabled": "Turn off voice output",
+        "xiaomi": "Xiaomi speakers",
+        "other": "Other speakers"
+      }
+    },
+    "primary_agent": {
+      "label": "Primary AI entity",
+      "description": "Select the preferred dialogue assistant AI"
+    },
+    "fallback_agent": {
+      "label": "Backup AI entity",
+      "description": "Alternate AI to use when the preferred AI cannot respond"
+    },
+    "secondary_fallback_agent": {
+      "label": "Level 2 backup AI entity",
+      "description": "AI used when the backing AI is also unable to respond"
+    },
+    "speaker_entity": {
+      "label": "Speaker equipment",
+      "description": "Select the device for voice output"
+    },
+    "tts_service": {
+      "label": "TTS Services",
+      "description": "Select a service for text to voice"
+    }
+  },
+  "navigation": {
+    "save_and_exit": "Save and complete",
+    "next_step": "Next step",
+    "previous_step": "Previous"
+  }
+}

@@ -1,0 +1,109 @@
+language: "zh"
+intents:
+  AISkills:
+    data:
+      - sentences:
+          - "(技能|技能包|能力|功能)(说明|介绍|帮助|列表)"
+          - "(怎么|如何)(使用|调用)(技能|功能)"
+          - "(有什么|有哪些)(技能|功能|能力)"
+          - "AI(技能|能力|功能)"
+  RolePlay:
+    data:
+      - sentences:
+          - "(扮演|假装|模仿|当|变成|化身|切换到|切换){role}"
+          - "用{role}(语气|口吻|方式)(说话|回复)"
+          - "(我是|我要当|我想当){role}"
+          - "(你是|你现在是|现在你是){role}"
+          - "(退出|取消|停止)(角色|扮演)"
+          - "(恢复正常|不要角色|不扮演了)"
+          - "退不出(角色|扮演)了"
+          - "退出不了(角色|扮演)"
+          - "(不想|不要)(继续)?(扮演|角色)"
+          - "(换|换个|换一个|不喜欢这个)(角色|人物)"
+          - "(随机|随便)(角色|扮演)"
+          - "角色扮演"
+          - "{role}(模式)"
+        slots:
+          role:
+            name: "role"
+  LanguageStyle:
+    data:
+      - sentences:
+          - "(简单|正式|幽默|简洁)(一点|点|些)"
+          - "用(简单|正式|幽默|简洁)(的话|语言|方式)(说|回复)"
+          - "(小学生|孩子)(能懂|听得懂)"
+        slots:
+          style:
+            name: "style"
+  WebSearch:
+    data:
+      - sentences:
+          - "(搜索|搜一下|查一下|联网搜|网上搜){query}"
+          - "(帮我|请)(搜索|搜|查){query}"
+          - "(联网|上网)(查|搜|找){query}"
+          - "{query}(的最新消息|最新情况)"
+        slots:
+          query:
+            name: "query"
+  Click:
+    data:
+      - sentences:
+          - "(点击|打开|访问){target}"
+          - "(帮我|请)(点击|打开){target}"
+        slots:
+          target:
+            name: "target"
+  Query:
+    data:
+      - sentences:
+          - "(查询|查看|看看){entity}(状态|情况)"
+          - "{entity}(现在|目前)(怎么样|什么状态)"
+          - "{entity}(开着吗|关着吗|是多少)"
+        slots:
+          entity:
+            name: "entity"
+  AIOutput:
+    data:
+      - sentences:
+          - "(简洁|详细|列表|代码)(模式|输出)"
+          - "(回复|说话)(简洁|详细)(一点|些)"
+        slots:
+          mode:
+            name: "mode"
+  Smart:
+    data:
+      - sentences:
+          - "(智能|自动)(判断|分析|处理)"
+          - "(帮我|请)(智能|自动)(处理|分析)"
+        slots:
+          action:
+            name: "action"
+  Explain:
+    data:
+      - sentences:
+          - "(解释|说明|讲解){topic}"
+          - "{topic}(是什么|什么意思|怎么理解)"
+          - "(帮我|请)(解释|说明){topic}"
+        slots:
+          topic:
+            name: "topic"
+  Notify:
+    data:
+      - sentences:
+          - "(通知|提醒|发送){message}"
+          - "(帮我|请)(通知|提醒){message}"
+          - "(发|发送)(通知|消息){message}"
+        slots:
+          message:
+            name: "message"
+          target:
+            name: "target"
+  GlobalInject:
+    data:
+      - sentences:
+          - "(全局|注入|设置)(上下文|背景){context}"
+          - "(记住|记下){context}"
+          - "(从现在开始|接下来){context}"
+        slots:
+          context:
+            name: "context"
