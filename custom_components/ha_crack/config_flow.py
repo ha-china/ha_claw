@@ -11,7 +11,7 @@ from homeassistant.helpers.selector import SelectSelector, SelectSelectorConfig,
 
 from .const import (
     DOMAIN, CONF_CONVERSATION_MODE, CONF_PRIMARY_AGENT, CONF_FALLBACK_AGENT,
-    CONF_SECONDARY_FALLBACK_AGENT, CONF_ERROR_RESPONSES, CONF_ENABLE_SPEAKER,
+    CONF_SECONDARY_FALLBACK_AGENT, CONF_ERROR_RESPONSES,
     CONF_SPEAKER_ENTITY, CONF_SPEAKER_TYPE, CONF_TTS_SERVICE,
     CONVERSATION_MODE_NO_NAME, CONVERSATION_MODE_ADD_NAME, CONVERSATION_MODE_DETAILED,
     SPEAKER_TYPE_DISABLED, SPEAKER_TYPE_XIAOMI, SPEAKER_TYPE_OTHER, CONF_ENABLE_AI_SUMMARY,
@@ -84,6 +84,8 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
                     if key in current_options:
                         self._user_input[key] = current_options[key]
             
+            bool_keys = [CONF_ENABLE_AI_SUMMARY, CONF_ENABLE_WEB_SEARCH]
+            
             for key, value in user_input.items():
                 if key not in exclude_keys:
                     if key in agent_keys and allow_agent_changes:
@@ -97,11 +99,15 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
                             if value not in (None, ""):
                                 self._user_input[key] = value
                     elif key in conversation_keys and allow_conversation_changes:
-                        if value not in (None, ""):
+                        if key in bool_keys:
+                            self._user_input[key] = value
+                        elif value not in (None, ""):
                             self._user_input[key] = value
                     elif key in speaker_keys and allow_speaker_changes:
                         if value not in (None, ""):
                             self._user_input[key] = value
+                    elif key in bool_keys:
+                        self._user_input[key] = value
                     elif value not in (None, ""):
                         self._user_input[key] = value
                     elif key in current_options and key not in self._user_input:

@@ -60,7 +60,7 @@ HACrack.highlight('选择器')           // 高亮元素
 HACrack.callService('domain','service') // 调用HA服务
 ```
 
-用户要求雨/雪花/特效时，用InjectJS注入自己编写的Canvas动画代码。
+用户要求特效时，用InjectJS注入自己编写的Canvas动画代码。
 
 时间触发器：
 - 必须用`at`而不是`time`

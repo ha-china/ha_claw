@@ -224,8 +224,6 @@ class PromptManager:
             , re.IGNORECASE
         )
 
-        temp_only_pattern = re.compile(r"(?:最高气温|气温)\s?约?(-?\d{1,2})\s*℃?")
-        low_temp_only_pattern = re.compile(r"(?:最低气温)\s?约?(-?\d{1,2})\s*℃?")
 
         processed_indices = set()
         
@@ -238,7 +236,6 @@ class PromptManager:
             date_str = self._normalize_date_string(data.get("date","").strip())
             condition = data.get("condition","").strip().replace("转","转") 
             
-            temp_part = data.get("temp","").strip()
             temp1_str = data.get("temp1") or match.group(match.lastindex -1) 
             temp2_str = data.get("temp2") or match.group(match.lastindex) 
 

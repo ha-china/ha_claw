@@ -12,7 +12,11 @@ from homeassistant.components import conversation
 from homeassistant.util import ulid
 from homeassistant.core import HomeAssistant
 from homeassistant.components.conversation import intent
-from ..const import DEFAULT_ERROR_RESPONSES
+from ..const import (
+    CONVERSATION_MODE_NO_NAME,
+    CONVERSATION_MODE_ADD_NAME,
+    CONVERSATION_MODE_DETAILED,
+)
 
 from ..services.prompt_manager import PromptManager, QueryType
 from ..services.content_processor import ContentProcessor
@@ -377,7 +381,7 @@ class AIManager:
                         response_text = result.response.speech['plain'].get('original_speech', 
                                                                           result.response.speech['plain'].get('speech', '')).strip()
                         
-                        if conversation_mode == "no_name":
+                        if conversation_mode == CONVERSATION_MODE_NO_NAME:
                             result.response.speech['plain'].update({
                                 'speech': response_text,
                                 'extra_data': None,
@@ -385,7 +389,7 @@ class AIManager:
                                 'agent_name': agent_name,
                                 'agent_id': agent_id
                             })
-                        elif conversation_mode == "add_name":
+                        elif conversation_mode == CONVERSATION_MODE_ADD_NAME:
                             result.response.speech['plain'].update({
                                 'speech': f"({agent_name}) 回复: {response_text}",
                                 'extra_data': None,
@@ -516,11 +520,11 @@ class AIManager:
                 result.response.speech['plain']['agent_id'] = agent_id
                 
                 
-                if conversation_mode == "no_name":
+                if conversation_mode == CONVERSATION_MODE_NO_NAME:
                     result.response.speech['plain']['speech'] = r
-                elif conversation_mode == "add_name":
+                elif conversation_mode == CONVERSATION_MODE_ADD_NAME:
                     result.response.speech['plain']['speech'] = f"({agent_name}) 回复: {r}"
-                elif conversation_mode == "detailed":
+                elif conversation_mode == CONVERSATION_MODE_DETAILED:
                     if previous_result is not None and previous_result.response.response_type == intent.IntentResponseType.ERROR:
                         prev_name = previous_result.response.speech['plain'].get('agent_name', 'UNKNOWN')
                         prev_text = previous_result.response.speech['plain'].get('original_speech', previous_result.response.speech['plain']['speech'])

@@ -54,8 +54,9 @@ async def async_setup_skills(hass: HomeAssistant):
     intent.async_register(hass, NotifyIntent())
     intent.async_register(hass, GlobalInjectIntent())
     intent.async_register(hass, CameraAnalyzeIntent())
+    intent.async_register(hass, GenerateImageIntent())
     hass.data.setdefault("kadermanager", {})["_skills_registered"] = True
-    _LOGGER.info("AI Skills Package registered (12 intents with tool chain support)")
+    _LOGGER.info("AI Skills Package registered (13 intents with tool chain support)")
 
 class AISkillsIntent(intent.IntentHandler):
 
@@ -469,6 +470,55 @@ class CameraAnalyzeIntent(intent.IntentHandler):
             response.async_set_speech(f"分析摄像头失败: {e}")
         
         return response
+
+class GenerateImageIntent(intent.IntentHandler):
+
+    intent_type = "GenerateImage"
+    description = "生成图片。当用户说'生成图片'、'画一张'、'创建图片'、'生成一张XX图'时调用此工具"
+    slot_schema = {
+        vol.Required("prompt", description="图片描述，如'一只可爱的小猫'"): str,
+        vol.Optional("size", description="图片尺寸，如1024x1024"): str
+    }
+    
+    async def async_handle(self, intent_obj: intent.Intent):
+        hass = intent_obj.hass
+        slots = self.async_validate_slots(intent_obj.slots)
+        prompt = slots.get("prompt", {}).get("value", "")
+        size = slots.get("size", {}).get("value", "1024x1024")
+        
+        response = intent_obj.create_response()
+        response.response_type = intent.IntentResponseType.ACTION_DONE
+        
+        if not prompt:
+            response.async_set_speech("请描述您想生成的图片内容")
+            return response
+        
+        _fire_thought_event(hass, f"用户想生成图片'{prompt}'，我调用ai_hub.generate_image")
+        
+        try:
+            result = await hass.services.async_call(
+                "ai_hub", "generate_image",
+                {"prompt": prompt, "size": size},
+                blocking=True, return_response=True
+            )
+            
+            if result and isinstance(result, dict):
+                if result.get("success"):
+                    image_url = result.get("image_url", "")
+                    if image_url:
+                        response.async_set_speech(f"图片已生成：\n![{prompt}]({image_url})")
+                    else:
+                        response.async_set_speech("图片生成成功，但无法获取URL")
+                else:
+                    response.async_set_speech(f"生成失败: {result.get('error', '未知错误')}")
+            else:
+                response.async_set_speech("图片生成请求已发送")
+        except Exception as e:
+            _LOGGER.error(f"GenerateImageIntent error: {e}")
+            response.async_set_speech(f"生成图片失败: {e}")
+        
+        return response
+
 
 def get_skill_rules(skill_id: str) -> dict:
     return SKILLS.get(skill_id, {})

@@ -132,14 +132,39 @@
                         if (messagesDiv) {
                             const messages = messagesDiv.querySelectorAll('.message.hass');
                             messages.forEach(msg => {
-                                if (msg._thinkingProcessed) return;
-                                msg._thinkingProcessed = true;
-                                
                                 const content = msg.textContent || '';
-                                if (content.includes('💭')) {
+                                if (content.includes('💭') && !msg._thinkingStyled) {
+                                    msg._thinkingStyled = true;
                                     msg.style.backgroundColor = '#e3f2fd';
                                     msg.style.borderLeft = '3px solid #2196f3';
                                     msg.style.fontStyle = 'italic';
+                                }
+                                
+                                if (!msg._imgProcessed) {
+                                    const haMarkdown = msg.querySelector('ha-markdown') || msg;
+                                    const mdContent = haMarkdown.content || haMarkdown.getAttribute('content') || content;
+                                    let imgUrl = null;
+                                    const mdMatch = mdContent.match(/!\[([^\]]*)\]\(([^)]+)\)/);
+                                    if (mdMatch) {
+                                        imgUrl = mdMatch[2];
+                                    } else {
+                                        const urlMatch = mdContent.match(/(https?:\/\/[^\s]+\.(jpg|jpeg|png|gif|webp|bmp)(\?[^\s]*)?)/i);
+                                        if (urlMatch) {
+                                            imgUrl = urlMatch[1];
+                                        } else {
+                                            const imgKeyMatch = mdContent.match(/image_url[:\s]+['"]?(https?:\/\/[^\s'"]+)/i);
+                                            if (imgKeyMatch) imgUrl = imgKeyMatch[1];
+                                        }
+                                    }
+                                    if (imgUrl) {
+                                        msg._imgProcessed = true;
+                                        const img = document.createElement('img');
+                                        img.src = imgUrl;
+                                        img.alt = '图片';
+                                        img.style.cssText = 'max-width:300px;max-height:200px;border-radius:8px;margin:20px 0;display:block;';
+                                        img.onerror = () => img.remove();
+                                        msg.appendChild(img);
+                                    }
                                 }
                             });
                         }

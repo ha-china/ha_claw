@@ -27,7 +27,6 @@ from .const import (
     CONF_SPEAKER_ENTITY,
     CONF_SPEAKER_TYPE,
     CONF_TTS_SERVICE,
-    CONF_ENABLE_AI_SUMMARY,
     CONF_ENABLE_WEB_SEARCH,
     CONVERSATION_MODE_NO_NAME,
     CONVERSATION_MODE_ADD_NAME,
@@ -36,7 +35,6 @@ from .const import (
     SPEAKER_TYPE_XIAOMI,
     SPEAKER_TYPE_OTHER,
     DOMAIN,
-    DEFAULT_ERROR_RESPONSES,
 )
 
 from .services.web_search import WebSearch
@@ -47,6 +45,102 @@ from .services.ai_manager import AIManager
 _LOGGER = logging.getLogger(__name__)
 
 CONFIG_SCHEMA = cv.config_entry_only_config_schema(DOMAIN)
+
+
+async def process_ai_summary(
+    hass, text, conversation_id, context, language,
+    fallback_agents, conversation_mode, 
+    original_async_converse, extra_system_prompt,
+    device_id, satellite_id, get_agent_name, is_error_response
+):
+    """处理AI智能总结：前面的AI处理问题，最后一个AI总结"""
+    processing_agents = fallback_agents[:-1]
+    summary_agent = fallback_agents[-1]
+    summary_agent_name = get_agent_name(summary_agent)
+    
+    primary_responses = []
+    for proc_agent in processing_agents:
+        try:
+            proc_result = await original_async_converse(
+                hass, text, conversation_id, context, language,
+                proc_agent, device_id, satellite_id, extra_system_prompt
+            )
+            if proc_result and proc_result.response and proc_result.response.speech and 'plain' in proc_result.response.speech:
+                resp_text = proc_result.response.speech['plain'].get('speech', '').strip()
+                if resp_text and not is_error_response(proc_result):
+                    primary_responses.append({
+                        "agent_name": get_agent_name(proc_agent),
+                        "response": resp_text
+                    })
+        except Exception as e:
+            _LOGGER.debug(f"Agent {proc_agent} failed in summary mode: {e}")
+    
+    if not primary_responses:
+        return None
+    
+    summary_prompt = f"""请根据用户的问题：'{text}'，以及以下AI的回复进行总结和优化：
+
+"""
+    for resp in primary_responses:
+        summary_prompt += f"- {resp['agent_name']}：{resp['response']}\n"
+    
+    summary_prompt += """
+请你首先进行多维度的思考分析，然后给出最终的回复结果。你的回复格式：
+
+---分析---
+在这里分析各个AI回复的优缺点，评估它们的准确性、完整性和相关性。
+
+---总结---
+在这里直接提供你的最终答案，用你自己的语言回答用户的问题。
+
+注意：
+- 必须包含上述两个部分，用---分析---和---总结---分隔
+- 使用中文回复
+- 控制在550字之内
+- 不要使用编号、列表格式，用自然流畅的段落表达
+- 你只负责总结和分析，绝对不要执行任何操作、调用任何工具或控制任何设备
+"""
+    
+    try:
+        summary_result = await original_async_converse(
+            hass, summary_prompt, conversation_id, context, language,
+            summary_agent, device_id, satellite_id, extra_system_prompt
+        )
+        if summary_result and summary_result.response and summary_result.response.speech and 'plain' in summary_result.response.speech:
+            raw_text = summary_result.response.speech['plain'].get('speech', '').strip()
+            if raw_text and not is_error_response(summary_result):
+                analysis_part = ""
+                summary_part = raw_text
+                import re
+                analysis_match = re.search(r'(?:---)?分析(?:---)?[：:\n](.+?)(?:(?:---)?总结(?:---)?|$)', raw_text, re.DOTALL)
+                summary_match = re.search(r'(?:---)?总结(?:---)?[：:\n](.+?)$', raw_text, re.DOTALL)
+                if analysis_match:
+                    analysis_part = analysis_match.group(1).strip()
+                if summary_match:
+                    summary_part = summary_match.group(1).strip()
+                
+                
+                if conversation_mode == CONVERSATION_MODE_DETAILED:
+                    detailed = ""
+                    for resp in primary_responses:
+                        detailed += f"({resp['agent_name']}) 回复: {resp['response']}\n"
+                    detailed += "\n"
+                    if analysis_part:
+                        detailed += f"{analysis_part}\n\n"
+                    detailed += f"({summary_agent_name}) 总结: {summary_part}"
+                    summary_result.response.speech['plain']['speech'] = detailed
+                elif conversation_mode == CONVERSATION_MODE_ADD_NAME:
+                    summary_result.response.speech['plain']['speech'] = f"({summary_agent_name}) 总结: {summary_part}"
+                else:
+                    summary_result.response.speech['plain']['speech'] = summary_part
+                
+                summary_result.response.speech['plain']['original_speech'] = summary_part
+                summary_result.response.speech['plain']['agent_name'] = summary_agent_name
+                return summary_result
+    except Exception as e:
+        _LOGGER.debug(f"Summary agent failed: {e}")
+    
+    return None
 
 @callback
 def get_default_agent(hass: HomeAssistant) -> conversation.default_agent.DefaultAgent:
@@ -153,6 +247,9 @@ class FallbackConversationAgent(conversation.ConversationEntity, conversation.Ab
         )
         
     async def _call_speaker_service(self, text: str) -> None:
+        import re
+        text = re.sub(r'</?(?:ANALYSIS_SECTION|SUMMARY_SECTION|AI_SUMMARY_REQUEST)[^>]*>?', '', text, flags=re.IGNORECASE).strip()
+        
         speaker_entity = self.entry.options.get(CONF_SPEAKER_ENTITY)
         speaker_type = self.entry.options.get(CONF_SPEAKER_TYPE, SPEAKER_TYPE_DISABLED)
         tts_service = self.entry.options.get(CONF_TTS_SERVICE)
@@ -295,7 +392,6 @@ class FallbackConversationAgent(conversation.ConversationEntity, conversation.Ab
             if not agents:
                 agents.append(conversation.const.HOME_ASSISTANT_AGENT)
             
-            enable_ai_summary = self.entry.options.get(CONF_ENABLE_AI_SUMMARY, False)
             enable_web_search = self.entry.options.get(CONF_ENABLE_WEB_SEARCH, False)
         
             if not agents:
@@ -310,7 +406,6 @@ class FallbackConversationAgent(conversation.ConversationEntity, conversation.Ab
                 )
 
             conversation_mode = self.entry.options.get(CONF_CONVERSATION_MODE, CONVERSATION_MODE_ADD_NAME)
-            _LOGGER.info(f"配置: agents={agents}, enable_ai_summary={enable_ai_summary}, enable_web_search={enable_web_search}, options={dict(self.entry.options)}")
 
             is_summary_request = False
             if "请根据用户的问题" in user_input.text and "以及以下AI的回复进行总结和优化" in user_input.text:
@@ -341,15 +436,7 @@ class FallbackConversationAgent(conversation.ConversationEntity, conversation.Ab
                         {"detail": "Web search failed", "error": str(e)}
                     )
         
-            if enable_ai_summary and len(agents) >= 2:
-                trace.async_conversation_trace_append(
-                    trace.ConversationTraceEventType.AGENT_DETAIL,
-                    {"detail": "Processing with AI summary", "agents": agents}
-                )
-                result = await self._process_with_summary(user_input, agent_manager, agents, agent_names, default_agent, conversation_mode, web_search_results)
-                conversation_trace.set_result(result=result.as_dict())
-                return result
-            elif enable_web_search and web_search_results:
+            if enable_web_search and web_search_results:
                 
                 trace.async_conversation_trace_append(
                     trace.ConversationTraceEventType.AGENT_DETAIL,
@@ -432,271 +519,6 @@ class FallbackConversationAgent(conversation.ConversationEntity, conversation.Ab
             asyncio.create_task(self._call_speaker_service(result.response.speech['plain']['speech']))
         
         return result
-
-    async def _process_with_summary(self, user_input, agent_manager, agents, agent_names, default_agent, conversation_mode, web_search_results=None):
-        
-        _LOGGER.info(f"开始处理带AI总结的查询，代理数量: {len(agents)}")
-        
-        if len(agents) <= 1:
-            return await self._process_with_fallback(user_input, agent_manager, agents, agent_names, default_agent, conversation_mode)
-        
-        
-        if len(agents) == 2:
-            processing_agents = [agents[0]]
-            summary_agent = agents[1]
-        else:
-            processing_agents = agents[:-1]
-            summary_agent = agents[-1]
-        
-        
-        summary_agent_name = agent_names.get(summary_agent, "UNKNOWN")
-        if summary_agent == conversation.const.HOME_ASSISTANT_AGENT:
-            summary_agent_name = default_agent.name
-            
-        _LOGGER.info(f"使用代理 {[agent_names.get(a, 'UNKNOWN') for a in processing_agents]} 处理查询，"
-                   f"使用代理 '{summary_agent_name}' 进行总结")
-        
-        
-        primary_responses = []
-        all_results = []
-        
-        for agent_id in processing_agents:
-            if not agent_id:
-                continue
-                
-            agent_name = default_agent.name if agent_id == conversation.const.HOME_ASSISTANT_AGENT else agent_names.get(agent_id, "UNKNOWN")
-                
-            if not isinstance(agent_id, str):
-                agent_id = conversation.const.HOME_ASSISTANT_AGENT if (hasattr(agent_id, "__class__") and agent_id.__class__.__name__ == "DefaultAgent") else (str(agent_id) if hasattr(agent_id, "__str__") else conversation.const.HOME_ASSISTANT_AGENT)
-            
-            try:
-                _LOGGER.info(f"使用代理 '{agent_name}' 处理用户输入")
-                
-                
-                if web_search_results:
-                    
-                    prompt_data = self._prompt_manager.generate_prompt(
-                        user_input.text, 
-                        web_search_results
-                    )
-                    
-                    
-                    enhanced_text = f"{prompt_data['main_prompt']}\n\n联网搜索结果：\n{web_search_results}"
-                    
-                    
-                    cleaned_text = await self._content_processor.clean_text_for_api(enhanced_text)
-                    
-                    
-                    device_id = getattr(user_input, "device_id", None)
-                    original_context = getattr(user_input, "context", {})
-                    
-                    enhanced_input = conversation.ConversationInput(
-                        text=cleaned_text,
-                        conversation_id=user_input.conversation_id,
-                        language=user_input.language,
-                        context=original_context,
-                        device_id=device_id,
-                        agent_id=agent_id,
-                        satellite_id=getattr(user_input, "satellite_id", None)
-                    )
-                    
-                    
-                    result = await self._async_process_agent(
-                        agent_manager,
-                        agent_id,
-                        agent_name,
-                        enhanced_input,
-                        CONVERSATION_MODE_NO_NAME,  
-                        None,
-                    )
-                else:
-                    
-                    result = await self._async_process_agent(
-                        agent_manager,
-                        agent_id,
-                        agent_name,
-                        user_input,
-                        CONVERSATION_MODE_NO_NAME,  
-                        None,
-                    )
-                
-                
-                response_text = ""
-                is_action_done = False
-                
-                if (result and result.response and result.response.speech and 'plain' in result.response.speech):
-                    response_text = result.response.speech['plain'].get('original_speech', result.response.speech['plain'].get('speech', "")).strip()
-                    
-                    
-                    response_text = self._ai_manager._clean_agent_response(response_text, agent_name)
-                    
-                    if result.response.response_type == intent.IntentResponseType.ACTION_DONE:
-                        is_action_done = True
-                        
-                        
-                        if hasattr(result.response, 'data') and result.response.data:
-                            targets = result.response.data.get('targets', [])
-                            success = result.response.data.get('success', [])
-                            failed = result.response.data.get('failed', [])
-                            
-                            response_text += "".join([
-                                f" (目标: {', '.join(targets)})" if targets else "",
-                                f" (成功: {', '.join(success)})" if success else "",
-                                f" (失败: {', '.join(failed)})" if failed else ""
-                            ])
-                
-                
-                primary_responses.append({
-                    "agent_name": agent_name,
-                    "response": response_text,
-                    "is_error": not (is_action_done or (response_text and 
-                              not response_text.lower().startswith('python') and
-                              response_text not in DEFAULT_ERROR_RESPONSES and
-                              len(response_text) > 10))
-                })
-                
-                all_results.append(result)
-            except Exception as e:
-                _LOGGER.error(f"使用代理 '{agent_name}' 处理输入时出错: {e}", exc_info=True)
-                primary_responses.append({
-                    "agent_name": agent_name,
-                    "response": f"处理错误: {str(e)}",
-                    "is_error": True
-                })
-        
-        
-        if not primary_responses or not summary_agent:
-            _LOGGER.info("没有获得有效的代理响应或未指定总结代理，回退到标准处理方法")
-            return await self._process_with_fallback(user_input, agent_manager, agents, agent_names, default_agent, conversation_mode)
-        
-        
-        summary_prompt = f"""<AI_SUMMARY_REQUEST>
-请根据用户的问题：'{user_input.text}'，以及以下AI的回复进行总结和优化：
-
-"""
-        
-        for resp in primary_responses:
-            summary_prompt += f"- {resp['agent_name']}：{resp['response']}\n"
-        
-        
-        if web_search_results:
-            summary_prompt += f"\n联网搜索参考信息：\n{'-' * 40}\n{web_search_results}\n{'-' * 40}\n"
-            
-        summary_prompt += """
-请你首先进行多维度的思考分析，然后给出最终的回复结果，最终结果不要解释自己为什么这样回复。你的回复必须严格按照以下格式：
-
-<ANALYSIS_SECTION>
-在这里分析各个AI回复的优缺点，评估它们的准确性、完整性和相关性。如果有联网搜索结果，也请结合搜索结果进行分析。
-</ANALYSIS_SECTION>
-
-<SUMMARY_SECTION>
-在这里直接提供你的最终答案，用你自己的语言回答用户的问题。总结应该综合考虑AI回复和搜索结果（如果有）。
-</SUMMARY_SECTION>
-
-严格注意：
-- 你的回复必须包含且仅包含上述两个部分，并使用指定的标记，必须使用中文
-- 禁止使用JSON格式输出
-- 不要在回复中添加任何其他前言、说明或额外内容
-- 不要使用"这里是我的分析"等引导语
-- 分析部分必须在标记内，总结部分也必须在标记内
-- 总结应该综合各个信息源的内容，并添加你自己的见解
-- 控制你的总结和回复在550字之内，不可以超出这个限制
-
-**请严格按照上述格式回复，不要有任何偏差。**
-</AI_SUMMARY_REQUEST>
-"""
-        
-        
-        try:
-            _LOGGER.info(f"使用代理 '{summary_agent_name}' 处理总结请求")
-            
-            
-            device_id = getattr(user_input, "device_id", None)
-            original_context = getattr(user_input, "context", {})
-            
-            
-            cleaned_prompt = await self._content_processor.clean_text_for_api(summary_prompt)
-            
-            
-            summary_input = conversation.ConversationInput(
-                text=cleaned_prompt,
-                conversation_id=user_input.conversation_id,
-                language=user_input.language,
-                context=original_context, 
-                device_id=device_id,
-                agent_id=summary_agent,
-                satellite_id=getattr(user_input, "satellite_id", None)
-            )
-            
-            
-            result = await self._async_process_agent(
-                agent_manager,
-                summary_agent,
-                summary_agent_name, 
-                summary_input,
-                CONVERSATION_MODE_NO_NAME,  
-                None,
-            )
-            
-            
-            if not (result and result.response and result.response.speech and 'plain' in result.response.speech):
-                raise Exception("无效的总结响应格式")
-                
-            
-            response_text = result.response.speech['plain'].get('original_speech', result.response.speech['plain'].get('speech', "")).strip()
-            
-            
-            cleaned_response = self._clean_ai_response(response_text)
-            
-            analysis_part = cleaned_response.get('analysis', '')
-            summary_part = cleaned_response.get('summary', '')
-            
-            
-            if summary_part:
-                summary_lines = summary_part.strip().split('\n')
-                if len(summary_lines) > 1:
-                    final_summary = summary_lines[-1].strip()
-                else:
-                    final_summary = summary_part.strip()
-            else:
-                final_summary = response_text
-            
-            
-            if conversation_mode == CONVERSATION_MODE_NO_NAME:
-                result.response.speech['plain']['speech'] = final_summary
-            elif conversation_mode == CONVERSATION_MODE_ADD_NAME:
-                result.response.speech['plain']['speech'] = f"({summary_agent_name}) 回复: {final_summary}"
-            elif conversation_mode == CONVERSATION_MODE_DETAILED:
-                detailed_response = ""
-                for resp in primary_responses:
-                    detailed_response += f"({resp['agent_name']}) 回复: {resp['response']}\n"
-                detailed_response += "\n"
-                if analysis_part:
-                    detailed_response += f"{analysis_part}\n\n"
-                if summary_part:
-                    detailed_response += f"({summary_agent_name}) 回复: {summary_part.strip()}"
-                else:
-                    detailed_response += f"({summary_agent_name}) 回复: {final_summary}"
-                result.response.speech['plain']['speech'] = detailed_response
-            
-            
-            if (final_summary and 
-                not final_summary.lower().startswith('python') and
-                final_summary not in DEFAULT_ERROR_RESPONSES and
-                len(final_summary) > 10):
-                
-                self._attr_chat_response = result.response.speech['plain']['speech']
-                self.async_write_ha_state()
-                asyncio.create_task(self._call_speaker_service(result.response.speech['plain']['speech']))
-                return result
-            
-            all_results.append(result)
-        except Exception as e:
-            _LOGGER.error(f"使用总结代理处理时出错: {e}", exc_info=True)
-            
-        
-        _LOGGER.info("总结处理失败，回退到标准处理方法")
-        return await self._process_with_fallback(user_input, agent_manager, agents, agent_names, default_agent, conversation_mode)
 
     async def _process_with_fallback(self, user_input, agent_manager, agents, agent_names, default_agent, conversation_mode):
         

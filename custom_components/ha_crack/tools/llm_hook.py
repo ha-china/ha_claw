@@ -173,8 +173,7 @@ def _patch_assist_api_prompt(hass: HomeAssistant) -> None:
         now = datetime.now(tz)
         current_datetime = now.strftime("今天是 %Y年%m月%d日 %A，当前时间 %H:%M:%S (北京时间)")
         
-        ha_crack_prompt = f"""{HASS_LLM_SYSTEM_PROMPT.format(current_datetime=current_datetime)}
-"""
+        ha_crack_prompt = f"""{HASS_LLM_SYSTEM_PROMPT.format(current_datetime=current_datetime)}"""
         original_prompt = original_get_api_prompt(self, llm_context, exposed_entities)
         
         return ha_crack_prompt + "\n" + original_prompt

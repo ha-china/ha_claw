@@ -597,7 +597,7 @@ class WebSearch:
         
         return results
 
-    async def search(self, query: str, num_results: int = 5, include_news: bool = True) -> List[SearchResult]:
+    async def search(self, query: str, num_results: int = 5, include_news: bool = True, engine: str = "") -> List[SearchResult]:
         async with self:
             try:
                 direct_url_results = await self.process_direct_urls(query)
@@ -616,9 +616,10 @@ class WebSearch:
                     _LOGGER.error(f"获取知乎热榜失败: {str(e)}")
                 
             all_results = []
-            for engine in SEARCH_ENGINES:
-                _LOGGER.info(f"搜索: {query} (引擎: {engine})")
-                results = await self._search_engine(query, engine, num_results)
+            engines_to_try = [engine] if engine and engine in SEARCH_ENGINES else ["baidu", "bing"]
+            for eng in engines_to_try:
+                _LOGGER.info(f"搜索: {query} (引擎: {eng})")
+                results = await self._search_engine(query, eng, num_results)
                 if results:
                     all_results.extend(results)
                     break
@@ -675,6 +676,25 @@ class WebSearch:
                 _LOGGER.info(f"无法获取页面内容: {real_url}")
                 return None
 
+            if '.xml' in real_url or 'feed' in real_url or 'rss' in real_url.lower():
+                try:
+                    soup = BeautifulSoup(response, 'xml')
+                    items = soup.find_all(['item', 'entry'])
+                    if items:
+                        rss_content = []
+                        for item in items[:10]:
+                            title = item.find(['title'])
+                            desc = item.find(['description', 'summary', 'content'])
+                            title_text = title.get_text(strip=True) if title else ""
+                            desc_text = desc.get_text(strip=True) if desc else ""
+                            if title_text:
+                                rss_content.append(f"【{title_text}】\n{desc_text[:500]}")
+                        if rss_content:
+                            _LOGGER.info(f"RSS解析成功: {real_url}, {len(items)}条")
+                            return (response, "\n\n".join(rss_content))
+                except Exception as e:
+                    _LOGGER.debug(f"RSS解析失败: {e}")
+            
             soup = BeautifulSoup(response, 'html.parser')
             _LOGGER.info(f"成功解析HTML: {real_url}")
             
@@ -704,16 +724,26 @@ class WebSearch:
                     
             
             if not content or len(content) < 500:
-                _LOGGER.info(f"未找到主要内容区域,尝试提取段落: {real_url}")
-                paragraphs = []
+                _LOGGER.info(f"未找到主要内容区域,尝试提取列表和段落: {real_url}")
+                items = []
                 seen = set()
+                
+                for idx, link in enumerate(soup.find_all('a', href=True)):
+                    text = link.get_text(strip=True)
+                    if len(text) > 10 and text not in seen:
+                        seen.add(text)
+                        items.append(f"[{idx+1}] {text}")
+                        if len(items) >= 30:
+                            break
+                
                 for tag in soup.find_all(['p', 'div', 'section', 'li', 'td', 'h1', 'h2', 'h3', 'h4', 'article', 'span']):
                     text = tag.get_text(strip=True)
                     if len(text) > 20 and text not in seen:
                         seen.add(text)
-                        paragraphs.append(text)
-                if paragraphs:
-                    content = '\n\n'.join(paragraphs)
+                        items.append(text)
+                
+                if items:
+                    content = '\n'.join(items)
             
             if not content or len(content) < 300:
                 _LOGGER.info(f"段落提取不足,尝试body全文: {real_url}")

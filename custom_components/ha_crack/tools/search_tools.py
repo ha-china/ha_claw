@@ -10,10 +10,11 @@ _LOGGER = logging.getLogger(__name__)
 
 class WebSearchTool(llm.Tool):
     name = "WebSearch"
-    description = "联网搜索实时信息。当用户询问新闻、天气、股票、最新消息等需要实时数据时使用。"
+    description = "联网搜索实时信息。当用户询问新闻、天气、股票、最新消息等需要实时数据时使用。可选择搜索引擎：baidu(百度)或bing(必应)。"
     parameters = vol.Schema({
         vol.Required("query"): str,
         vol.Optional("num_results", default=3): int,
+        vol.Optional("engine", default=""): str,
     })
 
     async def async_call(self, hass: HomeAssistant, tool_input: llm.ToolInput, llm_context: llm.LLMContext) -> JsonObjectType:
@@ -21,11 +22,12 @@ class WebSearchTool(llm.Tool):
         
         query = tool_input.tool_args.get("query", "")
         num = tool_input.tool_args.get("num_results", 3)
+        engine = tool_input.tool_args.get("engine", "")
         hass.data["ha_crack_tool_called"] = True
         hass.data["ha_crack_last_tool"] = "WebSearch"
         try:
             async with WebSearch() as ws:
-                results = await ws.search(query, num)
+                results = await ws.search(query, num, engine=engine)
                 if not results:
                     return {"success": False, "error": "未找到搜索结果"}
                 
@@ -72,16 +74,16 @@ class UrlFetchTool(llm.Tool):
 
 class NewsSearchTool(llm.Tool):
     name = "NewsSearch"
-    description = """获取金十数据财经新闻快讯。
+    description = """获取金十数据财经新闻快讯。注意：此工具仅支持财经类新闻（股票、外汇、期货、贵金属等），不支持娱乐、体育、科技等其他类型新闻。如需其他类型新闻请使用WebSearch工具。
 
 参数：
 - category: 分类筛选（可选）
-  - all: 全部（默认）
+  - all: 全部财经新闻（默认）
   - stock: A股相关
   - forex: 外汇
   - futures: 期货
   - gold: 贵金属
-  - important: 仅重要新闻
+  - important: 仅重要财经新闻
 - limit: 返回条数（默认15，最多30）
 - query: 关键词筛选（可选）
 
@@ -244,7 +246,7 @@ class ZhihuHotTool(llm.Tool):
 
 class StockQueryTool(llm.Tool):
     name = "StockQuery"
-    description = """🚨必须用此工具查询股票/基金/A股/美股行情！禁止用WebSearch/NewsSearch搜索股票！
+    description = """必须用此工具查询股票/基金/A股/美股行情！禁止用WebSearch/NewsSearch搜索股票！
 
 触发关键词：股票、股价、行情、A股、美股、港股、基金、涨跌、茅台、特斯拉、苹果、腾讯等
 

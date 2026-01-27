@@ -5,12 +5,18 @@ from homeassistant.core import HomeAssistant
 from homeassistant.const import Platform
 from homeassistant.helpers import config_validation as cv
 from homeassistant.helpers import intent
-from .const import DOMAIN
-from homeassistant.components import conversation
-from homeassistant.util import ulid
-from home_assistant_intents import get_languages
-from homeassistant.components.conversation.agent_manager import async_get_agent
-from homeassistant.components.conversation.const import HOME_ASSISTANT_AGENT
+from .const import (
+    DOMAIN,
+    CONF_PRIMARY_AGENT,
+    CONF_FALLBACK_AGENT,
+    CONF_SECONDARY_FALLBACK_AGENT,
+    CONF_CONVERSATION_MODE,
+    CONF_ERROR_RESPONSES,
+    CONF_ENABLE_AI_SUMMARY,
+    CONVERSATION_MODE_NO_NAME,
+    CONVERSATION_MODE_ADD_NAME,
+    CONVERSATION_MODE_DETAILED,
+)
 
 LOGGER = logging.getLogger(__name__)
 CONFIG_SCHEMA = cv.config_entry_only_config_schema(DOMAIN)
@@ -80,8 +86,6 @@ async def _register_frontend(hass: HomeAssistant) -> None:
     LOGGER.info(f"HA Crack 前端资源已自动加载: {js_url}")
 
 def _setup_ai_coordinator(hass: HomeAssistant, entry: ConfigEntry) -> None:
-
-    from .const import CONF_FALLBACK_AGENT
     
     if hass.data.get("ha_crack_coordinator_installed"):
         return
@@ -150,10 +154,6 @@ def _install_conversation_hook(hass: HomeAssistant, entry: ConfigEntry) -> None:
     from homeassistant.components.conversation import http as conv_http
     from homeassistant.components import conversation as conv_module
     from homeassistant.components.conversation import chat_log as chat_log_module
-    from .const import (
-        CONF_PRIMARY_AGENT, CONF_FALLBACK_AGENT, CONF_SECONDARY_FALLBACK_AGENT,
-        CONF_ERROR_RESPONSES, CONF_CONVERSATION_MODE, CONVERSATION_MODE_ADD_NAME
-    )
     
     if hass.data.get("ha_crack_hook_installed"):
         return
@@ -200,40 +200,10 @@ def _install_conversation_hook(hass: HomeAssistant, entry: ConfigEntry) -> None:
             return False
         
         return detect_user_ending_intent(text)
-    
-    def parse_choices_from_response(response_text: str) -> list:
 
-        import re
-        match = re.search(r'\[([^\]]+\|[^\]]+)\]', response_text)
-        if match:
-            options_str = match.group(1)
-            options = [opt.strip() for opt in options_str.split('|') if opt.strip()]
-            return [{"id": f"opt_{i}", "label": opt} for i, opt in enumerate(options)]
-        return []
-    
-    def inject_choices_from_response(choices: list, title: str = "请选择"):
-
-        import json
-        js_code = f"HACrack.showChoices('{title}', {json.dumps(choices, ensure_ascii=False)})"
-        pending = hass.data.setdefault("ha_crack_pending_js", [])
-        pending.append(js_code)
-        LOGGER.info(f"已注入{len(choices)}个选项供用户选择")
-    
-    def should_continue_loop(result, text: str) -> bool:
-        task_loop = hass.data.get("ha_crack_task_loop", {})
-        if task_loop.get("iteration", 0) >= task_loop.get("max_iterations", 30):
-            return False
-        if is_user_done(text):
-            return False
-        return True
     
     def analyze_response_state(response_text: str, history: list, hass_data: dict = None) -> dict:
-        """ReAct风格的响应状态分析
-        
-        返回:
-        - state: 'final' | 'need_action' | 'need_user' | 'wait_choice' | 'continue'
-        - reason: 判断原因
-        """
+
         
         if hass_data:
             ha_crack_data = hass_data.get("ha_crack", {})
@@ -350,6 +320,7 @@ def _install_conversation_hook(hass: HomeAssistant, entry: ConfigEntry) -> None:
         error_responses = options.get(CONF_ERROR_RESPONSES, "")
         error_keywords = [kw.strip() for kw in error_responses.split(",") if kw.strip()] if error_responses else []
         conversation_mode = options.get(CONF_CONVERSATION_MODE, CONVERSATION_MODE_ADD_NAME)
+        enable_ai_summary = options.get(CONF_ENABLE_AI_SUMMARY, False)
         
         last_conv_id = hass.data.get("ha_crack_last_conversation_id")
         if conversation_id and last_conv_id and conversation_id != last_conv_id:
@@ -424,7 +395,19 @@ def _install_conversation_hook(hass: HomeAssistant, entry: ConfigEntry) -> None:
                         return True
             return False
         
+        if enable_ai_summary and len(fallback_agents) >= 2:
+            from .conversation import process_ai_summary
+            summary_result = await process_ai_summary(
+                hass, text, conversation_id, context, language,
+                fallback_agents, conversation_mode, 
+                original_async_converse, extra_system_prompt,
+                device_id, satellite_id, get_agent_name, is_error_response
+            )
+            if summary_result:
+                return summary_result
+        
         agent_index = 0
+        agent_errors = []
         for current_agent_id in fallback_agents:
             agent_index += 1
             try:
@@ -488,11 +471,11 @@ def _install_conversation_hook(hass: HomeAssistant, entry: ConfigEntry) -> None:
                     
                     hass.data["ha_crack_current_thought"] = None
                     
-                    if conversation_mode == "no_name":
+                    if conversation_mode == CONVERSATION_MODE_NO_NAME:
                         result.response.speech['plain']['speech'] = display_text
-                    elif conversation_mode == "add_name":
+                    elif conversation_mode == CONVERSATION_MODE_ADD_NAME:
                         result.response.speech['plain']['speech'] = f"({agent_name}) 回复: {display_text}"
-                    elif conversation_mode == "detailed":
+                    elif conversation_mode == CONVERSATION_MODE_DETAILED:
                         result.response.speech['plain']['speech'] = f"({agent_name}) 回复: {display_text}"
                     result.response.speech['plain']['original_speech'] = response_text
                     result.response.speech['plain']['agent_name'] = agent_name
@@ -508,15 +491,18 @@ def _install_conversation_hook(hass: HomeAssistant, entry: ConfigEntry) -> None:
                 err_msg = str(e)
                 if "content parts are required" in err_msg:
                     LOGGER.debug(f"Agent {current_agent_id}: Google AI SDK空响应（工具调用后无文本），尝试下一个agent")
+                    agent_errors.append(f"{current_agent_id}: 空响应")
                 else:
                     import traceback
                     LOGGER.warning(f"Agent {current_agent_id} failed: {e}\n{traceback.format_exc()}")
+                    agent_errors.append(f"{current_agent_id}: {err_msg[:100]}")
                 continue
         
+        error_detail = "; ".join(agent_errors) if agent_errors else "未知错误"
         intent_response = intent.IntentResponse(language=language or hass.config.language)
         intent_response.async_set_error(
             intent.IntentResponseErrorCode.UNKNOWN,
-            "所有AI代理都无法响应，请稍后重试。"
+            f"所有AI代理都无法响应: {error_detail}"
         )
         from homeassistant.components.conversation import ConversationResult
         return ConversationResult(
