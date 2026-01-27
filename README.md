@@ -81,7 +81,7 @@
 
 
 
-<h2 align="center">⚙️ 配置项</h2>
+<h2 align="center"> 配置项</h2>
 
 <div align="center">
 
