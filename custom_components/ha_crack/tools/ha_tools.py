@@ -542,7 +542,14 @@ class InjectJSTool(llm.Tool):
     name = "InjectJS"
     description = """注入JavaScript代码到前端执行。用于创建视觉效果、操作页面、深度DOM操作等。
 
+🎨 动态特效生成指南：
+当用户要求特效时，生成纯JS+CSS动画代码：
+- position:fixed全屏覆盖，z-index:9999
+- 用IIFE包裹：!function(){...}()
+- 代码压缩为一行，不要注释
+- 追求艺术感、仪式感、动画流畅
 
+可用HACrack API：
 - softNavigate(path): 软导航到页面，如 HACrack.softNavigate('/config')
 - clickSidebar(text): 点击侧边栏项目，如 HACrack.clickSidebar('设置')
 - getSidebarItems(): 获取侧边栏所有项目列表
@@ -610,9 +617,21 @@ class InjectJSTool(llm.Tool):
         code = tool_input.tool_args.get("code", "")
         if not code:
             return {"success": False, "error": "缺少code参数"}
+        import re
+        code = code.strip()
+        if code.startswith('```'):
+            code = re.sub(r'^```\w*\n?', '', code)
+            code = re.sub(r'\n?```$', '', code)
+        code = re.sub(r'\s*\n\s*', ' ', code)
+        code = re.sub(r'\s+', ' ', code)
+        open_parens = code.count('(') - code.count(')')
+        open_braces = code.count('{') - code.count('}')
+        open_brackets = code.count('[') - code.count(']')
+        if open_parens != 0 or open_braces != 0 or open_brackets != 0:
+            return {"success": False, "error": f"JS代码不完整：括号不匹配 (={open_parens} {{={open_braces} [={open_brackets})", "hint": "请生成完整的JS代码"}
         pending_js = hass.data.setdefault("ha_crack_pending_js", [])
         pending_js.append(code)
-        return {"success": True, "message": "JS已执行"}
+        return {"success": True, "message": "JS代码已注入前端执行"}
 
 
 class HAControlTool(llm.Tool):
@@ -756,7 +775,7 @@ class HAControlTool(llm.Tool):
 
 class FrontendControlTool(llm.Tool):
     name = "FrontendControl"
-    description = """前端高级控制工具。执行预定义的前端操作，无需编写JS代码。
+    description = """前端高级控制工具。执行预定义的前端操作。
 
 可用操作：
 - get_page_info: 获取当前页面信息(URL、按钮数、输入框数等)
@@ -768,7 +787,8 @@ class FrontendControlTool(llm.Tool):
 - fill_input: 填充输入框 (params: {index: 0, value: "内容"})
 - navigate: 导航到页面 (params: {path: "/lovelace"})
 - inject_css: 注入CSS样式 (params: {css: "body{...}"})
-- show_effect: 显示视觉效果 (params: {type: "sakura|firework|snow|confetti"})"""
+
+⚠️ 动态特效请使用InjectJS工具自行生成代码"""
     parameters = vol.Schema({
         vol.Required("action"): str,
         vol.Optional("params", default={}): dict,
@@ -847,161 +867,212 @@ class FrontendControlTool(llm.Tool):
             return {"success": True, "message": "已注入CSS样式"}
         
         elif action == "show_effect":
-            effect_type = params.get("type", "sakura")
-            effects = {
-                "sakura": self._get_sakura_effect(),
-                "firework": self._get_firework_effect(),
-                "snow": self._get_snow_effect(),
-                "confetti": self._get_confetti_effect(),
+            return {
+                "success": False, 
+                "error": "show_effect已废弃，请使用InjectJS工具生成动态特效代码",
+                "hint": "使用InjectJS(code='你的JS代码')执行特效，代码格式：!function(){...}()"
             }
-            code = effects.get(effect_type, effects["sakura"])
-            pending_js.append(code)
-            return {"success": True, "message": f"已添加{effect_type}效果"}
         
         return {"success": False, "error": f"未知操作: {action}"}
-    
-    def _get_sakura_effect(self):
-        return """
-(function(){
-    const canvas = document.createElement('canvas');
-    canvas.id = 'ha-crack-effect';
-    canvas.style.cssText = 'position:fixed;top:0;left:0;width:100%;height:100%;pointer-events:none;z-index:9998;';
-    document.body.appendChild(canvas);
-    const ctx = canvas.getContext('2d');
-    canvas.width = window.innerWidth;
-    canvas.height = window.innerHeight;
-    const petals = [];
-    for(let i=0;i<50;i++) petals.push({x:Math.random()*canvas.width,y:Math.random()*canvas.height-canvas.height,size:Math.random()*10+5,speed:Math.random()*2+1,angle:Math.random()*Math.PI*2,spin:Math.random()*0.1-0.05});
-    function draw(){
-        ctx.clearRect(0,0,canvas.width,canvas.height);
-        petals.forEach(p=>{
-            ctx.save();
-            ctx.translate(p.x,p.y);
-            ctx.rotate(p.angle);
-            ctx.fillStyle='rgba(255,182,193,0.8)';
-            ctx.beginPath();
-            ctx.moveTo(0,-p.size/2);
-            ctx.bezierCurveTo(p.size/2,-p.size/2,p.size/2,p.size/2,0,p.size);
-            ctx.bezierCurveTo(-p.size/2,p.size/2,-p.size/2,-p.size/2,0,-p.size/2);
-            ctx.fill();
-            ctx.restore();
-            p.y+=p.speed;
-            p.x+=Math.sin(p.angle)*0.5;
-            p.angle+=p.spin;
-            if(p.y>canvas.height){p.y=-20;p.x=Math.random()*canvas.width;}
-        });
-        requestAnimationFrame(draw);
-    }
-    draw();
-    setTimeout(()=>canvas.remove(),10000);
-})();
-"""
-    
-    def _get_firework_effect(self):
-        return """
-(function(){
-    const canvas = document.createElement('canvas');
-    canvas.id = 'ha-crack-effect';
-    canvas.style.cssText = 'position:fixed;top:0;left:0;width:100%;height:100%;pointer-events:none;z-index:9998;';
-    document.body.appendChild(canvas);
-    const ctx = canvas.getContext('2d');
-    canvas.width = window.innerWidth;
-    canvas.height = window.innerHeight;
-    const particles = [];
-    function explode(x,y){
-        const color = `hsl(${Math.random()*360},100%,50%)`;
-        for(let i=0;i<30;i++){
-            const angle = Math.random()*Math.PI*2;
-            const speed = Math.random()*5+2;
-            particles.push({x,y,vx:Math.cos(angle)*speed,vy:Math.sin(angle)*speed,life:1,color});
-        }
-    }
-    function draw(){
-        ctx.fillStyle='rgba(0,0,0,0.1)';
-        ctx.fillRect(0,0,canvas.width,canvas.height);
-        particles.forEach((p,i)=>{
-            p.x+=p.vx;p.y+=p.vy;p.vy+=0.1;p.life-=0.02;
-            if(p.life>0){
-                ctx.fillStyle=p.color;
-                ctx.globalAlpha=p.life;
-                ctx.beginPath();
-                ctx.arc(p.x,p.y,3,0,Math.PI*2);
-                ctx.fill();
-            }
-        });
-        ctx.globalAlpha=1;
-        if(Math.random()<0.05)explode(Math.random()*canvas.width,Math.random()*canvas.height*0.5);
-        requestAnimationFrame(draw);
-    }
-    explode(canvas.width/2,canvas.height/2);
-    draw();
-    setTimeout(()=>canvas.remove(),8000);
-})();
-"""
-    
-    def _get_snow_effect(self):
-        return """
-(function(){
-    const canvas = document.createElement('canvas');
-    canvas.id = 'ha-crack-effect';
-    canvas.style.cssText = 'position:fixed;top:0;left:0;width:100%;height:100%;pointer-events:none;z-index:9998;';
-    document.body.appendChild(canvas);
-    const ctx = canvas.getContext('2d');
-    canvas.width = window.innerWidth;
-    canvas.height = window.innerHeight;
-    const flakes = [];
-    for(let i=0;i<100;i++) flakes.push({x:Math.random()*canvas.width,y:Math.random()*canvas.height,r:Math.random()*3+1,speed:Math.random()*2+0.5});
-    function draw(){
-        ctx.clearRect(0,0,canvas.width,canvas.height);
-        ctx.fillStyle='white';
-        flakes.forEach(f=>{
-            ctx.beginPath();
-            ctx.arc(f.x,f.y,f.r,0,Math.PI*2);
-            ctx.fill();
-            f.y+=f.speed;
-            f.x+=Math.sin(f.y*0.01)*0.5;
-            if(f.y>canvas.height){f.y=0;f.x=Math.random()*canvas.width;}
-        });
-        requestAnimationFrame(draw);
-    }
-    draw();
-    setTimeout(()=>canvas.remove(),10000);
-})();
-"""
-    
-    def _get_confetti_effect(self):
-        return """
-(function(){
-    const canvas = document.createElement('canvas');
-    canvas.id = 'ha-crack-effect';
-    canvas.style.cssText = 'position:fixed;top:0;left:0;width:100%;height:100%;pointer-events:none;z-index:9998;';
-    document.body.appendChild(canvas);
-    const ctx = canvas.getContext('2d');
-    canvas.width = window.innerWidth;
-    canvas.height = window.innerHeight;
-    const confetti = [];
-    const colors = ['#f00','#0f0','#00f','#ff0','#f0f','#0ff'];
-    for(let i=0;i<100;i++) confetti.push({x:Math.random()*canvas.width,y:-20,w:Math.random()*10+5,h:Math.random()*5+3,color:colors[Math.floor(Math.random()*colors.length)],speed:Math.random()*3+2,angle:Math.random()*Math.PI*2,spin:Math.random()*0.2-0.1});
-    function draw(){
-        ctx.clearRect(0,0,canvas.width,canvas.height);
-        confetti.forEach(c=>{
-            ctx.save();
-            ctx.translate(c.x,c.y);
-            ctx.rotate(c.angle);
-            ctx.fillStyle=c.color;
-            ctx.fillRect(-c.w/2,-c.h/2,c.w,c.h);
-            ctx.restore();
-            c.y+=c.speed;
-            c.x+=Math.sin(c.angle)*0.5;
-            c.angle+=c.spin;
-            if(c.y>canvas.height){c.y=-20;c.x=Math.random()*canvas.width;}
-        });
-        requestAnimationFrame(draw);
-    }
-    draw();
-    setTimeout(()=>canvas.remove(),10000);
-})();
-"""
+
+
+class DashboardTool(llm.Tool):
+    name = "Dashboard"
+    description = """仪表盘管理工具。管理Home Assistant Lovelace仪表盘。
+
+可用操作：
+- list_dashboards: 列出所有仪表盘
+- get_config: 获取配置 (url_path: null=主仪表盘)
+- list_views: 列出仪表盘的所有视图 (url_path)
+- get_view: 获取指定视图详情 (url_path, view_index)
+- add_view: 添加视图 (url_path, view: {{title,icon,cards}})
+- add_card: 添加卡片 (url_path, view_index, card)
+- update_view: 更新视图 (url_path, view_index, view)
+- delete_view: 删除视图 (url_path, view_index)
+- get_entities: 获取实体列表 (domain: light/switch/sensor/weather等)
+
+视图示例：{{title:"灯光控制", icon:"mdi:lightbulb", cards:[...]}}
+
+常用卡片：
+- heading: {{type:"heading", heading:"标题", heading_style:"title"}}
+- tile: {{type:"tile", entity:"light.xxx"}}
+- button: {{type:"button", entity:"switch.xxx"}}
+- entities: {{type:"entities", title:"灯光", entities:["light.a"]}}
+- grid: {{type:"grid", columns:2, cards:[...]}}
+- weather-forecast: {{type:"weather-forecast", entity:"weather.xxx", show_forecast:true}}
+
+card-mod美化：{{type:"tile", entity:"light.xxx", card_mod:{{style:"ha-card {{background:linear-gradient(135deg,#667eea,#764ba2);border-radius:16px;}}"}}}}"""
+    parameters = vol.Schema({
+        vol.Required("action"): str,
+        vol.Optional("url_path"): vol.Any(None, str),
+        vol.Optional("view_index", default=0): int,
+        vol.Optional("card"): dict,
+        vol.Optional("view"): dict,
+        vol.Optional("config"): dict,
+        vol.Optional("domain"): str,
+    })
+
+    async def async_call(self, hass: HomeAssistant, tool_input: llm.ToolInput, llm_context: llm.LLMContext) -> JsonObjectType:
+        action = tool_input.tool_args.get("action", "")
+        url_path = tool_input.tool_args.get("url_path")
+        view_index = tool_input.tool_args.get("view_index", 0)
+        domain = tool_input.tool_args.get("domain")
+        
+        try:
+            if action == "get_entities":
+                if not domain:
+                    return {"success": False, "error": "缺少domain参数"}
+                entities = []
+                for state in hass.states.async_all(domain):
+                    entities.append({
+                        "entity_id": state.entity_id,
+                        "name": state.attributes.get("friendly_name", state.entity_id),
+                        "state": state.state
+                    })
+                return {"success": True, "domain": domain, "count": len(entities), "entities": entities}
+            
+            from homeassistant.components.lovelace import LOVELACE_DATA
+            lovelace_data = hass.data.get(LOVELACE_DATA)
+            if not lovelace_data:
+                return {"success": False, "error": "Lovelace未初始化"}
+            
+            if action == "list_dashboards":
+                dashboards = []
+                for path, dashboard in lovelace_data.dashboards.items():
+                    dashboards.append({
+                        "url_path": path,
+                        "title": getattr(dashboard, 'title', path),
+                        "mode": getattr(dashboard, 'mode', 'unknown')
+                    })
+                return {"success": True, "dashboards": dashboards}
+            
+            dashboard = lovelace_data.dashboards.get(url_path)
+            if not dashboard:
+                return {"success": False, "error": f"仪表盘不存在: {url_path}，请先用list_dashboards查看可用仪表盘"}
+            
+            if action == "get_config":
+                try:
+                    config = await dashboard.async_load(False)
+                    return {"success": True, "config": config}
+                except Exception as e:
+                    return {"success": False, "error": str(e)}
+            
+            elif action == "list_views":
+                try:
+                    config = await dashboard.async_load(False)
+                    if not config:
+                        return {"success": True, "views": []}
+                    views = config.get("views", [])
+                    view_list = []
+                    for i, v in enumerate(views):
+                        view_list.append({
+                            "index": i,
+                            "title": v.get("title", f"视图{i}"),
+                            "icon": v.get("icon", ""),
+                            "card_count": len(v.get("cards", []))
+                        })
+                    return {"success": True, "views": view_list}
+                except Exception as e:
+                    return {"success": False, "error": str(e)}
+            
+            elif action == "get_view":
+                try:
+                    config = await dashboard.async_load(False)
+                    if not config:
+                        return {"success": False, "error": "仪表盘配置为空"}
+                    views = config.get("views", [])
+                    if view_index >= len(views):
+                        return {"success": False, "error": f"视图索引{view_index}不存在，共{len(views)}个视图"}
+                    return {"success": True, "view_index": view_index, "view": views[view_index]}
+                except Exception as e:
+                    return {"success": False, "error": str(e)}
+            
+            elif action == "add_card":
+                card = tool_input.tool_args.get("card")
+                if not card:
+                    return {"success": False, "error": "缺少card参数"}
+                try:
+                    config = await dashboard.async_load(False)
+                    if not config:
+                        config = {"views": [{"cards": []}]}
+                    views = config.get("views", [])
+                    if view_index >= len(views):
+                        views.append({"cards": []})
+                    cards = views[view_index].get("cards", [])
+                    cards.append(card)
+                    views[view_index]["cards"] = cards
+                    config["views"] = views
+                    await dashboard.async_save(config)
+                    return {"success": True, "message": f"卡片已添加到视图{view_index}"}
+                except Exception as e:
+                    return {"success": False, "error": str(e)}
+            
+            elif action == "add_view":
+                view = tool_input.tool_args.get("view")
+                if not view:
+                    return {"success": False, "error": "缺少view参数"}
+                try:
+                    config = await dashboard.async_load(False)
+                except:
+                    config = {"views": []}
+                if not config:
+                    config = {"views": []}
+                views = config.get("views", [])
+                if "cards" not in view:
+                    view["cards"] = []
+                views.append(view)
+                config["views"] = views
+                await dashboard.async_save(config)
+                new_index = len(views) - 1
+                return {"success": True, "message": f"新视图已添加，索引为{new_index}", "view_index": new_index}
+            
+            elif action == "delete_view":
+                try:
+                    config = await dashboard.async_load(False)
+                    if not config:
+                        return {"success": False, "error": "仪表盘配置为空"}
+                    views = config.get("views", [])
+                    if view_index >= len(views):
+                        return {"success": False, "error": f"视图索引{view_index}不存在"}
+                    deleted = views.pop(view_index)
+                    config["views"] = views
+                    await dashboard.async_save(config)
+                    return {"success": True, "message": f"视图{view_index}已删除", "deleted_title": deleted.get("title", "")}
+                except Exception as e:
+                    return {"success": False, "error": str(e)}
+            
+            elif action == "update_view":
+                view = tool_input.tool_args.get("view")
+                if not view:
+                    return {"success": False, "error": "缺少view参数"}
+                try:
+                    config = await dashboard.async_load(False)
+                    if not config:
+                        config = {"views": []}
+                    views = config.get("views", [])
+                    while len(views) <= view_index:
+                        views.append({"cards": []})
+                    views[view_index] = view
+                    config["views"] = views
+                    await dashboard.async_save(config)
+                    return {"success": True, "message": f"视图{view_index}已更新"}
+                except Exception as e:
+                    return {"success": False, "error": str(e)}
+            
+            elif action == "save_config":
+                new_config = tool_input.tool_args.get("config")
+                if not new_config:
+                    return {"success": False, "error": "缺少config参数"}
+                try:
+                    await dashboard.async_save(new_config)
+                    return {"success": True, "message": "仪表盘配置已保存"}
+                except Exception as e:
+                    return {"success": False, "error": str(e)}
+            
+            return {"success": False, "error": f"未知操作: {action}"}
+            
+        except Exception as e:
+            return {"success": False, "error": str(e)}
 
 
 class HACSTool(llm.Tool):
@@ -1147,19 +1218,22 @@ class HACSTool(llm.Tool):
                     await repo.async_download_repository()
                     domain = repo.data.domain or repo.data.name.replace("-", "_").replace(" ", "_").lower()
                     pending_js = hass.data.setdefault("ha_crack_pending_js", [])
-                    js_code = f"""
-(async()=>{{
+                    js_code = """
+(function(){
+    var domain = """ + json.dumps(domain) + """;
     HACrack.softNavigate('/config/integrations/dashboard');
-    await new Promise(r=>setTimeout(r,500));
-    const addBtn = document.querySelector('ha-fab, [slot="fab"]');
-    if(addBtn) addBtn.click();
-    await new Promise(r=>setTimeout(r,500));
-    const searchInput = document.querySelector('search-input input, ha-textfield input');
-    if(searchInput) {{
-        searchInput.value = {json.dumps(domain)};
-        searchInput.dispatchEvent(new Event('input', {{bubbles:true}}));
-    }}
-}})();
+    setTimeout(function(){
+        var addBtn = document.querySelector('ha-fab, [slot="fab"]');
+        if(addBtn) addBtn.click();
+        setTimeout(function(){
+            var searchInput = document.querySelector('search-input input, ha-textfield input');
+            if(searchInput) {
+                searchInput.value = domain;
+                searchInput.dispatchEvent(new Event('input', {bubbles:true}));
+            }
+        },500);
+    },500);
+})();
 """
                     pending_js.append(js_code)
                     return {
@@ -1173,19 +1247,22 @@ class HACSTool(llm.Tool):
             elif action == "open_add_integration":
                 search_query = query or ""
                 pending_js = hass.data.setdefault("ha_crack_pending_js", [])
-                js_code = f"""
-(async()=>{{
+                js_code = """
+(function(){
+    var query = """ + json.dumps(search_query) + """;
     HACrack.softNavigate('/config/integrations/dashboard');
-    await new Promise(r=>setTimeout(r,500));
-    const addBtn = document.querySelector('ha-fab, [slot="fab"]');
-    if(addBtn) addBtn.click();
-    await new Promise(r=>setTimeout(r,500));
-    const searchInput = document.querySelector('search-input input, ha-textfield input');
-    if(searchInput) {{
-        searchInput.value = {json.dumps(search_query)};
-        searchInput.dispatchEvent(new Event('input', {{bubbles:true}}));
-    }}
-}})();
+    setTimeout(function(){
+        var addBtn = document.querySelector('ha-fab, [slot="fab"]');
+        if(addBtn) addBtn.click();
+        setTimeout(function(){
+            var searchInput = document.querySelector('search-input input, ha-textfield input');
+            if(searchInput) {
+                searchInput.value = query;
+                searchInput.dispatchEvent(new Event('input', {bubbles:true}));
+            }
+        },500);
+    },500);
+})();
 """
                 pending_js.append(js_code)
                 return {"success": True, "message": f"已打开添加集成页面，搜索: {search_query}"}

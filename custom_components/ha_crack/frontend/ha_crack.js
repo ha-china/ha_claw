@@ -432,6 +432,21 @@
             
             screenshot: () => window.HACrack.getPageInfo(),
             
+            clearEffect: () => {
+                const existing = document.getElementById('ha-crack-effect-container');
+                if (existing) { existing.remove(); return true; }
+                return false;
+            },
+            
+            eval: (code) => {
+                try {
+                    return eval(code);
+                } catch(e) {
+                    console.error('[HACrack] eval error:', e);
+                    return null;
+                }
+            },
+            
             debug: () => ({
                 hass: !!getHass(),
                 connection: !!getHass()?.connection,
@@ -466,7 +481,7 @@
                 html += '</div>';
                 container.innerHTML = html;
                 
-                inner.querySelectorAll('button').forEach(btn => {
+                container.querySelectorAll('button').forEach(btn => {
                     btn.onmouseenter = () => { btn.style.background = 'var(--primary-color)'; btn.style.color = 'white'; };
                     btn.onmouseleave = () => { btn.style.background = 'transparent'; btn.style.color = 'var(--primary-color)'; };
                     btn.onclick = () => {
@@ -843,7 +858,9 @@
     }
     
     function executeJS(code) {
-        let processedCode = code;
+        if (!code || typeof code !== 'string') return { success: false, error: 'Invalid code' };
+        
+        let processedCode = code.trim();
         
         try {
             processedCode = processedCode.replace(/^\uFEFF/, '').replace(/[\u200B-\u200D\uFEFF]/g, '');
@@ -855,19 +872,39 @@
                 try { processedCode = JSON.parse(processedCode); } catch(e) {}
             }
             
+            if (processedCode.startsWith('```')) {
+                processedCode = processedCode.replace(/^```\w*\n?/, '').replace(/\n?```$/, '');
+            }
+            
         } catch(e) {
             console.error('[HACrack] Preprocess error:', e.message);
         }
         
         try {
-            const script = document.createElement('script');
-            script.textContent = `try { ${processedCode} } catch(e) { console.error('[HACrack] Exec error:', e.message); }`;
-            document.head.appendChild(script);
-            script.remove();
+            console.log('[HACrack] Executing JS:', processedCode.substring(0, 100) + '...');
+            
+            if (processedCode.includes('await ')) {
+                const asyncFn = new Function('return (async () => { ' + processedCode + ' })()');
+                asyncFn().catch(e => console.error('[HACrack] Async error:', e.message));
+                return { success: true };
+            }
+            
+            const fn = new Function(processedCode);
+            fn();
+            
             return { success: true };
-        } catch(e) {
-            console.error('[HACrack] Exec failed:', e.message);
-            return { success: false, error: e.message };
+        } catch(e1) {
+            try {
+                if (processedCode.includes('await ')) {
+                    eval('(async () => { ' + processedCode + ' })()');
+                } else {
+                    eval(processedCode);
+                }
+                return { success: true };
+            } catch(e2) {
+                console.error('[HACrack] Exec failed:', e1.message, e2.message);
+                return { success: false, error: e2.message };
+            }
         }
     }
     

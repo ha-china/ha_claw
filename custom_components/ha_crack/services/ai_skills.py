@@ -53,8 +53,9 @@ async def async_setup_skills(hass: HomeAssistant):
     intent.async_register(hass, ExplainIntent())
     intent.async_register(hass, NotifyIntent())
     intent.async_register(hass, GlobalInjectIntent())
+    intent.async_register(hass, CameraAnalyzeIntent())
     hass.data.setdefault("kadermanager", {})["_skills_registered"] = True
-    _LOGGER.info("AI Skills Package registered (11 intents with tool chain support)")
+    _LOGGER.info("AI Skills Package registered (12 intents with tool chain support)")
 
 class AISkillsIntent(intent.IntentHandler):
 
@@ -396,6 +397,77 @@ class GlobalInjectIntent(intent.IntentHandler):
         else:
             current = hass.data.get("ha_crack_global", {}).get("inject", "")
             response.async_set_speech(f"当前全局上下文: {current[:50] if current else '无'}")
+        return response
+
+
+class CameraAnalyzeIntent(intent.IntentHandler):
+
+    intent_type = "CameraAnalyze"
+    description = "分析摄像头画面。当用户说'摄像头'、'看看摄像头'、'分析画面'、'摄像头里有什么'时调用此工具。分析结果需重点描述画面细节，100-400字，包括：人物位置动作、物品摆放、光线环境、异常情况等"
+    slot_schema = {
+        vol.Optional("camera", description="摄像头实体ID或名称，如camera.xxx或'客厅摄像头'"): str,
+        vol.Optional("question", description="要问的问题，如'有人吗'、'门关了吗'"): str
+    }
+    
+    async def async_handle(self, intent_obj: intent.Intent):
+        hass = intent_obj.hass
+        slots = self.async_validate_slots(intent_obj.slots)
+        camera = slots.get("camera", {}).get("value", "")
+        question = slots.get("question", {}).get("value", "请详细描述画面内容，包括：1)人物位置和动作 2)物品摆放 3)光线环境 4)任何异常情况。100-400字")
+        
+        response = intent_obj.create_response()
+        response.response_type = intent.IntentResponseType.ACTION_DONE
+        
+        camera_entities = [s.entity_id for s in hass.states.async_all("camera")]
+        
+        if not camera_entities:
+            response.async_set_speech("未找到任何摄像头设备")
+            return response
+        
+        target_camera = None
+        if camera:
+            if camera.startswith("camera."):
+                target_camera = camera if camera in camera_entities else None
+            else:
+                for cam_id in camera_entities:
+                    state = hass.states.get(cam_id)
+                    name = state.attributes.get("friendly_name", "") if state else ""
+                    if camera.lower() in name.lower() or camera.lower() in cam_id.lower():
+                        target_camera = cam_id
+                        break
+        
+        if not target_camera:
+            target_camera = camera_entities[0]
+        
+        cam_state = hass.states.get(target_camera)
+        cam_name = cam_state.attributes.get("friendly_name", target_camera) if cam_state else target_camera
+        
+        _fire_thought_event(hass, f"用户想查看摄像头'{cam_name}'，我调用ai_hub.analyze_image分析画面")
+        
+        try:
+            result = await hass.services.async_call(
+                "ai_hub", "analyze_image",
+                {
+                    "message": question,
+                    "image_entity": target_camera,
+                    "model": "glm-4.6v-flash",
+                    "temperature": 0.5,
+                    "max_tokens": 1024,
+                    "stream": False
+                },
+                blocking=True,
+                return_response=True
+            )
+            
+            if result and isinstance(result, dict):
+                analysis = result.get("response", result.get("text", str(result)))
+                response.async_set_speech(f"【{cam_name}】{analysis}")
+            else:
+                response.async_set_speech(f"已请求分析{cam_name}，请稍候查看结果")
+        except Exception as e:
+            _LOGGER.error(f"CameraAnalyzeIntent error: {e}")
+            response.async_set_speech(f"分析摄像头失败: {e}")
+        
         return response
 
 def get_skill_rules(skill_id: str) -> dict:

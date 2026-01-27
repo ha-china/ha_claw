@@ -505,8 +505,12 @@ def _install_conversation_hook(hass: HomeAssistant, entry: ConfigEntry) -> None:
                 LOGGER.info(f"Agent {current_agent_id} succeeded after {loop_count} think loops")
                 return result
             except Exception as e:
-                import traceback
-                LOGGER.warning(f"Agent {current_agent_id} failed: {e}\n{traceback.format_exc()}")
+                err_msg = str(e)
+                if "content parts are required" in err_msg:
+                    LOGGER.debug(f"Agent {current_agent_id}: Google AI SDK空响应（工具调用后无文本），尝试下一个agent")
+                else:
+                    import traceback
+                    LOGGER.warning(f"Agent {current_agent_id} failed: {e}\n{traceback.format_exc()}")
                 continue
         
         intent_response = intent.IntentResponse(language=language or hass.config.language)

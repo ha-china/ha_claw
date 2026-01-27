@@ -12,7 +12,7 @@ from .ha_tools import (
     SmartDiscoveryTool, EntityQueryTool, ServiceCallTool, GetLiveContextTool, ListServicesTool, 
     AutomationTool, ScriptExecuteTool, HistoryQueryTool, AreaDevicesTool, 
     BatchControlTool, NotifyTool, FireEventTool, InjectJSTool, HAControlTool, FrontendControlTool,
-    HACSTool
+    DashboardTool, HACSTool
 )
 from .misc_tools import (
     AgentLoopTool, RolePlayTool, ExecutePythonTool, SystemControlTool,
@@ -47,7 +47,7 @@ class EnhancedAPI(llm.API):
             SystemControlTool(), AutomationTool(), ScriptExecuteTool(), ZhihuHotTool(), HistoryQueryTool(), 
             AreaDevicesTool(), BatchControlTool(), ConversationMemoryTool(), TextCompressTool(), FireEventTool(), 
             ThinkContinueTool(), ParallelToolCallTool(), ListServicesTool(), InjectJSTool(), FrontendControlTool(),
-            HACSTool()
+            DashboardTool(), HACSTool()
         ]
         prompt = f"""{HASS_LLM_SYSTEM_PROMPT.format(current_datetime=current_datetime)}
 
@@ -81,7 +81,8 @@ class EnhancedAPI(llm.API):
 
 ## 前端操作
 - FrontendControl: 前端控制(导航/点击/填充)
-- InjectJS: 注入JavaScript代码
+- InjectJS: 注入JavaScript代码(动态特效用此工具)
+- Dashboard: 仪表盘管理(添加/更新卡片)
 
 
 ## 思考模式（必须执行！）
@@ -214,6 +215,7 @@ def _patch_assist_api_prompt(hass: HomeAssistant) -> None:
             InjectJSTool(),
             HAControlTool(),
             FrontendControlTool(),
+            DashboardTool(),
             HACSTool(),
         ]
         
