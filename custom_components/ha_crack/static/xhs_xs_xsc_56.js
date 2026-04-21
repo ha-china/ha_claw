@@ -13,39 +13,7 @@ const dom = new JSDOM(html,{
 })
 window = dom.window;
 document = window.document;
-// DOMParser = window.DOMParser;
-// location = window.location;
-// navigator = window.navigator;
-// localStorage = window.localStorage;
-// class AudioContextMock {
-//     constructor() {
-//     }
-// }
-// class webkitAudioContextMock {
-//     constructor() {
-//     }
-// }
-// var indexedDB = {}
-// var canvas = {
-//     toDataURL: function toDataURL() {
-//     },
-//     getContext: function getContext(x) {
-//     }
-// };
 window.document.cookie = "a1=1927f6098768njq4co9jqukn0qtc8irx7u3ixrnxs50000565146;"
-// history = {}
-// Image = function () {
-//
-// }
-// PluginArray = function () {
-//
-// }
-// indexedDB = function () {
-//
-// }
-// WebSocket = function () {
-//
-// }
 
 var esm_typeof = {
     Z: function (t) {
@@ -3332,19 +3300,3 @@ function get_request_headers_params(api, data, a1){
         "xs_common": xs_common
     }
 }
-
-// let cc = "/api/sns/web/v1/note/like"
-//     let ii = {
-//         "note_oid": "6767de72000000001301984c"
-//     }
-// let res = window._webmsxyw(cc, ii)
-// console.log(res)
-// console.log(res["X-s"].substring(4))
-// console.log(atob(res["X-s"].substring(4)))
-// console.log(JSON.parse(atob(res["X-s"].substring(4))))
-// console.log(JSON.parse(atob(res["X-s"].substring(4)))['payload'])
-// console.log(JSON.parse(atob(res["X-s"].substring(4)))['payload'].length)
-// console.log(res["X-s"].length)
-
-// let res2 = get_request_headers_params(cc, ii, '189d533c32bwp462awbnt4domm5ahdx406sgskfho50000420914')
-// console.log(res2['xs'].length)
