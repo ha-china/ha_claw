@@ -1,6 +1,6 @@
 {
     "domain": "kadermanager",
-    "name": "AI外挂",
+    "name": "AI Claw",
     "codeowners": [
       "@knoop7"
     ],
@@ -10,7 +10,7 @@
       "intent",
       "websocket_api"
     ],
-    "after_dependencies": ["assist_pipeline", "ai_hub"],
+    "after_dependencies": ["assist_pipeline"],
     "documentation": "https://github.com/knoop7/ha_crack",
     "integration_type": "service",
     "iot_class": "local_polling",
@@ -19,5 +19,5 @@
     "requirements": [
       "trafilatura==2.0.0"
     ],
-    "version": "6.1.1"
+    "version": "6.1.2"
   }
