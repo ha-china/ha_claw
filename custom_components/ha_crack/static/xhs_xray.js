@@ -416,7 +416,6 @@ var zc666;
     }()
     zc666 = f;
 }();
-//# sourceMappingURL=https://picasso-private-1251524319.cos.ap-shanghai.myqcloud.com/data/formula-static/formula/xhs-pc-web/runtime-main.8718828.js.map
 try {
     require('./xhs_xray_pack1.js');
 } catch (e) {
