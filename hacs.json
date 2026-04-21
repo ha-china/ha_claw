@@ -1,5 +1,5 @@
 {
   "name": "HA Claw",
   "render_readme": true,
-  "homeassistant": "2025.19.0"
+  "homeassistant": "2025.10.0"
 }
