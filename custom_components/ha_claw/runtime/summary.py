@@ -35,6 +35,7 @@ def _join_summary_sections(*sections: str) -> str:
 def _build_summary_prompt(
     text: str,
     primary_responses: list[dict[str, str]],
+    language: str | None = None,
 ) -> str:
 
     intro = "Summarize and refine the following AI responses for the user request."
@@ -44,7 +45,12 @@ def _build_summary_prompt(
         f"{response['response']}"
         for index, response in enumerate(primary_responses, start=1)
     ]
-    instructions = """
+    lang_instruction = (
+        "- Reply in the same language as the user request"
+        if not language
+        else f"- Reply in {language}"
+    )
+    instructions = f"""
 First analyze the strengths and weaknesses of the responses, then provide a final answer.
 Use this exact format:
 
@@ -56,7 +62,7 @@ Write the final user-facing answer here in your own words.
 
 Requirements:
 - Include both sections, separated by ---analysis--- and ---answer---
-- Reply in English
+{lang_instruction}
 - Keep the total response under 550 words
 - Do not use numbered or bullet lists; write natural paragraphs
 - Only summarize and analyze. Do not execute actions, call tools, or control devices
@@ -185,7 +191,7 @@ async def process_ai_summary(
             base_result.response.speech["plain"]["agent_id"] = processing_agents[-1]
         return base_result
 
-    summary_prompt = _build_summary_prompt(text, primary_responses)
+    summary_prompt = _build_summary_prompt(text, primary_responses, language=language)
 
     try:
         get_tool_results_state(hass).clear()
@@ -236,11 +242,10 @@ async def process_ai_summary(
                 if multi_agent_summary:
                     for response in primary_responses:
                         combined_responses += (
-                            f"({response['agent_name']}) {reply_word}: {response['response']}\n"
+                            f"({response['agent_name']}) {reply_word}: {response['response']}\n\n---\n\n"
                         )
-                    combined_responses += "\n"
                     if analysis_part:
-                        combined_responses += f"{analysis_part}\n\n"
+                        combined_responses += f"{analysis_part}\n\n---\n\n"
                     combined_responses += (
                         f"({summary_agent_name}) {summary_word}: {summary_part}"
                     )

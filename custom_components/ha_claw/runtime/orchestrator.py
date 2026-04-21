@@ -210,17 +210,21 @@ async def _execute_conversation_turn_inner(
     get_conversation_status(hass)["last_conversation_id"] = conversation_id
 
     original_text = text
-    base_prompt = build_base_prompt(
-        hass,
-        text=text,
-        conversation_id=conversation_id,
-        runtime_config=runtime_config,
-    )
+    is_first_turn = task_loop.get("turn_count", 1) <= 1
 
-    extra_system_prompt = _fit_base_prompt(
-        base_prompt,
-        [extra_system_prompt] if extra_system_prompt else [],
-    )
+    if is_first_turn:
+        base_prompt = build_base_prompt(
+            hass,
+            text=text,
+            conversation_id=conversation_id,
+            runtime_config=runtime_config,
+        )
+        extra_system_prompt = _fit_base_prompt(
+            base_prompt,
+            [extra_system_prompt] if extra_system_prompt else [],
+        )
+    else:
+        extra_system_prompt = None
 
     get_agent_name = make_agent_name_getter(hass)
 
