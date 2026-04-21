@@ -76,6 +76,10 @@ def get_conversation_agents(hass: HomeAssistant) -> list[dict[str, str]]:
 class KaderManagerConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     VERSION = 1
 
+    def __init__(self) -> None:
+        super().__init__()
+        self._title: str = ""
+
     async def async_step_user(self, user_input: dict[str, Any] | None = None) -> FlowResult:
         await self.async_set_unique_id(DOMAIN, raise_on_progress=False)
         self._abort_if_unique_id_configured()
@@ -89,7 +93,49 @@ class KaderManagerConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                     }
                 ),
             )
-        return self.async_create_entry(title=user_input[CONF_NAME], data={})
+        self._title = user_input[CONF_NAME]
+        return await self.async_step_agent_settings()
+
+    async def async_step_agent_settings(self, user_input: dict[str, Any] | None = None) -> FlowResult:
+        errors: dict[str, str] = {}
+        available_agents = get_conversation_agents(self.hass)
+        available_agent_ids = [a["value"] for a in available_agents]
+
+        if user_input is not None:
+            if not available_agent_ids or "no_agents" in available_agent_ids:
+                errors["base"] = "no_agents_available"
+            elif user_input.get(CONF_PRIMARY_AGENT) not in available_agent_ids:
+                errors[CONF_PRIMARY_AGENT] = "invalid_agent"
+            else:
+                return self.async_create_entry(
+                    title=self._title,
+                    data={},
+                    options={
+                        CONF_PRIMARY_AGENT: user_input[CONF_PRIMARY_AGENT],
+                        CONF_FALLBACK_AGENT: user_input.get(CONF_FALLBACK_AGENT, user_input[CONF_PRIMARY_AGENT]),
+                        CONF_SECONDARY_FALLBACK_AGENT: user_input.get(CONF_SECONDARY_FALLBACK_AGENT),
+                    },
+                )
+
+        default_agent = available_agent_ids[0] if available_agent_ids and available_agent_ids[0] != "no_agents" else ""
+
+        schema = vol.Schema({
+            vol.Required(CONF_PRIMARY_AGENT, description={"suggested_value": default_agent}): SelectSelector(
+                SelectSelectorConfig(options=available_agents, mode=SelectSelectorMode.DROPDOWN)
+            ),
+            vol.Required(CONF_FALLBACK_AGENT, description={"suggested_value": default_agent}): SelectSelector(
+                SelectSelectorConfig(options=available_agents, mode=SelectSelectorMode.DROPDOWN)
+            ),
+            vol.Optional(CONF_SECONDARY_FALLBACK_AGENT): SelectSelector(
+                SelectSelectorConfig(options=available_agents, mode=SelectSelectorMode.DROPDOWN)
+            ),
+        })
+
+        return self.async_show_form(
+            step_id="agent_settings",
+            data_schema=schema,
+            errors=errors,
+        )
 
     @staticmethod
     @callback

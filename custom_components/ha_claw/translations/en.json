@@ -11,9 +11,18 @@
     "step": {
       "user": {
         "title": "Initial setup",
-        "description": "## Welcome to AI Sidecar\n\nThis integration aggregates and manages Home Assistant conversation agents, giving you a single entry point, fallback routing, and more flexible response display.\n\n### Features\n- Choose primary, fallback, and secondary fallback conversation agents\n- Configure multiple reply display modes\n- Optionally allow web search context when needed\n\nConfirm the integration name and submit to continue.",
+        "description": "## Welcome to AI Sidecar\n\nThis integration aggregates and manages Home Assistant conversation agents, giving you a single entry point, fallback routing, and more flexible response display.\n\nConfirm the integration name and submit to continue.",
         "data": {
           "name": "Integration Name"
+        }
+      },
+      "agent_settings": {
+        "title": "Agent Settings",
+        "description": "**Instructions:**\nConfigure the AI conversation routing chain. The system tries each agent in order until a valid reply is obtained.\n\n**Primary AI Entity** — The default agent used first\n**Backup AI Entity** — Automatically used when the primary AI fails\n**Summary AI Entity** — Optional. When set, the first two AIs answer separately and this AI summarizes them into one final reply",
+        "data": {
+          "primary_agent": "Primary AI entity",
+          "fallback_agent": "Backup AI entity",
+          "secondary_fallback_agent": "Summary AI entity (optional)"
         }
       }
     }
