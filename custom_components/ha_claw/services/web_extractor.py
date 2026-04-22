@@ -9,11 +9,22 @@ from typing import Any
 
 from bs4 import BeautifulSoup, Tag
 
-try:
-    from trafilatura import extract, extract_metadata
-except ImportError:
-    extract = None
-    extract_metadata = None
+_trafilatura_loaded: bool = False
+_trafilatura_extract = None
+_trafilatura_extract_metadata = None
+
+
+def _lazy_load_trafilatura() -> None:
+    global _trafilatura_loaded, _trafilatura_extract, _trafilatura_extract_metadata
+    if _trafilatura_loaded:
+        return
+    _trafilatura_loaded = True
+    try:
+        from trafilatura import extract, extract_metadata
+        _trafilatura_extract = extract
+        _trafilatura_extract_metadata = extract_metadata
+    except ImportError:
+        pass
 
 _NOISE_HINTS = (
     "nav",
@@ -109,7 +120,8 @@ def _extract_with_trafilatura(
     *,
     default_title: str,
 ) -> ExtractedWebContent | None:
-    if extract is None:
+    _lazy_load_trafilatura()
+    if _trafilatura_extract is None:
         container_content = _extract_main_container_text(html)
         if not container_content:
             return None
@@ -119,7 +131,7 @@ def _extract_with_trafilatura(
             strategy="trafilatura",
         )
 
-    extracted = extract(
+    extracted = _trafilatura_extract(
         html,
         url=url,
         output_format="markdown",
@@ -134,8 +146,8 @@ def _extract_with_trafilatura(
         return None
 
     title = default_title
-    if extract_metadata is not None:
-        metadata = extract_metadata(html, default_url=url)
+    if _trafilatura_extract_metadata is not None:
+        metadata = _trafilatura_extract_metadata(html, default_url=url)
         title = getattr(metadata, "title", None) or default_title
     return ExtractedWebContent(
         title=str(title).strip() or default_title,

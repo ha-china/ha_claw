@@ -12,11 +12,21 @@ import re
 from homeassistant.core import HomeAssistant
 from homeassistant.util.file import write_utf8_file
 
+from .data_path import get_data_dir
+
 LOGGER = logging.getLogger(__name__)
 
-WORKSPACE_DIR = Path(__file__).resolve().parent.parent / "data" / "workspace"
-WORKSPACE_STATE_PATH = WORKSPACE_DIR / ".workspace_state.json"
-WORKSPACE_MEMORY_DIR = WORKSPACE_DIR / "memory"
+
+def _workspace_dir() -> Path:
+    return get_data_dir() / "workspace"
+
+
+def _workspace_state_path() -> Path:
+    return _workspace_dir() / ".workspace_state.json"
+
+
+def _workspace_memory_dir() -> Path:
+    return _workspace_dir() / "memory"
 WORKSPACE_DOC_NAMES = (
     "AGENTS",
     "BOOTSTRAP",
@@ -80,10 +90,11 @@ def _read_doc(path: Path) -> str:
 
 
 def _read_memory_doc() -> str:
-    content = _read_doc(WORKSPACE_DIR / "MEMORY.md")
+    ws = _workspace_dir()
+    content = _read_doc(ws / "MEMORY.md")
     if content:
         return content
-    return _read_doc(WORKSPACE_DIR / "memory.md")
+    return _read_doc(ws / "memory.md")
 
 
 def _today_memory_name() -> str:
@@ -91,7 +102,7 @@ def _today_memory_name() -> str:
 
 
 def _today_memory_path() -> Path:
-    return WORKSPACE_MEMORY_DIR / _today_memory_name()
+    return _workspace_memory_dir() / _today_memory_name()
 
 
 def _read_daily_memory_doc() -> str:
@@ -114,14 +125,15 @@ def _normalize_doc_name(name: str) -> str:
 
 def _doc_path(name: str) -> Path:
     normalized = _normalize_doc_name(name)
-    return WORKSPACE_DIR / f"{normalized}.md"
+    return _workspace_dir() / f"{normalized}.md"
 
 
 def _read_workspace_state() -> dict[str, bool]:
-    if not WORKSPACE_STATE_PATH.exists():
+    wsp = _workspace_state_path()
+    if not wsp.exists():
         return {"bootstrap_active": True}
     try:
-        data = json.loads(WORKSPACE_STATE_PATH.read_text(encoding="utf-8"))
+        data = json.loads(wsp.read_text(encoding="utf-8"))
     except (json.JSONDecodeError, OSError):
         return {"bootstrap_active": True}
     return {
@@ -130,21 +142,21 @@ def _read_workspace_state() -> dict[str, bool]:
 
 
 def _write_workspace_state(state: dict[str, bool]) -> None:
-    WORKSPACE_DIR.mkdir(parents=True, exist_ok=True)
-    WORKSPACE_STATE_PATH.write_text(
+    _workspace_dir().mkdir(parents=True, exist_ok=True)
+    _workspace_state_path().write_text(
         json.dumps(state, ensure_ascii=False, indent=2) + "\n",
         encoding="utf-8",
     )
 
 
 def _write_doc(path: Path, markdown: str) -> Path:
-    WORKSPACE_DIR.mkdir(parents=True, exist_ok=True)
+    _workspace_dir().mkdir(parents=True, exist_ok=True)
     write_utf8_file(str(path), markdown.strip() + "\n")
     return path
 
 
 def _write_daily_memory_doc(markdown: str) -> Path:
-    WORKSPACE_MEMORY_DIR.mkdir(parents=True, exist_ok=True)
+    _workspace_memory_dir().mkdir(parents=True, exist_ok=True)
     path = _today_memory_path()
     write_utf8_file(str(path), markdown.strip() + "\n")
     return path
@@ -152,17 +164,18 @@ def _write_daily_memory_doc(markdown: str) -> Path:
 
 def _load_workspace_snapshot() -> WorkspaceSnapshot:
     workspace_state = _read_workspace_state()
-    agents = _read_doc(WORKSPACE_DIR / "AGENTS.md")
+    ws = _workspace_dir()
+    agents = _read_doc(ws / "AGENTS.md")
     return WorkspaceSnapshot(
         agents=agents,
-        bootstrap=_read_doc(WORKSPACE_DIR / "BOOTSTRAP.md"),
+        bootstrap=_read_doc(ws / "BOOTSTRAP.md"),
         bootstrap_active=workspace_state.get("bootstrap_active", True),
-        heartbeat=_read_doc(WORKSPACE_DIR / "HEARTBEAT.md"),
-        identity=_read_doc(WORKSPACE_DIR / "IDENTITY.md"),
+        heartbeat=_read_doc(ws / "HEARTBEAT.md"),
+        identity=_read_doc(ws / "IDENTITY.md"),
         memory=_read_memory_doc(),
-        soul=_read_doc(WORKSPACE_DIR / "SOUL.md"),
-        tools=_read_doc(WORKSPACE_DIR / "TOOLS.md"),
-        user=_read_doc(WORKSPACE_DIR / "USER.md"),
+        soul=_read_doc(ws / "SOUL.md"),
+        tools=_read_doc(ws / "TOOLS.md"),
+        user=_read_doc(ws / "USER.md"),
         daily_memory=_read_daily_memory_doc(),
         startup_read_order=_parse_startup_read_order(agents),
         signature=_workspace_store_signature(),
@@ -175,11 +188,12 @@ def _set_snapshot(snapshot: WorkspaceSnapshot) -> None:
 
 def _workspace_store_signature() -> tuple[str, ...]:
 
+    ws = _workspace_dir()
     paths = [
-        WORKSPACE_STATE_PATH,
-        *sorted(WORKSPACE_DIR.glob("*.md")),
-        WORKSPACE_DIR / "memory.md",
-        *sorted(WORKSPACE_MEMORY_DIR.glob("*.md")),
+        _workspace_state_path(),
+        *sorted(ws.glob("*.md")),
+        ws / "memory.md",
+        *sorted(_workspace_memory_dir().glob("*.md")),
     ]
     signature: list[str] = []
     for path in paths:
@@ -187,7 +201,7 @@ def _workspace_store_signature() -> tuple[str, ...]:
             continue
         stat = path.stat()
         signature.append(
-            f"{path.relative_to(WORKSPACE_DIR).as_posix()}:{stat.st_mtime_ns}:{stat.st_size}"
+            f"{path.relative_to(ws).as_posix()}:{stat.st_mtime_ns}:{stat.st_size}"
         )
     return tuple(signature)
 

@@ -75,8 +75,7 @@ def patch_pipeline_for_final_content(hass: HomeAssistant) -> None:
                     final_text = plain.get("speech") or ""
 
                     if final_text:
-
-
+                        from .patches import _is_streaming_enabled
                         original_process_event(
                             self,
                             PipelineEvent(
@@ -84,13 +83,23 @@ def patch_pipeline_for_final_content(hass: HomeAssistant) -> None:
                                 {"chat_log_delta": {"role": "assistant"}},
                             ),
                         )
-                        original_process_event(
-                            self,
-                            PipelineEvent(
-                                PipelineEventType.INTENT_PROGRESS,
-                                {"chat_log_delta": {"content": final_text}},
-                            ),
-                        )
+                        if _is_streaming_enabled(hass):
+                            for ch in final_text:
+                                original_process_event(
+                                    self,
+                                    PipelineEvent(
+                                        PipelineEventType.INTENT_PROGRESS,
+                                        {"chat_log_delta": {"content": ch}},
+                                    ),
+                                )
+                        else:
+                            original_process_event(
+                                self,
+                                PipelineEvent(
+                                    PipelineEventType.INTENT_PROGRESS,
+                                    {"chat_log_delta": {"content": final_text}},
+                                ),
+                            )
 
             return original_process_event(self, event)
 
@@ -151,6 +160,23 @@ def install_conversation_hook(hass: HomeAssistant, entry: ConfigEntry) -> None:
         satellite_id=None,
         extra_system_prompt=None,
     ):
+        frontend_lang = language
+        try:
+            user_id = getattr(context, "user_id", None)
+            if user_id:
+                from homeassistant.components.frontend.storage import async_user_store
+                user_store = await async_user_store(hass, user_id)
+                lang_data = user_store.data.get("language")
+                if isinstance(lang_data, dict) and lang_data.get("language"):
+                    frontend_lang = lang_data["language"]
+        except Exception:
+            pass
+        get_conversation_status(hass)["user_language"] = frontend_lang
+        if agent_id is not None and agent_id != entry.entry_id:
+            return await original_async_converse(
+                hass, text, conversation_id, context, language,
+                agent_id, device_id, satellite_id, extra_system_prompt,
+            )
         return await execute_conversation_turn(
             hass,
             entry,

@@ -11,11 +11,21 @@ import re
 from homeassistant.core import HomeAssistant
 from homeassistant.util.file import write_utf8_file
 
+from .data_path import get_data_dir
+
 LOGGER = logging.getLogger(__name__)
 
-GUIDE_DIR = Path(__file__).resolve().parent.parent / "data" / "homeassistant_guide"
-RUNTIME_GUIDE_DIR = GUIDE_DIR / "runtime"
-SOURCE_GUIDE_DIR = GUIDE_DIR / "source"
+
+def _guide_dir() -> Path:
+    return get_data_dir() / "homeassistant_guide"
+
+
+def _runtime_guide_dir() -> Path:
+    return _guide_dir() / "runtime"
+
+
+def _source_guide_dir() -> Path:
+    return _guide_dir() / "source"
 MAX_SEARCH_SNIPPET_CHARS = 1600
 RUNTIME_COLLECTION = "runtime"
 SOURCE_COLLECTION = "source"
@@ -50,12 +60,27 @@ _GUIDE_TOPIC_HINTS: dict[str, tuple[str, ...]] = {
     "automation": ("automation", "automations", "自动化", "脚本", "script", "trigger", "trace"),
     "dashboard": ("dashboard", "lovelace", "仪表盘", "卡片", "card", "视图", "view"),
     "integration": ("integration", "integrations", "集成", "reload", "repair", "repairs", "修复"),
-    "calendar": ("calendar", "calendars", "日历", "todo", "待办"),
+    "calendar": ("calendar", "calendars", "日历"),
+    "todo": ("todo", "待办", "任务", "清单", "shopping list", "购物"),
     "backup": ("backup", "restore", "备份", "恢复", "rollback", "回滚"),
     "diagnostics": ("diagnostics", "logs", "trace", "日志", "诊断"),
     "esphome": ("esphome", "esp", "固件", "ota", "节点"),
     "safety": ("safety", "safe", "风险", "安全", "确认", "危险"),
     "naming context": ("alias", "aliases", "命名", "名称", "别名", "friendly name"),
+    "template": ("template", "jinja", "模板", "jinja2", "state_attr", "trigger."),
+    "blueprint": ("blueprint", "蓝图", "blueprints"),
+    "scene": ("scene", "scenes", "场景", "快照"),
+    "zigbee": ("zigbee", "zha", "z2m", "zigbee2mqtt", "coordinator", "配对", "pairing"),
+    "zwave": ("zwave", "z-wave", "zwavejs", "s2", "dsk"),
+    "addon": ("add-on", "addon", "supervisor", "插件", "附加组件"),
+    "yaml config": ("yaml", "configuration.yaml", "customize", "package", "packages"),
+    "network": ("ssl", "certificate", "dns", "duckdns", "nginx", "proxy", "远程访问", "external_url"),
+    "energy": ("energy", "电量", "用电", "solar", "太阳能", "utility_meter"),
+    "recorder": ("recorder", "数据库", "database", "purge", "statistics"),
+    "voice": ("tts", "piper", "whisper", "语音", "voice", "assist", "stt"),
+    "presence": ("device_tracker", "zone", "person", "位置", "在家", "离家", "geofence"),
+    "custom component": ("custom_component", "hacs", "自定义组件", "第三方"),
+    "area floor": ("area", "floor", "区域", "楼层", "房间", "label"),
 }
 
 
@@ -114,8 +139,8 @@ def _iter_markdown_documents(base_dir: Path, collection: str) -> list[GuideDocum
 
 def _read_guide_store_from_disk() -> GuideStoreSnapshot:
     documents = [
-        *_iter_markdown_documents(RUNTIME_GUIDE_DIR, RUNTIME_COLLECTION),
-        *_iter_markdown_documents(SOURCE_GUIDE_DIR, SOURCE_COLLECTION),
+        *_iter_markdown_documents(_runtime_guide_dir(), RUNTIME_COLLECTION),
+        *_iter_markdown_documents(_source_guide_dir(), SOURCE_COLLECTION),
     ]
     return GuideStoreSnapshot(
         documents=tuple(documents),
@@ -126,8 +151,8 @@ def _read_guide_store_from_disk() -> GuideStoreSnapshot:
 def _guide_store_signature() -> tuple[str, ...]:
 
     paths = [
-        *sorted(RUNTIME_GUIDE_DIR.rglob("*.md")),
-        *sorted(SOURCE_GUIDE_DIR.rglob("*.md")),
+        *sorted(_runtime_guide_dir().rglob("*.md")),
+        *sorted(_source_guide_dir().rglob("*.md")),
     ]
     signature: list[str] = []
     for path in paths:
@@ -135,7 +160,7 @@ def _guide_store_signature() -> tuple[str, ...]:
             continue
         stat = path.stat()
         signature.append(
-            f"{path.relative_to(GUIDE_DIR).as_posix()}:{stat.st_mtime_ns}:{stat.st_size}"
+            f"{path.relative_to(_guide_dir()).as_posix()}:{stat.st_mtime_ns}:{stat.st_size}"
         )
     return tuple(signature)
 
@@ -258,7 +283,8 @@ def build_homeassistant_topic_hint(query: str) -> str:
     return (
         "Current request maps to Home Assistant guide topics: "
         f"{topics}. "
-        "Use HomeAssistantGuideSkill first to pull the relevant workflow or safety context before acting when the user is asking how to do it, how to fix it, or how to design it."
+        "If the user is asking HOW to do something, HOW to fix something, or HOW to design something, consult HomeAssistantGuideSkill first. "
+        "If the user is simply requesting an action (e.g. 'add a todo', 'turn on the light'), execute it directly without consulting the guide."
     )
 
 
@@ -358,8 +384,8 @@ def _sanitize_runtime_relative_path(relative_path: str) -> Path:
         raise ValueError("relative_path is required")
     if raw.startswith("/"):
         raw = raw.lstrip("/")
-    candidate = (RUNTIME_GUIDE_DIR / raw).resolve()
-    base = RUNTIME_GUIDE_DIR.resolve()
+    candidate = (_runtime_guide_dir() / raw).resolve()
+    base = _runtime_guide_dir().resolve()
     try:
         candidate.relative_to(base)
     except ValueError as err:
@@ -415,7 +441,7 @@ async def async_upsert_runtime_guide_doc(
     await async_record_change(
         hass,
         target_type="guide",
-        target_id=f"runtime/{path.relative_to(RUNTIME_GUIDE_DIR).as_posix()}",
+        target_id=f"runtime/{path.relative_to(_runtime_guide_dir()).as_posix()}",
         action="update" if previous else "create",
         before=previous,
         after=markdown,
@@ -442,7 +468,7 @@ async def async_delete_runtime_guide_doc(
     await async_record_change(
         hass,
         target_type="guide",
-        target_id=f"runtime/{path.relative_to(RUNTIME_GUIDE_DIR).as_posix()}",
+        target_id=f"runtime/{path.relative_to(_runtime_guide_dir()).as_posix()}",
         action="delete",
         before=previous,
         after=None,

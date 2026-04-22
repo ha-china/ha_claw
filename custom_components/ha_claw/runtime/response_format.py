@@ -115,6 +115,7 @@ def ensure_response_data(result: Any) -> None:
 def apply_agent_response_format(
     result: Any,
     *,
+    hass: Any = None,
     agent_name: str,
     agent_id: str,
     conversation_mode: str,
@@ -136,7 +137,9 @@ def apply_agent_response_format(
     plain["agent_name"] = agent_name
     plain["agent_id"] = agent_id
 
-    labels = reply_labels(language_of(result))
+    from .state import get_conversation_status
+    frontend_lang = get_conversation_status(hass).get("user_language") if hass else None
+    labels = reply_labels(frontend_lang or language_of(result))
     reply = labels["reply"]
 
     if conversation_mode == CONVERSATION_MODE_NO_NAME:

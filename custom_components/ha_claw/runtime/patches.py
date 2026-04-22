@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
+import re
 
 from homeassistant.core import HomeAssistant, callback
 
@@ -28,6 +30,8 @@ _STREAM_CLOSURE_PATCHED = "_ha_crack_stream_closure_patched"
 _STREAM_CLOSURE_ORIGINAL = "_ha_crack_original_stream_closure"
 _PIPELINE_FILTER_PATCHED = "_kadermanager_tool_filter_patched"
 _PIPELINE_FILTER_ORIGINAL = "_kadermanager_original_process_event"
+_TOOL_PROGRESS_PATCHED = "_kadermanager_tool_progress_patched"
+_TOOL_PROGRESS_ORIGINAL = "_kadermanager_tool_progress_original"
 
 
 def _pop_empty_trailing_assistant(chat_log) -> None:
@@ -241,15 +245,13 @@ def patch_hide_tool_calls_from_pipeline(hass: HomeAssistant) -> None:
         if not agent_id:
             return False
 
-
-
         from homeassistant.helpers import entity_registry as er
 
         registry = er.async_get(hass)
         entity = registry.async_get(agent_id)
         if entity is None:
             return False
-        return entity.platform == DOMAIN
+        return entity.platform in (DOMAIN, "ai_hub")
 
     def _is_tool_only_delta(delta: dict) -> bool:
         if not isinstance(delta, dict):
@@ -286,10 +288,13 @@ def patch_hide_tool_calls_from_pipeline(hass: HomeAssistant) -> None:
             and _agent_is_ours(self)
             and isinstance(delta, dict)
             and not _extract_step_event(delta)
+            and not delta.get("content")
+            and delta.get("role") != "assistant"
         ):
             return
         if (
             event.type == PipelineEventType.INTENT_PROGRESS
+            and isinstance(delta, dict)
             and (step_event := _extract_step_event(delta))
             and _agent_is_ours(self)
         ):
@@ -297,13 +302,12 @@ def patch_hide_tool_calls_from_pipeline(hass: HomeAssistant) -> None:
                 self,
                 PipelineEvent(
                     PipelineEventType.INTENT_PROGRESS,
-                    {"km_step_event": step_event},
+                    {"chat_log_delta": {"role": "assistant", "content": step_event.get("title", "")}},
                 ),
             )
         if (
             event.type == PipelineEventType.INTENT_PROGRESS
             and _is_tool_only_delta(delta)
-            and _agent_is_ours(self)
         ):
             return
         return original_process_event(self, event)
@@ -330,3 +334,105 @@ def unpatch_hide_tool_calls_from_pipeline() -> None:
     if hasattr(PipelineRun, _PIPELINE_FILTER_PATCHED):
         delattr(PipelineRun, _PIPELINE_FILTER_PATCHED)
     LOGGER.debug("Restored PipelineRun.process_event after kadermanager unload")
+
+
+def _is_streaming_enabled(hass: HomeAssistant) -> bool:
+    from ..const import CONF_ENABLE_STREAMING_EFFECT
+    entries = hass.config_entries.async_entries(DOMAIN)
+    if not entries:
+        return True
+    return entries[0].options.get(CONF_ENABLE_STREAMING_EFFECT, True)
+
+
+async def _emit_typewriter(hass: HomeAssistant, chat_log, text: str) -> None:
+    listener = chat_log.delta_listener
+    if not listener or not text:
+        return
+    if not _is_streaming_enabled(hass):
+        listener(chat_log, {"role": "assistant"})
+        listener(chat_log, {"content": text})
+        return
+    listener(chat_log, {"role": "assistant"})
+    await asyncio.sleep(0)
+    for ch in text:
+        listener(chat_log, {"content": ch})
+        await asyncio.sleep(0.03)
+
+
+def patch_tool_progress(hass: HomeAssistant) -> None:
+
+    from homeassistant.components.conversation import chat_log as chat_log_module
+    from .tool_progress import tool_progress_line
+
+    if getattr(chat_log_module.ChatLog, _TOOL_PROGRESS_PATCHED, False):
+        return
+
+    original_async_add_assistant_content = (
+        chat_log_module.ChatLog.async_add_assistant_content
+    )
+
+    _THINK_RE = re.compile(r"<think>(.*?)</think>\s*", re.DOTALL)
+
+    async def patched_async_add_assistant_content(
+        self, content, /, tool_call_tasks=None
+    ):
+        from dataclasses import replace as _replace
+        thinking_text = ""
+        raw_text = getattr(content, "content", None) or ""
+        think_match = _THINK_RE.search(raw_text)
+        if think_match:
+            thinking_text = think_match.group(1).strip()
+            content = _replace(content, content=_THINK_RE.sub("", raw_text).strip() or None)
+        native_thinking = getattr(content, "thinking_content", None)
+        if native_thinking and native_thinking.strip():
+            thinking_text = native_thinking.strip()
+        if thinking_text and self.delta_listener:
+            truncated = thinking_text[:20] + ("..." if len(thinking_text) > 20 else "")
+            await _emit_typewriter(hass, self, f"┊ \U0001f4ad {truncated}")
+            self.delta_listener(self, {"content": "\n"})
+
+        if self.delta_listener:
+            tool_calls = getattr(content, "tool_calls", None)
+            if tool_calls:
+                from .state import get_conversation_status
+                lang = get_conversation_status(hass).get("user_language") or hass.config.language or "en"
+                for tc in tool_calls:
+                    if getattr(tc, "external", False):
+                        continue
+                    line = tool_progress_line(
+                        tc.tool_name, tc.tool_args, lang
+                    )
+                    await _emit_typewriter(hass, self, line)
+
+        async for result in original_async_add_assistant_content(
+            self, content, tool_call_tasks=tool_call_tasks
+        ):
+            yield result
+
+    chat_log_module.ChatLog.async_add_assistant_content = (
+        patched_async_add_assistant_content
+    )
+    setattr(
+        chat_log_module.ChatLog,
+        _TOOL_PROGRESS_ORIGINAL,
+        original_async_add_assistant_content,
+    )
+    setattr(chat_log_module.ChatLog, _TOOL_PROGRESS_PATCHED, True)
+    LOGGER.debug("Patched ChatLog.async_add_assistant_content for tool progress + typewriter")
+
+
+def unpatch_tool_progress() -> None:
+
+    from homeassistant.components.conversation import chat_log as chat_log_module
+
+    original = getattr(
+        chat_log_module.ChatLog, _TOOL_PROGRESS_ORIGINAL, None
+    )
+    if original is None:
+        return
+
+    chat_log_module.ChatLog.async_add_assistant_content = original
+    delattr(chat_log_module.ChatLog, _TOOL_PROGRESS_ORIGINAL)
+    if hasattr(chat_log_module.ChatLog, _TOOL_PROGRESS_PATCHED):
+        delattr(chat_log_module.ChatLog, _TOOL_PROGRESS_PATCHED)
+    LOGGER.debug("Restored ChatLog.async_add_assistant_content after kadermanager unload")

@@ -11,10 +11,12 @@ from typing import Any
 from homeassistant.core import HomeAssistant
 from homeassistant.util.file import write_utf8_file
 
+from .data_path import get_data_dir
 from .route_hints import build_route_envelope, build_route_hint
-from .workspace_store import WORKSPACE_DIR
 
-MEMORY_PATH = WORKSPACE_DIR / "MEMORY.md"
+
+def _memory_path() -> Path:
+    return get_data_dir() / "workspace" / "MEMORY.md"
 MEMORY_HEADER = "# MEMORY.md"
 MEMORY_SUBTITLE = "_Curated long-term memory for kadermanager._"
 _FOLLOW_UP_MEMORY_PATTERNS = (
@@ -58,15 +60,17 @@ class MemorySaveOutcome:
 
 
 def _read_memory_markdown() -> str:
-    if not MEMORY_PATH.exists():
+    mp = _memory_path()
+    if not mp.exists():
         return ""
-    return MEMORY_PATH.read_text(encoding="utf-8").strip()
+    return mp.read_text(encoding="utf-8").strip()
 
 
 def _write_memory_markdown(markdown: str) -> Path:
-    WORKSPACE_DIR.mkdir(parents=True, exist_ok=True)
-    write_utf8_file(str(MEMORY_PATH), markdown.strip() + "\n")
-    return MEMORY_PATH
+    mp = _memory_path()
+    mp.parent.mkdir(parents=True, exist_ok=True)
+    write_utf8_file(str(mp), markdown.strip() + "\n")
+    return mp
 
 
 def _parse_entries(markdown: str) -> list[MemoryEntry]:

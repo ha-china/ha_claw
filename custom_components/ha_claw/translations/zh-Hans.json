@@ -52,13 +52,19 @@
       },
       "conversation_settings": {
         "title": "对话与显示设置",
-        "description": "**使用说明：**\n配置 AI 回复在前端的显示方式和附加功能。\n\n**对话模式：**\n• **不显示名称** — 精简模式，只显示回复内容\n• **显示 AI 名称** — 推荐，回复前标注当前响应的 AI 名称\n• **完整显示** — 显示完整调用过程，包含工具调用等详细信息\n\n**联网搜索：**\n启用后，AI 可在需要时自动补充联网搜索结果以提升回答质量。",
+        "description": "配置 AI 回复在前端的显示方式和附加功能。",
         "data": {
           "back": "返回主菜单",
           "save_and_exit": "保存并完成",
           "next_step": "下一步",
           "conversation_mode": "对话模式",
-          "enable_web_search": "联网搜索"
+          "enable_web_search": "联网搜索",
+          "enable_streaming_effect": "流式显示"
+        },
+        "data_description": {
+          "conversation_mode": "• **不显示名称** — 精简模式，只显示回复内容\n• **显示 AI 名称** — 推荐，回复前标注响应的 AI 名称\n• **完整显示** — 显示完整调用过程，包含工具调用详情",
+          "enable_web_search": "启用后，AI 可在需要时自动补充联网搜索结果以提升回答质量",
+          "enable_streaming_effect": "启用后，工具调用进度等消息将以逐字打字机效果呈现；关闭则一次性显示"
         }
       },
       "workspace_editor": {
@@ -107,7 +113,7 @@
       },
       "ws_tools": {
         "title": "编辑 TOOLS.md",
-        "description": "**环境与工具备注**\n记录当前智能家居环境的特殊配置和设备信息。\n例如：摄像头型号、TTS 服务名称、通知目标等。\nAI 在执行操作时会参考这些信息。\n\n格式示例：\n`- 客厅摄像头: camera.living_room`\n`- TTS 服务: tts.edge_say`\n\n使用 Markdown 格式，保存后立即生效。",
+        "description": "**环境与工具备注**\n记录设备信息、服务名称等，AI 执行操作时自动参考。\n\n**访问令牌（可选）：** 若 AI 无法读日志/执行命令，添加长期令牌启用 REST 穿透。\n个人资料页底部创建令牌，格式：`ha_token: eyJ...`\n\n保存后立即生效。",
         "data": { "content": "Markdown 编辑器" }
       },
       "ws_user": {

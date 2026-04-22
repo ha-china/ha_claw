@@ -7,6 +7,7 @@ CONF_CONVERSATION_MODE = "conversation_mode"
 CONF_ERROR_RESPONSES = "error_responses"
 CONF_ENABLE_AI_SUMMARY = "enable_ai_summary"
 CONF_ENABLE_WEB_SEARCH = "enable_web_search"
+CONF_ENABLE_STREAMING_EFFECT = "enable_streaming_effect"
 
 CONVERSATION_MODE_NO_NAME = "no_name"
 CONVERSATION_MODE_ADD_NAME = "add_name"

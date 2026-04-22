@@ -52,13 +52,19 @@
       },
       "conversation_settings": {
         "title": "Conversation & Display",
-        "description": "**Instructions:**\nConfigure how AI replies appear in the frontend.\n\n**Dialogue Mode:**\n• **No name** — Minimal mode, reply content only\n• **Show AI name** — Recommended, prefixes reply with the responding AI’s name\n• **Full display** — Shows the complete process including tool calls and details\n\n**Web Search:**\nWhen enabled, the AI can automatically supplement replies with online search results.",
+        "description": "Configure how AI replies appear in the frontend.",
         "data": {
           "back": "Return to main menu",
           "save_and_exit": "Save and complete",
           "next_step": "Next step",
           "conversation_mode": "Dialogue Mode",
-          "enable_web_search": "Web Search"
+          "enable_web_search": "Web Search",
+          "enable_streaming_effect": "Streaming Display"
+        },
+        "data_description": {
+          "conversation_mode": "• **No name** — Minimal mode, reply content only\n• **Show AI name** — Recommended, prefixes reply with the responding AI's name\n• **Full display** — Shows the complete process including tool calls and details",
+          "enable_web_search": "When enabled, the AI can automatically supplement replies with online search results",
+          "enable_streaming_effect": "When enabled, tool progress messages appear with a typewriter effect; when disabled, they appear instantly"
         }
       },
       "workspace_editor": {
@@ -119,7 +125,7 @@
       },
       "ws_tools": {
         "title": "Edit TOOLS.md",
-        "description": "**Environment notes**\nRecords special configurations and device info for your smart home.\nThe AI references these when performing actions.\n\nExample:\n`- Living room camera: camera.living_room`\n`- TTS service: tts.edge_say`\n\nMarkdown format. Saved immediately.",
+        "description": "**Environment notes**\nDevice info, service names, etc. AI references these during actions.\n\n**Access token (optional):** If AI can't read logs/run commands, add a long-lived token for REST fallback.\nCreate at: Profile → Long-Lived Access Tokens. Format: `ha_token: eyJ...`\n\nSaved immediately.",
         "data": {
           "content": "Markdown Editor"
         }

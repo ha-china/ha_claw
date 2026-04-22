@@ -9,6 +9,8 @@ from typing import Any
 
 from homeassistant.core import HomeAssistant
 
+from .data_path import get_data_dir
+
 _LOGGER = logging.getLogger(__name__)
 _STORE_KEY = "_custom_entities"
 
@@ -16,7 +18,7 @@ SUPPORTED_PLATFORMS = ("sensor", "binary_sensor", "switch", "button")
 
 
 def _store_path(hass: HomeAssistant) -> Path:
-    return Path(hass.config.config_dir) / "custom_components" / "kadermanager" / "data" / "custom_entities.json"
+    return get_data_dir() / "custom_entities.json"
 
 
 def _read_store(path: Path) -> list[dict[str, Any]]:

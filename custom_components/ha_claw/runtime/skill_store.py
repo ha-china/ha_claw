@@ -14,6 +14,7 @@ from urllib.parse import urlparse
 from homeassistant.core import HomeAssistant
 from homeassistant.util.file import write_utf8_file
 
+from .data_path import get_data_dir
 from .route_hints import build_route_envelope, build_route_hint
 
 try:
@@ -22,10 +23,20 @@ except ImportError:
     yaml = None
 
 
-DATA_DIR = Path(__file__).resolve().parent.parent / "data"
-MASTER_PROMPT_PATH = DATA_DIR / "master_prompt.md"
-SKILLS_DIR = DATA_DIR / "skills"
-PROMPTS_DIR = DATA_DIR / "prompts"
+def _data_dir() -> Path:
+    return get_data_dir()
+
+
+def _master_prompt_path() -> Path:
+    return _data_dir() / "master_prompt.md"
+
+
+def _skills_dir() -> Path:
+    return _data_dir() / "skills"
+
+
+def _prompts_dir() -> Path:
+    return _data_dir() / "prompts"
 MAX_SKILL_PROMPT_CHARS = 6000
 MAX_RELEVANT_SKILL_MATCHES = 3
 MAX_SKILL_CATALOG_ITEMS = 8
@@ -45,7 +56,8 @@ _DEFAULT_CONCEPT_ALIASES: dict[str, tuple[str, ...]] = {
     "股票": ("stock", "market"),
     "行情": ("market",),
 }
-_CONCEPT_ALIASES_PATH = DATA_DIR / "concept_aliases.yaml"
+def _concept_aliases_path() -> Path:
+    return _data_dir() / "concept_aliases.yaml"
 
 
 def _looks_like_html_document(content: str) -> bool:
@@ -62,10 +74,11 @@ def _is_prompt_eligible_skill(skill: SkillDocument) -> bool:
 def _load_concept_aliases() -> dict[str, tuple[str, ...]]:
 
     merged = dict(_DEFAULT_CONCEPT_ALIASES)
-    if yaml is None or not _CONCEPT_ALIASES_PATH.exists():
+    aliases_path = _concept_aliases_path()
+    if yaml is None or not aliases_path.exists():
         return merged
     try:
-        raw = yaml.safe_load(_CONCEPT_ALIASES_PATH.read_text(encoding="utf-8"))
+        raw = yaml.safe_load(aliases_path.read_text(encoding="utf-8"))
         if not isinstance(raw, dict):
             return merged
         for key, values in raw.items():
@@ -170,9 +183,9 @@ def _parse_frontmatter(content: str) -> dict[str, Any]:
 
 def ensure_skill_store() -> None:
 
-    DATA_DIR.mkdir(parents=True, exist_ok=True)
-    SKILLS_DIR.mkdir(parents=True, exist_ok=True)
-    PROMPTS_DIR.mkdir(parents=True, exist_ok=True)
+    _data_dir().mkdir(parents=True, exist_ok=True)
+    _skills_dir().mkdir(parents=True, exist_ok=True)
+    _prompts_dir().mkdir(parents=True, exist_ok=True)
 
 
 def _title_from_content(default_title: str, content: str) -> str:
@@ -304,10 +317,11 @@ def _prompt_document_from_path(path: Path, content: str) -> PromptDocument:
 def _prompt_store_signature() -> tuple[str, ...]:
 
     ensure_skill_store()
+    data_dir = _data_dir()
     paths = [
-        MASTER_PROMPT_PATH,
-        *sorted(SKILLS_DIR.glob("*.md")),
-        *sorted(PROMPTS_DIR.glob("*.md")),
+        _master_prompt_path(),
+        *sorted(_skills_dir().glob("*.md")),
+        *sorted(_prompts_dir().glob("*.md")),
     ]
     signature: list[str] = []
     for path in paths:
@@ -315,7 +329,7 @@ def _prompt_store_signature() -> tuple[str, ...]:
             continue
         stat = path.stat()
         signature.append(
-            f"{path.relative_to(DATA_DIR).as_posix()}:{stat.st_mtime_ns}:{stat.st_size}"
+            f"{path.relative_to(data_dir).as_posix()}:{stat.st_mtime_ns}:{stat.st_size}"
         )
     return tuple(signature)
 
@@ -325,18 +339,19 @@ def _read_prompt_store_from_disk() -> PromptStoreSnapshot:
     ensure_skill_store()
 
     master_prompt = ""
-    if MASTER_PROMPT_PATH.exists():
-        master_prompt = MASTER_PROMPT_PATH.read_text(encoding="utf-8").strip()
+    mpp = _master_prompt_path()
+    if mpp.exists():
+        master_prompt = mpp.read_text(encoding="utf-8").strip()
 
     skills: list[SkillDocument] = []
-    for path in sorted(SKILLS_DIR.glob("*.md")):
+    for path in sorted(_skills_dir().glob("*.md")):
         content = path.read_text(encoding="utf-8").strip()
         if not content:
             continue
         skills.append(_skill_document_from_path(path, content))
 
     runtime_prompt_docs: list[PromptDocument] = []
-    for path in sorted(PROMPTS_DIR.glob("*.md")):
+    for path in sorted(_prompts_dir().glob("*.md")):
         content = path.read_text(encoding="utf-8").strip()
         if not content:
             continue
@@ -377,7 +392,7 @@ def _ensure_prompt_store_fresh() -> PromptStoreSnapshot:
     ):
         return snapshot
 
-    if not (MASTER_PROMPT_PATH.exists() or SKILLS_DIR.exists() or PROMPTS_DIR.exists()):
+    if not (_master_prompt_path().exists() or _skills_dir().exists() or _prompts_dir().exists()):
         return snapshot
 
     snapshot = _read_prompt_store_from_disk()
@@ -388,8 +403,9 @@ def _ensure_prompt_store_fresh() -> PromptStoreSnapshot:
 def _write_master_prompt(markdown: str) -> Path:
 
     ensure_skill_store()
-    write_utf8_file(str(MASTER_PROMPT_PATH), markdown.strip() + "\n")
-    return MASTER_PROMPT_PATH
+    mpp = _master_prompt_path()
+    write_utf8_file(str(mpp), markdown.strip() + "\n")
+    return mpp
 
 
 def _write_skill(name: str, markdown: str, *, overwrite: bool) -> Path:
@@ -400,7 +416,7 @@ def _write_skill(name: str, markdown: str, *, overwrite: bool) -> Path:
     if not markdown.strip():
         raise ValueError("Skill markdown is empty")
 
-    skill_path = SKILLS_DIR / f"{_slugify(name)}.md"
+    skill_path = _skills_dir() / f"{_slugify(name)}.md"
     if skill_path.exists() and not overwrite:
         raise FileExistsError(f"Skill already exists: {skill_path.name}")
 
@@ -429,7 +445,7 @@ async def async_save_master_prompt(hass: HomeAssistant, markdown: str) -> Path:
 
 def _read_skill_raw(name: str) -> str | None:
 
-    skill_path = SKILLS_DIR / f"{_slugify(name)}.md"
+    skill_path = _skills_dir() / f"{_slugify(name)}.md"
     if not skill_path.exists():
         return None
     return skill_path.read_text(encoding="utf-8")
@@ -439,7 +455,7 @@ def _delete_skill_sync(name: str) -> tuple[Path, str | None]:
 
     if not name.strip():
         raise ValueError("Skill name is required")
-    skill_path = SKILLS_DIR / f"{_slugify(name)}.md"
+    skill_path = _skills_dir() / f"{_slugify(name)}.md"
     if not skill_path.exists():
         raise FileNotFoundError(f"Skill not found: {skill_path.name}")
     previous = skill_path.read_text(encoding="utf-8")

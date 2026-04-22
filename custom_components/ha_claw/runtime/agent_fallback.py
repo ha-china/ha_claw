@@ -135,6 +135,7 @@ async def _finalize_synthesized_success(
     )
     apply_agent_response_format(
         result,
+        hass=hass,
         agent_name=agent_name,
         agent_id=agent_id,
         conversation_mode=conversation_mode,
@@ -525,6 +526,10 @@ async def run_agent_fallback_chain(
             LOGGER.debug("Skipping cooled-down agents for this turn: %s", skipped_agents)
         ordered_agents = active_agents
 
+    _TRANSIENT_ERROR_KEYWORDS = ("disconnected", "connection", "timeout", "reset by peer", "broken pipe", "eof occurred")
+    _MAX_TRANSIENT_RETRIES = 1
+    transient_retry_counts: dict[str, int] = {}
+
     agent_queue = list(ordered_agents)
     while agent_queue:
         current_agent_id = agent_queue.pop(0)
@@ -581,7 +586,11 @@ async def run_agent_fallback_chain(
                 previous_tool_results.extend(_snapshot_tool_results(all_tools))
                 synthesized_response = extract_successful_tool_response(all_tools)
                 agent_response_text = get_response_text(result).strip()
-                if agent_response_text:
+                _is_error_text = agent_response_text and any(
+                    kw in agent_response_text.lower()
+                    for kw in ("error getting response", "server disconnected", "timed out", "connection reset")
+                )
+                if agent_response_text and not _is_error_text:
                     agent_name = get_agent_name(current_agent_id)
                     result = await _finalize_synthesized_success(
                         hass,
@@ -647,6 +656,15 @@ async def run_agent_fallback_chain(
                         stage="tool_failure",
                     )
                     agent_errors.append(f"{current_agent_id}: {failure_reason[:160]}")
+                    if any(kw in failure_reason.lower() for kw in _TRANSIENT_ERROR_KEYWORDS):
+                        retries = transient_retry_counts.get(current_agent_id, 0)
+                        if retries < _MAX_TRANSIENT_RETRIES:
+                            transient_retry_counts[current_agent_id] = retries + 1
+                            agent_queue.append(current_agent_id)
+                            LOGGER.info(
+                                "Agent %s tool failure looks transient; re-queuing retry %d/%d",
+                                current_agent_id, retries + 1, _MAX_TRANSIENT_RETRIES,
+                            )
                 else:
                     synthesized_response = extract_successful_tool_response(all_tools)
                     if synthesized_response:
@@ -689,6 +707,15 @@ async def run_agent_fallback_chain(
                         stage="response_error",
                     )
                     agent_errors.append(f"{current_agent_id}: {failure_reason[:160]}")
+                    if any(kw in failure_reason.lower() for kw in _TRANSIENT_ERROR_KEYWORDS):
+                        retries = transient_retry_counts.get(current_agent_id, 0)
+                        if retries < _MAX_TRANSIENT_RETRIES:
+                            transient_retry_counts[current_agent_id] = retries + 1
+                            agent_queue.append(current_agent_id)
+                            LOGGER.info(
+                                "Agent %s response error looks transient; re-queuing retry %d/%d",
+                                current_agent_id, retries + 1, _MAX_TRANSIENT_RETRIES,
+                            )
                 continue
 
             if result.response.speech and "plain" in result.response.speech:
@@ -779,6 +806,7 @@ async def run_agent_fallback_chain(
                 set_current_thought(hass, None)
                 apply_agent_response_format(
                     result,
+                    hass=hass,
                     agent_name=agent_name,
                     agent_id=current_agent_id,
                     conversation_mode=conversation_mode,
@@ -846,6 +874,16 @@ async def run_agent_fallback_chain(
                 conversation_id=conversation_id,
                 stage="exception",
             )
+            err_lower = err_msg.lower()
+            if any(kw in err_lower for kw in _TRANSIENT_ERROR_KEYWORDS):
+                retries = transient_retry_counts.get(current_agent_id, 0)
+                if retries < _MAX_TRANSIENT_RETRIES:
+                    transient_retry_counts[current_agent_id] = retries + 1
+                    agent_queue.append(current_agent_id)
+                    LOGGER.info(
+                        "Agent %s hit transient error; re-queuing for retry %d/%d",
+                        current_agent_id, retries + 1, _MAX_TRANSIENT_RETRIES,
+                    )
             continue
 
     error_detail = "; ".join(agent_errors) if agent_errors else "unknown error"

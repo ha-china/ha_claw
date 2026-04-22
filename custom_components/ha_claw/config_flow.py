@@ -22,6 +22,7 @@ from homeassistant.helpers.selector import (
 from .const import (
     CONF_CONVERSATION_MODE,
     CONF_ENABLE_AI_SUMMARY,
+    CONF_ENABLE_STREAMING_EFFECT,
     CONF_ENABLE_WEB_SEARCH,
     CONF_ERROR_RESPONSES,
     CONF_FALLBACK_AGENT,
@@ -158,7 +159,7 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
             current_options = dict(self._config_entry.options)
 
             agent_keys = [CONF_PRIMARY_AGENT, CONF_FALLBACK_AGENT, CONF_SECONDARY_FALLBACK_AGENT]
-            conversation_keys = [CONF_CONVERSATION_MODE, CONF_ENABLE_WEB_SEARCH]
+            conversation_keys = [CONF_CONVERSATION_MODE, CONF_ENABLE_WEB_SEARCH, CONF_ENABLE_STREAMING_EFFECT]
 
             if not allow_agent_changes:
                 for key in agent_keys:
@@ -170,7 +171,7 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
                     if key in current_options:
                         self._user_input[key] = current_options[key]
 
-            bool_keys = [CONF_ENABLE_WEB_SEARCH]
+            bool_keys = [CONF_ENABLE_WEB_SEARCH, CONF_ENABLE_STREAMING_EFFECT]
 
             for key, value in user_input.items():
                 if key not in exclude_keys:
@@ -351,6 +352,7 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
         if not current_mode:
             current_mode = DEFAULT_CONVERSATION_MODE
         current_enable_web_search = self._config_entry.options.get(CONF_ENABLE_WEB_SEARCH, True)
+        current_enable_streaming = self._config_entry.options.get(CONF_ENABLE_STREAMING_EFFECT, True)
 
         schema = vol.Schema({
             vol.Required(CONF_CONVERSATION_MODE, description={"suggested_value": current_mode}): SelectSelector(
@@ -365,6 +367,7 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
                 )
             ),
             vol.Optional(CONF_ENABLE_WEB_SEARCH, default=current_enable_web_search): BooleanSelector(),
+            vol.Optional(CONF_ENABLE_STREAMING_EFFECT, default=current_enable_streaming): BooleanSelector(),
             vol.Optional("back", default=False): bool,
         })
 

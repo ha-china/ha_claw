@@ -101,12 +101,17 @@ async def _delta_stream(
                 }
 
 
+_STREAM_CHUNK_SIZE = 4
+
+
 async def _final_content_stream(
     response_text: str,
 ) -> AsyncGenerator[dict[str, Any]]:
 
     yield {"role": "assistant"}
-    yield {"content": response_text}
+    for i in range(0, len(response_text), _STREAM_CHUNK_SIZE):
+        yield {"content": response_text[i : i + _STREAM_CHUNK_SIZE]}
+        await asyncio.sleep(0)
 
 
 async def async_bridge_native_chatlog_turn(
@@ -150,12 +155,11 @@ async def async_bridge_native_chatlog_turn(
         pass
 
     if response_text:
-        chat_log.async_add_assistant_content_without_tools(
-            AssistantContent(
-                agent_id=agent_id,
-                content=response_text,
-            )
-        )
+        async for _ in chat_log.async_add_delta_content_stream(
+            agent_id,
+            _final_content_stream(response_text),
+        ):
+            pass
     return True
 
 
@@ -196,6 +200,21 @@ async def emit_live_thinking_delta(hass, *, agent_id: str, thought: str) -> bool
         agent_id,
         [{"role": "assistant"}, {"thinking_content": thought}],
     )
+
+
+async def emit_live_content_delta(*, agent_id: str, text: str) -> bool:
+
+    if not text:
+        return False
+    chat_log = current_chat_log.get()
+    if chat_log is None:
+        return False
+    if chat_log.delta_listener:
+        chat_log.delta_listener(chat_log, {"role": "assistant"})
+        for char in text:
+            chat_log.delta_listener(chat_log, {"content": char})
+            await asyncio.sleep(0.02)
+    return True
 
 
 async def emit_live_step_delta(
@@ -239,17 +258,10 @@ def append_step_message(
     if chat_log is None:
         return False
 
-    step_event = {
-        "index": step_index,
-        "phase": phase,
-        "title": content.splitlines()[0] if content else "",
-        "detail": "\n".join(content.splitlines()[1:]).strip(),
-    }
     if chat_log.delta_listener:
-        chat_log.delta_listener(
-            chat_log,
-            {"role": "assistant", "km_step_event": step_event},
-        )
+        title = content.splitlines()[0] if content else ""
+        chat_log.delta_listener(chat_log, {"role": "assistant"})
+        chat_log.delta_listener(chat_log, {"content": f"⚡️ {title}"})
 
     chat_log.async_add_assistant_content_without_tools(
         AssistantContent(

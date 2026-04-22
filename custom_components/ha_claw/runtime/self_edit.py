@@ -17,11 +17,17 @@ from homeassistant.core import HomeAssistant
 from homeassistant.util.file import write_utf8_file
 
 
+from .data_path import get_data_dir
+
 LOGGER = logging.getLogger(__name__)
 
-DATA_DIR = Path(__file__).resolve().parent.parent / "data"
-CHANGELOG_PATH = DATA_DIR / "changelog.jsonl"
-PENDING_DIR = DATA_DIR / "pending"
+
+def _changelog_path() -> Path:
+    return get_data_dir() / "changelog.jsonl"
+
+
+def _pending_dir() -> Path:
+    return get_data_dir() / "pending"
 
 VALID_TARGET_TYPES = frozenset({"skill", "guide"})
 VALID_ACTIONS = frozenset({"create", "update", "delete"})
@@ -78,8 +84,8 @@ class ChangelogEntry:
 
 
 def _ensure_dirs() -> None:
-    DATA_DIR.mkdir(parents=True, exist_ok=True)
-    PENDING_DIR.mkdir(parents=True, exist_ok=True)
+    get_data_dir().mkdir(parents=True, exist_ok=True)
+    _pending_dir().mkdir(parents=True, exist_ok=True)
 
 
 def _slugify(value: str) -> str:
@@ -143,7 +149,7 @@ def _parse_frontmatter(markdown: str) -> tuple[dict[str, Any], str]:
 def _append_changelog_sync(entry: ChangelogEntry) -> None:
     _ensure_dirs()
     line = json.dumps(entry.to_dict(), ensure_ascii=False)
-    with CHANGELOG_PATH.open("a", encoding="utf-8") as handle:
+    with _changelog_path().open("a", encoding="utf-8") as handle:
         handle.write(line + "\n")
 
 
@@ -191,10 +197,11 @@ async def async_record_change(
 
 
 def _read_changelog_sync(limit: int, target_type: str | None) -> list[dict[str, Any]]:
-    if not CHANGELOG_PATH.exists():
+    cl = _changelog_path()
+    if not cl.exists():
         return []
     records: list[dict[str, Any]] = []
-    with CHANGELOG_PATH.open("r", encoding="utf-8") as handle:
+    with cl.open("r", encoding="utf-8") as handle:
         for line in handle:
             line = line.strip()
             if not line:
@@ -224,7 +231,7 @@ async def async_read_changelog(
 
 
 def _proposal_path(slug: str) -> Path:
-    return PENDING_DIR / f"{slug}.md"
+    return _pending_dir() / f"{slug}.md"
 
 
 def _write_proposal_sync(
@@ -295,10 +302,11 @@ async def async_stage_proposal(
 
 
 def _list_proposals_sync() -> list[dict[str, Any]]:
-    if not PENDING_DIR.exists():
+    pd = _pending_dir()
+    if not pd.exists():
         return []
     proposals: list[dict[str, Any]] = []
-    for path in sorted(PENDING_DIR.glob("*.md")):
+    for path in sorted(pd.glob("*.md")):
         try:
             text = path.read_text(encoding="utf-8")
         except OSError:

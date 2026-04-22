@@ -12,10 +12,15 @@ from typing import Any
 from homeassistant.core import HomeAssistant
 from homeassistant.util.file import write_utf8_file
 
-from .workspace_store import WORKSPACE_DIR
+from .data_path import get_data_dir
 
-HEARTBEAT_PATH = WORKSPACE_DIR / "HEARTBEAT.md"
-HEARTBEAT_STATE_PATH = WORKSPACE_DIR / "memory" / "heartbeat-state.json"
+
+def _heartbeat_path() -> Path:
+    return get_data_dir() / "workspace" / "HEARTBEAT.md"
+
+
+def _heartbeat_state_path() -> Path:
+    return get_data_dir() / "workspace" / "memory" / "heartbeat-state.json"
 _HEADING_RE = re.compile(r"^##\s+(.+?)\s*$", flags=re.MULTILINE)
 _FIELD_RE = re.compile(r"^-\s+([a-z_]+):\s*(.*)$")
 _TRUE_VALUES = {"true", "yes", "1", "on"}
@@ -61,10 +66,11 @@ def _write_text(path: Path, content: str) -> Path:
 
 
 def _read_state() -> dict[str, Any]:
-    if not HEARTBEAT_STATE_PATH.exists():
+    hsp = _heartbeat_state_path()
+    if not hsp.exists():
         return {"tasks": {}}
     try:
-        data = json.loads(HEARTBEAT_STATE_PATH.read_text(encoding="utf-8"))
+        data = json.loads(hsp.read_text(encoding="utf-8"))
     except (json.JSONDecodeError, OSError):
         return {"tasks": {}}
     tasks = data.get("tasks")
@@ -72,12 +78,13 @@ def _read_state() -> dict[str, Any]:
 
 
 def _write_state(data: dict[str, Any]) -> Path:
-    HEARTBEAT_STATE_PATH.parent.mkdir(parents=True, exist_ok=True)
-    HEARTBEAT_STATE_PATH.write_text(
+    hsp = _heartbeat_state_path()
+    hsp.parent.mkdir(parents=True, exist_ok=True)
+    hsp.write_text(
         json.dumps(data, ensure_ascii=False, indent=2) + "\n",
         encoding="utf-8",
     )
-    return HEARTBEAT_STATE_PATH
+    return hsp
 
 
 def _bool_from_text(value: str, *, default: bool) -> bool:
@@ -233,7 +240,7 @@ def _build_task_payload(task: HeartbeatTask, task_state: dict[str, Any]) -> dict
 
 async def async_list_heartbeat_tasks(hass: HomeAssistant) -> list[dict[str, Any]]:
 
-    markdown = await hass.async_add_executor_job(_read_text, HEARTBEAT_PATH)
+    markdown = await hass.async_add_executor_job(_read_text, _heartbeat_path())
     state = await hass.async_add_executor_job(_read_state)
     tasks: list[dict[str, Any]] = []
     for task in parse_heartbeat_tasks(markdown):
@@ -255,7 +262,7 @@ async def async_upsert_heartbeat_task(
     delete_after_success: bool = False,
 ) -> Path:
 
-    markdown = await hass.async_add_executor_job(_read_text, HEARTBEAT_PATH)
+    markdown = await hass.async_add_executor_job(_read_text, _heartbeat_path())
     updated = upsert_heartbeat_task_markdown(
         markdown,
         slug=slug,
@@ -267,17 +274,17 @@ async def async_upsert_heartbeat_task(
         enabled=enabled,
         delete_after_success=delete_after_success,
     )
-    return await hass.async_add_executor_job(_write_text, HEARTBEAT_PATH, updated)
+    return await hass.async_add_executor_job(_write_text, _heartbeat_path(), updated)
 
 
 async def async_delete_heartbeat_task(hass: HomeAssistant, slug: str) -> Path:
 
-    markdown = await hass.async_add_executor_job(_read_text, HEARTBEAT_PATH)
+    markdown = await hass.async_add_executor_job(_read_text, _heartbeat_path())
     updated = delete_heartbeat_task_markdown(markdown, slug)
     state = await hass.async_add_executor_job(_read_state)
     state["tasks"].pop(_slugify(slug), None)
     await hass.async_add_executor_job(_write_state, state)
-    return await hass.async_add_executor_job(_write_text, HEARTBEAT_PATH, updated)
+    return await hass.async_add_executor_job(_write_text, _heartbeat_path(), updated)
 
 
 async def async_record_heartbeat_result(
@@ -291,7 +298,7 @@ async def async_record_heartbeat_result(
     normalized_slug = _slugify(slug)
     status_text = status.strip()
     note_text = note.strip()
-    markdown = await hass.async_add_executor_job(_read_text, HEARTBEAT_PATH)
+    markdown = await hass.async_add_executor_job(_read_text, _heartbeat_path())
     tasks = {task.slug: task for task in parse_heartbeat_tasks(markdown)}
     state = await hass.async_add_executor_job(_read_state)
     task_state = state.setdefault("tasks", {}).setdefault(normalized_slug, {})
@@ -308,7 +315,7 @@ async def async_record_heartbeat_result(
 
     state_path = await hass.async_add_executor_job(_write_state, state)
     task_deleted = False
-    heartbeat_path = HEARTBEAT_PATH
+    heartbeat_path = _heartbeat_path()
     task = tasks.get(normalized_slug)
     if task and task.delete_after_success and _is_completion_status(status_text):
         heartbeat_path = await async_delete_heartbeat_task(hass, normalized_slug)
@@ -431,7 +438,7 @@ def _next_due_seconds(schedule: str, last_checked: str, now: datetime) -> int | 
 
 
 def get_due_tasks() -> list[HeartbeatTask]:
-    markdown = _read_text(HEARTBEAT_PATH)
+    markdown = _read_text(_heartbeat_path())
     state = _read_state()
     now = datetime.now(UTC)
     due: list[HeartbeatTask] = []

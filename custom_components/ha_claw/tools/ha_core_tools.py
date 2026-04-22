@@ -513,16 +513,11 @@ class EntityQueryTool(llm.Tool):
 
 class ServiceCallTool(llm.Tool):
     name = "ServiceCall"
-    description = """Call a Home Assistant service to control devices, trigger automations, and more.
-Common examples:
-- homeassistant.restart: restart Home Assistant
-- homeassistant.reload_core_config: reload core configuration
-- light.turn_on/turn_off: control lights (data: {entity_id, brightness, color_temp})
-- switch.turn_on/turn_off: control switches (data: {entity_id})
-- climate.set_temperature: set temperature (data: {entity_id, temperature})
-- automation.trigger: trigger an automation (data: {entity_id})
-- script.turn_on: run a script (data: {entity_id})
-- notify.xxx: send a notification (data: {message, title})"""
+    description = """Call a registered Home Assistant service. Params: domain, service, data (dict).
+PREFER native intent tools (HassLightSet, HassTurnOn/Off, HassVacuumStart, HassClimateSetTemperature, HassMediaPause, etc.) for device control — they handle entity matching and error reporting better. Only use ServiceCall when no matching intent tool exists.
+Good for: calendar events, todo items, triggering automations/scripts, notifications, input helpers, timers, and any service not covered by intent tools.
+Do NOT use for: creating automations (use HAControl), installing integrations (use ConfigEntries), managing HACS (use HACS tool), editing YAML config (use ConfigFile), creating helpers (use HelperManager).
+Use ListServices to discover available services, ServiceHelp for parameter details."""
     parameters = vol.Schema(
         {
             vol.Required("domain"): str,
@@ -551,6 +546,14 @@ Common examples:
             except Exception:
                 data = {}
 
+        if not isinstance(data, dict):
+            data = {}
+        sanitized: dict[str, object] = {}
+        for k, v in data.items():
+            if isinstance(k, str):
+                sanitized[k] = v
+        data = sanitized
+
         service_data, target = _extract_service_target(data)
         requires_target = await _service_requires_explicit_target(hass, domain, service)
         has_target = _has_explicit_target(service_data, target)
@@ -566,7 +569,13 @@ Common examples:
 
         if "entity_id" in service_data or "entity_id" in target:
             entity_id = service_data.get("entity_id", target.get("entity_id"))
-            if not hass.states.get(entity_id):
+            if isinstance(entity_id, list):
+                entity_id = entity_id[0] if entity_id else None
+                if "entity_id" in service_data:
+                    service_data["entity_id"] = entity_id
+                else:
+                    target["entity_id"] = entity_id
+            if entity_id and not hass.states.get(str(entity_id)):
                 from ..smart_discovery import get_smart_discovery
                 discovery = get_smart_discovery(hass)
 

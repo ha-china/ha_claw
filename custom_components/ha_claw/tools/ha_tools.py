@@ -29,6 +29,41 @@ _LOGGER = logging.getLogger(__name__)
 _SHELL_MAX_OUTPUT = 64 * 1024
 _SHELL_DEFAULT_TIMEOUT = 30
 _SHELL_MAX_TIMEOUT = 600
+_HA_TOKEN_RE = re.compile(r"ha_token\s*[:：]\s*`?([A-Za-z0-9._\-]+)`?")
+
+
+def _read_ha_token_from_tools() -> str | None:
+    from ..runtime.workspace_store import get_workspace_doc
+    try:
+        doc = get_workspace_doc("TOOLS")
+        text = doc.get("markdown", "")
+        m = _HA_TOKEN_RE.search(text)
+        return m.group(1) if m else None
+    except Exception:
+        return None
+
+
+async def _rest_fallback(hass: HomeAssistant, endpoint: str, params: dict) -> dict | None:
+    token = _read_ha_token_from_tools()
+    if not token:
+        return None
+    from homeassistant.helpers.aiohttp_client import async_get_clientsession
+    session = async_get_clientsession(hass)
+    port = getattr(getattr(hass, "http", None), "server_port", None) or 8123
+    url = f"http://127.0.0.1:{port}{endpoint}"
+    headers = {"Authorization": f"Bearer {token}"}
+    try:
+        timeout_s = int(params.get("timeout", 15)) if isinstance(params, dict) else 15
+        resp = await session.get(url, headers=headers, timeout=aiohttp.ClientTimeout(total=timeout_s))
+        text = await resp.text()
+        if len(text) > _SHELL_MAX_OUTPUT:
+            text = text[:_SHELL_MAX_OUTPUT] + f"\n...[truncated]"
+        if resp.status >= 400:
+            return {"success": False, "error": f"REST {resp.status}: {text[:200]}"}
+        return {"success": True, "body": text, "status": resp.status, "via": "rest"}
+    except Exception as err:
+        _LOGGER.debug("REST fallback failed for %s: %s", endpoint, err)
+        return None
 
 
 async def _run_shell(hass: HomeAssistant, params: dict) -> JsonObjectType:
@@ -207,32 +242,127 @@ def _prepare_flow_result_json(
     *,
     include_entry_result: bool = False,
 ) -> dict[str, object]:
+    flow_type = result.get("type")
 
-    if result["type"] == data_entry_flow.FlowResultType.CREATE_ENTRY:
-        data = {
-            key: val for key, val in result.items() if key not in ("data", "context")
+    if flow_type == data_entry_flow.FlowResultType.CREATE_ENTRY:
+        data: dict[str, object] = {
+            "type": "create_entry",
+            "title": result.get("title", ""),
+            "domain": result.get("handler", ""),
+            "version": result.get("version"),
         }
         if include_entry_result and "result" in result:
             entry: config_entries.ConfigEntry = result["result"]
-            data["result"] = entry.as_json_fragment
+            data["entry_id"] = entry.entry_id
+            data["entry_title"] = entry.title
+            data["entry_domain"] = entry.domain
+            data["entry_state"] = str(entry.state)
+            data["entry_options"] = dict(entry.options) if entry.options else {}
+            data["entry_data_keys"] = list((entry.data or {}).keys())
+        data["next_action"] = "done — entry created successfully. To create another, call config_entries/flow/init again with the same handler."
         return data
 
-    data = dict(result)
-    if "data_schema" not in result:
-        return data
+    if flow_type == data_entry_flow.FlowResultType.ABORT:
+        return {
+            "type": "abort",
+            "reason": result.get("reason", "unknown"),
+            "description_placeholders": result.get("description_placeholders"),
+            "next_action": "aborted — no further action needed",
+        }
 
-    schema = result["data_schema"]
-    if schema is None:
-        data["data_schema"] = []
-        data["data_schema_fields"] = []
-    else:
-        data["data_schema"] = voluptuous_serialize.convert(
+    if flow_type == data_entry_flow.FlowResultType.EXTERNAL_STEP:
+        flow_id = result.get("flow_id")
+        return {
+            "type": "external",
+            "flow_id": flow_id,
+            "step_id": result.get("step_id"),
+            "url": result.get("url", ""),
+            "example_call": {"action": "config_entries/flow/configure", "params": {"flow_id": flow_id}},
+            "next_action": "Tell user to open the URL in browser to complete authentication. Then call ConfigEntries with example_call to check completion.",
+        }
+
+    if flow_type == data_entry_flow.FlowResultType.EXTERNAL_STEP_DONE:
+        flow_id = result.get("flow_id")
+        return {
+            "type": "external_done",
+            "flow_id": flow_id,
+            "example_call": {"action": "config_entries/flow/configure", "params": {"flow_id": flow_id}},
+            "next_action": "Call ConfigEntries with example_call to proceed.",
+        }
+
+    if flow_type == data_entry_flow.FlowResultType.SHOW_PROGRESS:
+        flow_id = result.get("flow_id")
+        return {
+            "type": "progress",
+            "flow_id": flow_id,
+            "step_id": result.get("step_id"),
+            "progress_action": result.get("progress_action"),
+            "example_call": {"action": "config_entries/flow/configure", "params": {"flow_id": flow_id}},
+            "next_action": "Wait a few seconds, then call ConfigEntries with example_call to check if progress is done.",
+        }
+
+    if flow_type == data_entry_flow.FlowResultType.SHOW_PROGRESS_DONE:
+        flow_id = result.get("flow_id")
+        return {
+            "type": "progress_done",
+            "flow_id": flow_id,
+            "example_call": {"action": "config_entries/flow/configure", "params": {"flow_id": flow_id}},
+            "next_action": "Call ConfigEntries with example_call to proceed to next step.",
+        }
+
+    if flow_type == data_entry_flow.FlowResultType.MENU:
+        flow_id = result.get("flow_id")
+        menu_options = result.get("menu_options", [])
+        return {
+            "type": "menu",
+            "flow_id": flow_id,
+            "step_id": result.get("step_id"),
+            "menu_options": menu_options,
+            "example_call": {
+                "action": "config_entries/flow/configure",
+                "params": {"flow_id": flow_id, "next_step_id": menu_options[0] if menu_options else ""},
+            },
+            "next_action": f"Call ConfigEntries with action='config_entries/flow/configure'. Set next_step_id to one of: {menu_options}",
+        }
+
+    flow_id = result.get("flow_id")
+    step_id = result.get("step_id")
+    schema = result.get("data_schema")
+    fields: list[dict[str, object]] = []
+    if schema is not None:
+        serialized = voluptuous_serialize.convert(
             schema, custom_serializer=cv.custom_serializer
         )
-        data["data_schema_fields"] = _extract_serialized_schema_fields(
-            data["data_schema"]
-        )
-    return data
+        fields = _extract_serialized_schema_fields(serialized)
+    example_params: dict[str, object] = {"flow_id": flow_id}
+    for f in fields:
+        name = f.get("name", "")
+        if not name:
+            continue
+        if f.get("default") is not None:
+            example_params[name] = f["default"]
+        elif f.get("options"):
+            example_params[name] = f["options"][0] if f["options"] else ""
+        elif f.get("selector") == "boolean":
+            example_params[name] = False
+        elif f.get("type") in ("integer", "positive_int"):
+            example_params[name] = f.get("min", 0)
+        elif f.get("type") == "float":
+            example_params[name] = f.get("min", 0.0)
+        else:
+            example_params[name] = ""
+    return {
+        "type": "form",
+        "flow_id": flow_id,
+        "step_id": step_id,
+        "fields": fields,
+        "errors": result.get("errors"),
+        "example_call": {
+            "action": "config_entries/flow/configure",
+            "params": example_params,
+        },
+        "next_action": f"Call ConfigEntries with action='config_entries/flow/configure' and params shown in example_call. Fill in the field values.",
+    }
 
 
 def _extract_serialized_schema_fields(
@@ -340,6 +470,21 @@ def _normalize_filter_list(value: object) -> list[str] | None:
     return None
 
 
+_PARAM_KEY_ALIASES: dict[str, str] = {
+    "flowid": "flow_id",
+    "entryid": "entry_id",
+    "userinput": "user_input",
+    "nextstepid": "next_step_id",
+    "subentrytype": "subentry_type",
+    "subentryid": "subentry_id",
+    "typefilter": "type_filter",
+    "todolistname": "todo_list_name",
+    "showadvancedoptions": "show_advanced_options",
+    "disabledby": "disabled_by",
+    "storagekey": "storage_key",
+}
+
+
 def _coerce_params(raw_params: object) -> dict[str, object]:
 
     if isinstance(raw_params, str):
@@ -347,8 +492,14 @@ def _coerce_params(raw_params: object) -> dict[str, object]:
             parsed = json.loads(raw_params)
         except Exception:
             return {}
-        return parsed if isinstance(parsed, dict) else {}
-    return dict(raw_params) if isinstance(raw_params, dict) else {}
+        raw = parsed if isinstance(parsed, dict) else {}
+    else:
+        raw = dict(raw_params) if isinstance(raw_params, dict) else {}
+    result: dict[str, object] = {}
+    for k, v in raw.items():
+        norm = k.replace("_", "").replace("-", "").lower()
+        result[_PARAM_KEY_ALIASES.get(norm, k)] = v
+    return result
 
 
 class HAControlTool(llm.Tool):
@@ -368,8 +519,9 @@ Available actions:
 - rename_entry: Rename a config entry (params: {domain: "integration_domain", name: "new_name"})
 - navigate: Navigate to a page (path: "/lovelace", "/config", "/developer-tools/service", etc.)
 - reload_themes/reload_resources/reload_scripts/reload_automations: Reload related HA resources
-- show_toast: Show a toast message (message)
-- show_dialog: Show a dialog (title, message)"""
+- get_system_log: Get recent HA system error/warning log entries from memory (params: {limit: 20})
+- get_error_log: Read the HA error log file tail (params: {lines: 50}). Works even if shell is unavailable.
+- get_diagnostics: Get diagnostic info for an integration (params: {domain}). Returns entry state, unavailable entities, related errors."""
     parameters = vol.Schema(
         {
             vol.Required("action"): str,
@@ -542,6 +694,72 @@ Available actions:
                 "error": "The frontend bridge has been removed; HAControl no longer supports frontend popup actions",
             }
 
+        if action == "get_system_log":
+            handler = hass.data.get("system_log")
+            if handler:
+                limit = int(params.get("limit", 20))
+                entries = handler.records.to_list()[:limit]
+                return {"success": True, "entries": entries, "count": len(entries)}
+            result = await _rest_fallback(hass, "/api/error/all", params)
+            if result:
+                return result
+            return {"success": False, "error": "system_log not loaded. Please add ha_token to TOOLS.md for REST fallback."}
+
+        if action == "get_error_log":
+            tail = int(params.get("lines", 50))
+            from homeassistant.const import KEY_DATA_LOGGING as _LOG_KEY
+            log_path = hass.data.get(_LOG_KEY)
+            if log_path:
+                try:
+                    import pathlib
+                    _p = pathlib.Path(log_path)
+                    log_text = await hass.async_add_executor_job(
+                        lambda: _p.read_text(encoding="utf-8", errors="replace")
+                    )
+                    all_lines = log_text.splitlines(keepends=True)
+                    lines = all_lines[-tail:]
+                    return {"success": True, "path": str(log_path), "lines": "".join(lines), "total_lines": len(all_lines)}
+                except Exception:
+                    pass
+            result = await _rest_fallback(hass, "/api/error_log", params)
+            if result:
+                body = result.get("body", "")
+                all_lines = body.splitlines(keepends=True)
+                return {"success": True, "lines": "".join(all_lines[-tail:]), "total_lines": len(all_lines), "via": "rest"}
+            return {"success": False, "error": "Cannot read error log. Please add ha_token to TOOLS.md for REST fallback."}
+
+        if action == "get_diagnostics":
+            domain = str(params.get("domain", "")).strip()
+            if not domain:
+                return {"success": False, "error": "Missing required parameter: domain"}
+            info: dict = {"domain": domain}
+            entries = hass.config_entries.async_entries(domain)
+            if entries:
+                entry = entries[0]
+                info["entry_id"] = entry.entry_id
+                info["state"] = entry.state.value if hasattr(entry.state, "value") else str(entry.state)
+                info["version"] = entry.version
+            try:
+                from homeassistant.loader import async_get_integration as _get_int
+                integration = await _get_int(hass, domain)
+                info["version_str"] = str(getattr(integration, "version", "unknown"))
+            except Exception:
+                pass
+            from homeassistant.helpers import entity_registry as er
+            registry = er.async_get(hass)
+            unavailable = [
+                e.entity_id for e in registry.entities.values()
+                if e.platform == domain and hass.states.get(e.entity_id) and hass.states.get(e.entity_id).state == "unavailable"
+            ]
+            info["unavailable_entities"] = unavailable[:20]
+            handler = hass.data.get("system_log")
+            if handler:
+                info["related_errors"] = [
+                    e for e in handler.records.to_list()
+                    if domain in str(e.get("name", "")) or domain in str(e.get("message", ""))
+                ][:10]
+            return {"success": True, "diagnostics": info}
+
         return {"success": False, "error": f"Unknown action: {action}"}
 
 
@@ -549,42 +767,43 @@ class ConfigEntriesTool(llm.Tool):
     name = "ConfigEntries"
     description = """Home Assistant integration and config-entry management tool.
 
-This tool mirrors the Home Assistant config-entry frontend/backend workflow.
+WORKFLOWS (follow these exact steps, do NOT explore randomly):
 
-Supported actions:
-- integration/descriptions
-- config_entries/get
-- config_entries/get_single
-- config_entries/get_supported_subentry_types
-- config_entries/update
-- config_entries/disable
-- config_entries/delete
-- config_entries/reload
-- config_entries/flow_handlers
-- config_entries/flow/progress
-- config_entries/flow/init
-- config_entries/flow/get
-- config_entries/flow/configure
-- config_entries/flow/abort
-- config_entries/ignore_flow
-- config_entries/options/init
-- config_entries/options/get
-- config_entries/options/configure
-- config_entries/options/abort
-- config_entries/subentries/list
-- config_entries/subentries/update
-- config_entries/subentries/delete
-- config_entries/subentries/flow/init
-- config_entries/subentries/flow/get
-- config_entries/subentries/flow/configure
-- config_entries/subentries/flow/abort
+To INSTALL a new integration:
+  1. config_entries/flow/init — params: {handler: "domain_name"} → returns flow_id + data_schema_fields
+  2. If step has a form: config_entries/flow/configure — params: {flow_id: "...", field1: value1, field2: value2} → done or next step
+  That's it. 2 calls max. Do NOT call list/get/flow_handlers/descriptions/help first.
+  Put form field values directly in params alongside flow_id (no user_input wrapper needed).
 
-Use the flow actions to add integrations or continue setup forms.
-Use the options actions to change settings for an existing config entry.
-Use the subentry flow actions when an installed integration exposes add/configure actions such as "添加对话助手"."""
+To CHECK existing entries: config_entries/get — params: {domain: "xxx"} (optional)
+To CHANGE options: config_entries/options/init → config_entries/options/configure
+To DELETE: config_entries/delete — params: {entry_id: "..."}
+To RELOAD: config_entries/reload — params: {entry_id: "..."}
+To RECONFIGURE: config_entries/flow/init — params: {handler: "domain", entry_id: "..."}
+To manage SUBENTRIES: config_entries/subentries/flow/init → configure → done
+
+When response contains next_action, follow that instruction exactly."""
+
+    _VALID_ACTIONS = [
+        "integration/descriptions",
+        "config_entries/get", "config_entries/get_single",
+        "config_entries/get_supported_subentry_types",
+        "config_entries/update", "config_entries/disable",
+        "config_entries/delete", "config_entries/reload",
+        "config_entries/flow_handlers", "config_entries/flow/progress",
+        "config_entries/flow/init", "config_entries/flow/get",
+        "config_entries/flow/configure", "config_entries/flow/abort",
+        "config_entries/ignore_flow",
+        "config_entries/options/init", "config_entries/options/get",
+        "config_entries/options/configure", "config_entries/options/abort",
+        "config_entries/subentries/list", "config_entries/subentries/update",
+        "config_entries/subentries/delete",
+        "config_entries/subentries/flow/init", "config_entries/subentries/flow/get",
+        "config_entries/subentries/flow/configure", "config_entries/subentries/flow/abort",
+    ]
     parameters = vol.Schema(
         {
-            vol.Required("action"): str,
+            vol.Required("action"): vol.In(_VALID_ACTIONS),
             vol.Optional("params", default={}): vol.Any(dict, str),
         }
     )
@@ -594,6 +813,12 @@ Use the subentry flow actions when an installed integration exposes add/configur
     ) -> JsonObjectType:
         del llm_context
         action = str(tool_input.tool_args.get("action", "") or "").strip()
+        if action not in self._VALID_ACTIONS:
+            norm = action.replace("_", "").replace("-", "").replace(" ", "").lower()
+            for valid in self._VALID_ACTIONS:
+                if valid.replace("_", "").replace("-", "").replace(" ", "").lower() == norm:
+                    action = valid
+                    break
         params = _coerce_params(tool_input.tool_args.get("params", {}))
 
         try:
@@ -608,16 +833,26 @@ Use the subentry flow actions when an installed integration exposes add/configur
             if action == "config_entries/get":
                 type_filter = _normalize_filter_list(params.get("type_filter"))
                 domain = str(params.get("domain", "") or "").strip() or None
-                fragments = await _matching_config_entries_json_fragments(
-                    hass,
-                    type_filter=type_filter,
-                    domain=domain,
-                )
+                if domain:
+                    entries = hass.config_entries.async_entries(domain)
+                else:
+                    entries = hass.config_entries.async_entries()
+                entry_list = [
+                    {
+                        "entry_id": e.entry_id,
+                        "domain": e.domain,
+                        "title": e.title,
+                        "state": str(e.state),
+                        "disabled_by": str(e.disabled_by) if e.disabled_by else None,
+                    }
+                    for e in entries
+                ]
                 return {
                     "success": True,
-                    "message": f"Found {len(fragments)} config entries",
-                    "config_entries": fragments,
-                    "count": len(fragments),
+                    "message": f"Found {len(entry_list)} config entries",
+                    "entries": entry_list,
+                    "count": len(entry_list),
+                    "hint": "Use entry_id with config_entries/delete, config_entries/reload, config_entries/options/init, etc.",
                 }
 
             if action == "config_entries/get_single":
@@ -719,14 +954,18 @@ Use the subentry flow actions when an installed integration exposes add/configur
                 entry_id = str(params.get("entry_id", "") or "").strip()
                 if not entry_id:
                     return {"success": False, "error": "Missing required parameter: entry_id"}
+                entry = hass.config_entries.async_get_entry(entry_id)
+                entry_title = entry.title if entry else entry_id
+                entry_domain = entry.domain if entry else "unknown"
                 try:
                     result = await hass.config_entries.async_remove(entry_id)
                 except config_entries.UnknownEntry:
                     return {"success": False, "error": "Invalid entry specified"}
                 return {
                     "success": True,
-                    "message": f"Deleted config entry {entry_id}",
-                    **result,
+                    "message": f"Deleted integration entry: {entry_title} ({entry_domain})",
+                    "entry_id": entry_id,
+                    "require_restart": result.get("require_restart", False),
                 }
 
             if action == "config_entries/reload":
@@ -774,6 +1013,7 @@ Use the subentry flow actions when an installed integration exposes add/configur
                 handler = params.get("handler")
                 if handler in (None, ""):
                     return {"success": False, "error": "Missing required parameter: handler"}
+                handler = str(handler).strip()
                 context: dict[str, object] = {
                     "show_advanced_options": bool(
                         params.get("show_advanced_options", False)
@@ -786,18 +1026,58 @@ Use the subentry flow actions when an installed integration exposes add/configur
                     context["source"] = config_entries.SOURCE_USER
                 try:
                     result = await hass.config_entries.flow.async_init(
-                        str(handler), context=context
+                        handler, context=context
                     )
                 except data_entry_flow.UnknownHandler:
-                    return {"success": False, "error": "Invalid handler specified"}
+                    all_handlers = sorted(await async_get_config_flows(hass))
+                    h_norm = handler.replace("_", "").replace("-", "").replace(" ", "").lower()
+                    fuzzy_match = next(
+                        (h for h in all_handlers if h.replace("_", "").replace("-", "").lower() == h_norm),
+                        None,
+                    )
+                    if fuzzy_match:
+                        try:
+                            result = await hass.config_entries.flow.async_init(
+                                fuzzy_match, context=context
+                            )
+                        except (data_entry_flow.UnknownHandler, data_entry_flow.UnknownStep) as err:
+                            return {"success": False, "error": str(err)}
+                        prepared = _prepare_flow_result_json(result, include_entry_result=True)
+                        init_msg = f"Config flow started for {fuzzy_match} (corrected from '{handler}')"
+                        if result.get("type") == data_entry_flow.FlowResultType.CREATE_ENTRY:
+                            init_msg = f"Integration {fuzzy_match} installed directly (no form needed)"
+                        resp = {
+                            "success": True,
+                            "message": init_msg,
+                            **prepared,
+                        }
+                        if result.get("type") == data_entry_flow.FlowResultType.FORM:
+                            resp["flow_id"] = result.get("flow_id")
+                        return resp
+                    suggestions = [
+                        h for h in all_handlers
+                        if h_norm in h.replace("_", "").replace("-", "").lower()
+                        or h.replace("_", "").replace("-", "").lower() in h_norm
+                    ][:5]
+                    return {
+                        "success": False,
+                        "error": f"Unknown handler: '{handler}'.",
+                        "suggestions": suggestions if suggestions else None,
+                    }
                 except data_entry_flow.UnknownStep as err:
                     return {"success": False, "error": str(err)}
                 prepared = _prepare_flow_result_json(result, include_entry_result=True)
-                return {
+                init_msg = f"Config flow started for {handler} — fill in fields and call configure"
+                if result.get("type") == data_entry_flow.FlowResultType.CREATE_ENTRY:
+                    init_msg = f"Integration {handler} installed directly (no form needed)"
+                resp = {
                     "success": True,
-                    "message": f"Initialized config flow for {handler}",
+                    "message": init_msg,
                     **prepared,
                 }
+                if result.get("type") == data_entry_flow.FlowResultType.FORM:
+                    resp["flow_id"] = result.get("flow_id")
+                return resp
 
             if action in {"config_entries/flow/get", "config_entries/flow/configure"}:
                 flow_id = str(params.get("flow_id", "") or "").strip()
@@ -807,7 +1087,8 @@ Use the subentry flow actions when an installed integration exposes add/configur
                 if action == "config_entries/flow/get":
                     user_input = None
                 elif user_input is None:
-                    user_input = {}
+                    remaining = {k: v for k, v in params.items() if k not in ("flow_id", "user_input")}
+                    user_input = remaining if remaining else {}
                 if isinstance(user_input, str):
                     try:
                         user_input = json.loads(user_input)
@@ -824,15 +1105,32 @@ Use the subentry flow actions when an installed integration exposes add/configur
                 except data_entry_flow.InvalidData as err:
                     return {
                         "success": False,
-                        "error": "Invalid data",
-                        "errors": err.schema_errors,
+                        "error": "Invalid data provided",
+                        "schema_errors": err.schema_errors,
+                        "submitted_input": user_input,
                     }
                 prepared = _prepare_flow_result_json(result, include_entry_result=True)
-                return {
+                flow_errors = result.get("errors")
+                if flow_errors:
+                    prepared["form_errors"] = flow_errors
+                    prepared["submitted_input"] = user_input
+                result_type = result.get("type")
+                if result_type == data_entry_flow.FlowResultType.CREATE_ENTRY:
+                    msg = f"Integration entry created: {result.get('title', '')} ({result.get('handler', '')})"
+                elif result_type == data_entry_flow.FlowResultType.FORM:
+                    msg = f"Form returned — fill in required fields and call configure again"
+                elif result_type == data_entry_flow.FlowResultType.ABORT:
+                    msg = f"Flow aborted: {result.get('reason', 'unknown')}"
+                else:
+                    msg = f"Flow step: {result_type}"
+                resp = {
                     "success": True,
-                    "message": f"Processed config flow {flow_id}",
+                    "message": msg,
                     **prepared,
                 }
+                if result_type == data_entry_flow.FlowResultType.FORM:
+                    resp["flow_id"] = result.get("flow_id")
+                return resp
 
             if action == "config_entries/flow/abort":
                 flow_id = str(params.get("flow_id", "") or "").strip()
@@ -893,11 +1191,14 @@ Use the subentry flow actions when an installed integration exposes add/configur
                 except data_entry_flow.UnknownStep as err:
                     return {"success": False, "error": str(err)}
                 prepared = _prepare_flow_result_json(result)
-                return {
+                resp = {
                     "success": True,
-                    "message": f"Initialized options flow for {entry_id}",
+                    "message": f"Options flow started for {entry_id} — fill in fields and call options/configure",
                     **prepared,
                 }
+                if result.get("type") == data_entry_flow.FlowResultType.FORM:
+                    resp["flow_id"] = result.get("flow_id")
+                return resp
 
             if action in {
                 "config_entries/options/get",
@@ -910,7 +1211,8 @@ Use the subentry flow actions when an installed integration exposes add/configur
                 if action == "config_entries/options/get":
                     user_input = None
                 elif user_input is None:
-                    user_input = {}
+                    remaining = {k: v for k, v in params.items() if k not in ("flow_id", "user_input")}
+                    user_input = remaining if remaining else {}
                 if isinstance(user_input, str):
                     try:
                         user_input = json.loads(user_input)
@@ -927,15 +1229,32 @@ Use the subentry flow actions when an installed integration exposes add/configur
                 except data_entry_flow.InvalidData as err:
                     return {
                         "success": False,
-                        "error": "Invalid data",
-                        "errors": err.schema_errors,
+                        "error": "Invalid data provided for options",
+                        "schema_errors": err.schema_errors,
+                        "submitted_input": user_input,
                     }
                 prepared = _prepare_flow_result_json(result)
-                return {
+                flow_errors = result.get("errors")
+                if flow_errors:
+                    prepared["form_errors"] = flow_errors
+                    prepared["submitted_input"] = user_input
+                result_type = result.get("type")
+                if result_type == data_entry_flow.FlowResultType.CREATE_ENTRY:
+                    opt_msg = f"Options saved for {flow_id}"
+                elif result_type == data_entry_flow.FlowResultType.FORM:
+                    opt_msg = "Options form returned — fill in fields and call options/configure again"
+                elif result_type == data_entry_flow.FlowResultType.ABORT:
+                    opt_msg = f"Options flow aborted: {result.get('reason', 'unknown')}"
+                else:
+                    opt_msg = f"Options flow step: {result_type}"
+                resp = {
                     "success": True,
-                    "message": f"Processed options flow {flow_id}",
+                    "message": opt_msg,
                     **prepared,
                 }
+                if result_type == data_entry_flow.FlowResultType.FORM:
+                    resp["flow_id"] = result.get("flow_id")
+                return resp
 
             if action == "config_entries/options/abort":
                 flow_id = str(params.get("flow_id", "") or "").strip()
@@ -1044,11 +1363,14 @@ Use the subentry flow actions when an installed integration exposes add/configur
                 except data_entry_flow.UnknownStep as err:
                     return {"success": False, "error": str(err)}
                 prepared = _prepare_flow_result_json(result)
-                return {
+                resp = {
                     "success": True,
-                    "message": f"Initialized subentry flow for {entry_id}:{subentry_type}",
+                    "message": f"Subentry flow started for {entry_id}:{subentry_type} — fill in fields and call subentries/flow/configure",
                     **prepared,
                 }
+                if result.get("type") == data_entry_flow.FlowResultType.FORM:
+                    resp["flow_id"] = result.get("flow_id")
+                return resp
 
             if action in {
                 "config_entries/subentries/flow/get",
@@ -1061,7 +1383,8 @@ Use the subentry flow actions when an installed integration exposes add/configur
                 if action == "config_entries/subentries/flow/get":
                     user_input = None
                 elif user_input is None:
-                    user_input = {}
+                    remaining = {k: v for k, v in params.items() if k not in ("flow_id", "user_input")}
+                    user_input = remaining if remaining else {}
                 if isinstance(user_input, str):
                     try:
                         user_input = json.loads(user_input)
@@ -1078,15 +1401,32 @@ Use the subentry flow actions when an installed integration exposes add/configur
                 except data_entry_flow.InvalidData as err:
                     return {
                         "success": False,
-                        "error": "Invalid data",
-                        "errors": err.schema_errors,
+                        "error": "Invalid data provided for subentry",
+                        "schema_errors": err.schema_errors,
+                        "submitted_input": user_input,
                     }
                 prepared = _prepare_flow_result_json(result)
-                return {
+                flow_errors = result.get("errors")
+                if flow_errors:
+                    prepared["form_errors"] = flow_errors
+                    prepared["submitted_input"] = user_input
+                result_type = result.get("type")
+                if result_type == data_entry_flow.FlowResultType.CREATE_ENTRY:
+                    sub_msg = f"Subentry created for {flow_id}"
+                elif result_type == data_entry_flow.FlowResultType.FORM:
+                    sub_msg = "Subentry form returned — fill in fields and call subentries/flow/configure again"
+                elif result_type == data_entry_flow.FlowResultType.ABORT:
+                    sub_msg = f"Subentry flow aborted: {result.get('reason', 'unknown')}"
+                else:
+                    sub_msg = f"Subentry flow step: {result_type}"
+                resp = {
                     "success": True,
-                    "message": f"Processed subentry flow {flow_id}",
+                    "message": sub_msg,
                     **prepared,
                 }
+                if result_type == data_entry_flow.FlowResultType.FORM:
+                    resp["flow_id"] = result.get("flow_id")
+                return resp
 
             if action == "config_entries/subentries/flow/abort":
                 flow_id = str(params.get("flow_id", "") or "").strip()
@@ -1098,7 +1438,12 @@ Use the subentry flow actions when an installed integration exposes add/configur
                     return {"success": False, "error": "Invalid flow specified"}
                 return {"success": True, "message": "Subentry flow aborted"}
 
-            return {"success": False, "error": f"Unknown action: {action}"}
+            return {
+                "success": False,
+                "error": f"Unknown action: '{action}'",
+                "valid_actions": self._VALID_ACTIONS,
+                "hint": "To install an integration: use action='config_entries/flow/init' with params={handler:'domain_name'}",
+            }
         except Exception as err:
             return {"success": False, "error": str(err)}
 

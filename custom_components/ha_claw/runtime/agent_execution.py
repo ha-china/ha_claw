@@ -88,6 +88,7 @@ async def process_agent_turn(
         response_text = get_response_text(result)
         apply_agent_response_format(
             result,
+            hass=hass,
             agent_name=agent_name,
             agent_id=agent_id,
             conversation_mode=conversation_mode,
