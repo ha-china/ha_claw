@@ -16,6 +16,7 @@ from .ha_core_tools import (
     GetLiveContextTool,
     GetSystemIndexTool,
     HistoryQueryTool,
+    IntentCallTool,
     ListServicesTool,
     NextAgentHandoffTool,
     NotifyTool,
@@ -95,8 +96,8 @@ TOOL_REGISTRY: dict[str, dict[str, Any]] = {
     "ListWorkspaceDocs": {"category": "core", "desc": "List workspace markdown documents. No parameters.", "priority": 1},
     "GetWorkspaceDoc": {"category": "core", "desc": "Read one workspace markdown document. Params: name", "priority": 1},
     "SetWorkspaceDoc": {"category": "core", "desc": "Write one workspace markdown document. Params: name, markdown", "priority": 2},
-    "HeartbeatManager": {"category": "core", "desc": "Manage heartbeat follow-up tasks instead of blind polling. Params: action(list/upsert/delete/record/clear_state), slug/title/schedule/objective/steps/notes/status/note/enabled/delete_after_success", "priority": 2},
-    "CustomEntityManager": {"category": "system", "desc": "Create/list/edit/delete dynamic AI entities under kadermanager device (diagnostic). Use this tool (NOT HAControl/shell) to create custom entities. Supports sensor(Jinja2), binary_sensor(Jinja2), switch(toggle), button(press_action). Params: action(create/list/edit/delete), platform, name, entity_id, state_template, icon, device_class, state_class, unit_of_measurement, press_action", "priority": 1},
+    "HeartbeatManager": {"category": "core", "desc": "Manage heartbeat follow-up tasks instead of blind polling. Params: action(list/upsert/delete/record/clear_state), slug/title/schedule/objective/steps/notes/status/note/enabled/delete_after_success/notify_channel(e.g. wechat:account_id:user_id)", "priority": 2},
+    "CustomEntityManager": {"category": "system", "desc": "Create/list/edit/delete dynamic AI entities under claw_assistant device (diagnostic). Use this tool (NOT HAControl/shell) to create custom entities. Supports sensor(Jinja2), binary_sensor(Jinja2), switch(toggle), button(press_action). Params: action(create/list/edit/delete), platform, name, entity_id, state_template, icon, device_class, state_class, unit_of_measurement, press_action", "priority": 1},
     "HelperManager": {"category": "system", "desc": "Create/list/delete HA native helpers (input_boolean/input_number/input_text/input_select/input_datetime/input_button/timer/counter/template sensor/binary_sensor). Use this tool (NOT HAControl/shell) to manage helpers. All params are flat (no nested dict). action=create: helper_type+name+type-specific params. action=delete: entity_id or helper_type+name.", "priority": 1},
     "GetSystemIndex": {"category": "query", "desc": "Get the system structure index (areas/domains/device classes/people/automations/scripts overview). Params: force_refresh (default false)", "priority": 2},
     "SetConversationState": {"category": "core", "desc": "Set the conversation state. Params: expecting_response(bool), reason", "priority": 2},
@@ -105,6 +106,7 @@ TOOL_REGISTRY: dict[str, dict[str, Any]] = {
     "ValidateService": {"category": "query", "desc": "Validate service call parameters. Params: domain, service, data. Returns validity, errors, and suggestions.", "priority": 2},
     "ServiceHelp": {"category": "query", "desc": "Get help for a domain or service. Params: domain (required), service (optional)", "priority": 2},
     "SmartDiscovery": {"category": "query", "desc": "Smart entity discovery. Params: area/domain/state/name_contains/name_pattern/device_class/inferred_type/person_name/pet_name/limit", "priority": 2},
+    "IntentCall": {"category": "query", "desc": "List or call third-party intent handlers (e.g. Holidays, Almanac, TuneFreePlayMusic). action=list to discover; action=call with intent_type and optional slots dict.", "priority": 2},
     "ConfigFile": {"category": "system", "desc": "Access the Home Assistant config directory. Params: action(list/read/stage_write/stage_append/stage_mkdir/stage_delete/apply/cancel/list_pending), path/content/approval_id", "priority": 3},
     "DeleteSkill": {"category": "core", "desc": "Delete an installed Markdown skill (audited in changelog). Params: name, reason", "priority": 2},
     "UpsertGuideDoc": {"category": "core", "desc": "Create or overwrite a runtime Home Assistant guide Markdown. Params: relative_path, markdown, reason", "priority": 2},
@@ -184,6 +186,7 @@ def build_tool_map() -> dict[str, type]:
         "ApplyProposal": ApplyProposalTool,
         "HelperManager": HelperManagerTool,
         "CustomEntityManager": CustomEntityManagerTool,
+        "IntentCall": IntentCallTool,
     }
 
 

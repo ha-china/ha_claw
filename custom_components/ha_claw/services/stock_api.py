@@ -4,7 +4,7 @@ import re
 import asyncio
 from typing import Dict, List, Any, Optional
 from dataclasses import dataclass
-from aiohttp import ClientSession, ClientTimeout
+from aiohttp import ClientSession, ClientTimeout, TCPConnector
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -48,7 +48,7 @@ class StockAPI:
         self.session: Optional[ClientSession] = None
 
     async def __aenter__(self):
-        self.session = ClientSession(timeout=self.timeout)
+        self.session = ClientSession(timeout=self.timeout, connector=TCPConnector(ssl=False))
         return self
 
     async def __aexit__(self, *args):
@@ -82,7 +82,7 @@ class StockAPI:
         _LOGGER.debug("Query stock: %s -> %s (market: %s)", code, full_code, market)
 
         try:
-            async with self.session.get(url) as resp:
+            async with self.session.get(url, ssl=False) as resp:
                 if resp.status != 200:
                     _LOGGER.error("Stock API returned an error: %s", resp.status)
                     return None
@@ -120,7 +120,7 @@ class StockAPI:
         if cn_codes:
             url = f"{TENCENT_API_URL}{','.join(cn_codes)}"
             try:
-                async with self.session.get(url) as resp:
+                async with self.session.get(url, ssl=False) as resp:
                     if resp.status == 200:
                         raw_bytes = await resp.read()
                         text = raw_bytes.decode('gbk', errors='ignore')
@@ -134,7 +134,7 @@ class StockAPI:
         if us_codes:
             url = f"{TENCENT_API_URL}{','.join(us_codes)}"
             try:
-                async with self.session.get(url) as resp:
+                async with self.session.get(url, ssl=False) as resp:
                     if resp.status == 200:
                         raw_bytes = await resp.read()
                         text = raw_bytes.decode('gbk', errors='ignore')

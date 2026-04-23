@@ -1,4 +1,4 @@
-DOMAIN = "kadermanager"
+DOMAIN = "claw_assistant"
 
 CONF_PRIMARY_AGENT = "primary_agent"
 CONF_FALLBACK_AGENT = "fallback_agent"

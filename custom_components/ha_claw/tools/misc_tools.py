@@ -245,13 +245,15 @@ MODE B (sandbox, powerful): run in an isolated child venv via subprocess.
         forbidden = [
             "subprocess",
             "__import__",
-            "open(",
             "file(",
             "compile(",
             "globals(",
             "locals(",
-            "os.",
         ]
+        if "open(" in code and "pathlib" not in code:
+            forbidden.append("open(")
+        if "os." in code and "os.path" not in code:
+            forbidden.append("os.")
         for f in forbidden:
             if f in code:
                 return {"success": False, "error": f"Forbidden operation (use sandbox=true to bypass): {f}"}
@@ -259,6 +261,7 @@ MODE B (sandbox, powerful): run in an isolated child venv via subprocess.
         import datetime
         import importlib
         import math
+        import pathlib
         import random
         import re
 
@@ -274,6 +277,7 @@ MODE B (sandbox, powerful): run in an isolated child venv via subprocess.
             "print": lambda *args: None,
             "math": math, "datetime": datetime, "json": json, "re": re,
             "random": random, "asyncio": asyncio, "importlib": importlib,
+            "pathlib": pathlib, "open": open,
             "hass": hass,
         }
 
@@ -515,7 +519,7 @@ class GetInstalledSkillTool(llm.Tool):
 class HomeAssistantGuideTool(llm.Tool):
     name = "HomeAssistantGuide"
     description = (
-        "Read the bundled Home Assistant guide inside kadermanager. "
+        "Read the bundled Home Assistant guide inside claw_assistant. "
         "Supports action=overview/list/get/search, prioritizes runtime docs adapted to the integration permission model, "
         "and preserves source docs for full teaching reference."
     )
@@ -611,7 +615,8 @@ class HeartbeatManagerTool(llm.Tool):
     description = (
         "Manage heartbeat follow-up tasks. "
         "schedule: cron ('*/30 * * * *', '0 9 * * *') or interval ('30m', '2h', 'every 1d'). "
-        "Params: action(list/upsert/delete/record/clear_state), slug/title/schedule/objective/steps/notes/status/note/enabled/delete_after_success."
+        "notify_channel: where to push results, e.g. 'wechat:account_id:user_id' (from conversation_id). "
+        "Params: action(list/upsert/delete/record/clear_state), slug/title/schedule/objective/steps/notes/status/note/enabled/delete_after_success/notify_channel."
     )
     parameters = vol.Schema(
         {
@@ -626,6 +631,7 @@ class HeartbeatManagerTool(llm.Tool):
             vol.Optional("note", default=""): str,
             vol.Optional("enabled", default=True): bool,
             vol.Optional("delete_after_success", default=False): bool,
+            vol.Optional("notify_channel", default=""): str,
         }
     )
 
@@ -655,6 +661,12 @@ class HeartbeatManagerTool(llm.Tool):
             title = tool_input.tool_args.get("title", "").strip()
             if not title:
                 return {"success": False, "error": "Heartbeat title is required"}
+            notify_channel = tool_input.tool_args.get("notify_channel", "")
+            if not notify_channel:
+                from ..runtime.state import _active_conversation_id
+                conv_id = _active_conversation_id.get()
+                if conv_id and conv_id.startswith("wechat:"):
+                    notify_channel = conv_id
             path = await async_upsert_heartbeat_task(
                 hass,
                 slug=tool_input.tool_args.get("slug", ""),
@@ -665,6 +677,7 @@ class HeartbeatManagerTool(llm.Tool):
                 notes=tool_input.tool_args.get("notes", ""),
                 enabled=bool(tool_input.tool_args.get("enabled", True)),
                 delete_after_success=bool(tool_input.tool_args.get("delete_after_success", False)),
+                notify_channel=notify_channel,
             )
             slug = tool_input.tool_args.get("slug", "").strip() or title
             return {

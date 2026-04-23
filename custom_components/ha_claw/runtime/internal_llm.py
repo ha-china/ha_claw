@@ -15,6 +15,7 @@ from homeassistant.helpers import llm
 from .master_prompt import build_master_prompt_sections
 from .skill_store import format_runtime_prompt_doc
 from .state import (
+    get_active_conversation_state,
     get_conversation_status,
     get_runtime_store,
     get_tool_calls_state,
@@ -38,7 +39,7 @@ _TOOL_TRACK_ORIGINAL_KEY = "_ha_crack_original_tool_tracking"
 _CHATLOG_TOOLS_ORIGINAL_KEY = "_ha_crack_original_chatlog_tools"
 _API_STATE: dict[str, Callable[[], None] | None] = {"unregister_api": None}
 _RUNTIME_PATCH_SNAPSHOT_KEY = "internal_llm_patch_snapshot"
-_TOOL_MODE: ContextVar[str] = ContextVar("kadermanager_tool_mode", default="unset")
+_TOOL_MODE: ContextVar[str] = ContextVar("claw_assistant_tool_mode", default="unset")
 
 
 _MAX_SYSTEM_PROMPT_CHARS = 16000
@@ -581,6 +582,7 @@ def _patch_tool_call_tracking(hass: HomeAssistant) -> None:
     async def tracked_async_call_tool(self, tool_input):
         tool_results = get_tool_results_state(hass)
         tool_calls = get_tool_calls_state(hass)
+        conv_id_before = get_active_conversation_state(hass).get("id")
         tool_calls.append(tool_input.tool_name)
 
         try:
@@ -593,6 +595,14 @@ def _patch_tool_call_tracking(hass: HomeAssistant) -> None:
                     transient_err,
                 )
                 result = await original_async_call_tool(self, tool_input)
+
+            conv_id_after = get_active_conversation_state(hass).get("id")
+            if conv_id_before and conv_id_after and conv_id_before != conv_id_after:
+                LOGGER.info(
+                    "Conversation switched (%s -> %s) during tool %s, aborting stale turn",
+                    conv_id_before, conv_id_after, tool_input.tool_name,
+                )
+                return {"success": False, "error": "conversation_switched"}
             success = True
             error = None
             result_summary = None
@@ -619,7 +629,7 @@ def _patch_tool_call_tracking(hass: HomeAssistant) -> None:
                 }
             )
             if not success:
-                LOGGER.info("Tool call failed: %s - %s", tool_input.tool_name, error or "unknown")
+                LOGGER.info("Tool call failed: %s - %s | args=%s", tool_input.tool_name, error or "unknown", tool_input.tool_args)
             else:
                 LOGGER.info("Tool call ok: %s", tool_input.tool_name)
             return result

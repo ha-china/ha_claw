@@ -105,7 +105,7 @@ class HeartbeatSensor(TextEntity):
         return DeviceInfo(
             identifiers={(DOMAIN, self._entry.entry_id)},
             name=self._entry.title or DOMAIN,
-            manufacturer="kadermanager",
+            manufacturer="claw_assistant",
             model="AI Assistant",
         )
 
@@ -193,7 +193,7 @@ class DynamicSensor(SensorEntity):
         return DeviceInfo(
             identifiers={(DOMAIN, self._entry.entry_id)},
             name=self._entry.title or DOMAIN,
-            manufacturer="kadermanager",
+            manufacturer="claw_assistant",
             model="AI Assistant",
         )
 

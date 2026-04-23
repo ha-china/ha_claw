@@ -18,7 +18,7 @@ Use this source layer only when you need:
 - naming-context reference material
 - source-level topics such as esphome, dashboards, or automation troubleshooting
 
-Inside kadermanager:
+Inside claw_assistant:
 
 - do not require external setup
 - do not require shell wrappers or terminal bootstrap

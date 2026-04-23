@@ -16,7 +16,7 @@ from homeassistant.core import HomeAssistant
 
 LOGGER = logging.getLogger(__name__)
 
-_SANDBOX_DIRNAME = "kadermanager_sandbox"
+_SANDBOX_DIRNAME = "claw_assistant_sandbox"
 _VENV_SUBDIR = "venv"
 _INSTALLED_MARKER = ".installed_requirements.json"
 

@@ -1,3 +1,3 @@
 # MEMORY.md
 
-_Curated long-term memory for kadermanager._
+_Curated long-term memory for claw_assistant._

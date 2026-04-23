@@ -22,4 +22,4 @@
 
 ## Execution Rule
 - When the user asks for "how to do this in Home Assistant", use `HomeAssistantGuideSkill` to pull the relevant playbook first.
-- Then translate the playbook into `kadermanager` internal tools and actions.
+- Then translate the playbook into `claw_assistant` internal tools and actions.

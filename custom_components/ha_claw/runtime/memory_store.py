@@ -18,7 +18,7 @@ from .route_hints import build_route_envelope, build_route_hint
 def _memory_path() -> Path:
     return get_data_dir() / "workspace" / "MEMORY.md"
 MEMORY_HEADER = "# MEMORY.md"
-MEMORY_SUBTITLE = "_Curated long-term memory for kadermanager._"
+MEMORY_SUBTITLE = "_Curated long-term memory for claw_assistant._"
 _FOLLOW_UP_MEMORY_PATTERNS = (
     r"\b(remind|reminder|follow[- ]?up|check later|check back)\b",
     r"(提醒我|记得|稍后|之后|待会|回头|晚点|明天|下周|稍后检查|回头检查)",

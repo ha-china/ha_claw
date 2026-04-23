@@ -67,7 +67,7 @@ class HelperManagerTool(llm.Tool):
 
 IMPORTANT: When user asks to create an entity or helper, ALWAYS ask which kind they want:
   1. HA Helper (input_boolean/input_number/timer/template sensor etc, independent, use HelperManager)
-  2. AI Custom Entity (under kadermanager device, diagnostic, sensor/binary_sensor/switch/button, use CustomEntityManager)
+  2. AI Custom Entity (under claw_assistant device, diagnostic, sensor/binary_sensor/switch/button, use CustomEntityManager)
   Both work. Helpers are more standard, custom entities are more flexible. You can handle either.
 
 action=create: helper_type + name required. Fill type-specific params directly (flat, not nested).

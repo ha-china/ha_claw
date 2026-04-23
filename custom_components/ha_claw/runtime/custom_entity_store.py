@@ -43,12 +43,12 @@ def _slugify(text: str) -> str:
 async def async_load_custom_entities(hass: HomeAssistant) -> list[dict[str, Any]]:
     path = _store_path(hass)
     entities = await hass.async_add_executor_job(_read_store, path)
-    hass.data.setdefault("kadermanager", {})[_STORE_KEY] = entities
+    hass.data.setdefault("claw_assistant", {})[_STORE_KEY] = entities
     return entities
 
 
 def get_custom_entities(hass: HomeAssistant) -> list[dict[str, Any]]:
-    return hass.data.get("kadermanager", {}).get(_STORE_KEY, [])
+    return hass.data.get("claw_assistant", {}).get(_STORE_KEY, [])
 
 
 def get_custom_entities_by_platform(hass: HomeAssistant, platform: str) -> list[dict[str, Any]]:
@@ -110,7 +110,7 @@ async def async_delete_custom_entity(hass: HomeAssistant, uid: str) -> dict[str,
             new_list.append(e)
     if removed is None:
         return None
-    hass.data.setdefault("kadermanager", {})[_STORE_KEY] = new_list
+    hass.data.setdefault("claw_assistant", {})[_STORE_KEY] = new_list
     path = _store_path(hass)
     await hass.async_add_executor_job(_write_store, path, new_list)
     return removed

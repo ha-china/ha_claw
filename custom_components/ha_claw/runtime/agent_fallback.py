@@ -20,6 +20,7 @@ from .adaptive_memory import (
     should_temporarily_skip_agent,
 )
 from .events import fire_ai_response
+from .i18n import t
 from .internal_llm import reset_runtime_tool_mode, set_runtime_tool_mode
 from .loop_controller import record_response
 from .native_chatlog_bridge import async_bridge_native_chatlog_turn
@@ -122,6 +123,7 @@ async def _finalize_synthesized_success(
         user_text=original_text,
         assistant_text=response_text,
         tool_calls=tool_calls,
+        conversation_id=conversation_id,
     )
     tool_calls_state = get_tool_calls_state(hass)
     tool_calls_state.clear()
@@ -431,6 +433,7 @@ async def run_agent_fallback_chain(
                                 user_text=original_text,
                                 assistant_text=response_text,
                                 tool_calls=tool_calls,
+                                conversation_id=conversation_id,
                             )
                         tool_calls_state = get_tool_calls_state(hass)
                         tool_calls_state.clear()
@@ -788,6 +791,7 @@ async def run_agent_fallback_chain(
                         user_text=original_text,
                         assistant_text=response_text,
                         tool_calls=tool_calls,
+                        conversation_id=conversation_id,
                     )
                 tool_calls_state = get_tool_calls_state(hass)
                 tool_calls_state.clear()
@@ -826,6 +830,35 @@ async def run_agent_fallback_chain(
                 return result
         except Exception as err:
             err_msg = str(err)
+            err_lower = err_msg.lower()
+
+            _UNAVAILABLE_KEYWORDS = (
+                "not found",
+                "not_found",
+                "does not exist",
+                "no longer available",
+                "invalid agent",
+                "not loaded",
+                "not registered",
+                "not initialized",
+                "not configured",
+                "entity not available",
+                "entry not ready",
+                "entry not loaded",
+                "api_url_not_configured",
+                "api_key_not_configured",
+                "unsupported_provider",
+            )
+            is_unavailable = (
+                isinstance(err, ValueError)
+                or any(kw in err_lower for kw in _UNAVAILABLE_KEYWORDS)
+            )
+            if is_unavailable:
+                LOGGER.info(
+                    "Agent %s unavailable (%s: %s), skipping",
+                    current_agent_id, type(err).__name__, err_msg[:120],
+                )
+                continue
             successful_tool_response = extract_successful_tool_response(
                 get_tool_results_state(hass)
             )
@@ -874,7 +907,6 @@ async def run_agent_fallback_chain(
                 conversation_id=conversation_id,
                 stage="exception",
             )
-            err_lower = err_msg.lower()
             if any(kw in err_lower for kw in _TRANSIENT_ERROR_KEYWORDS):
                 retries = transient_retry_counts.get(current_agent_id, 0)
                 if retries < _MAX_TRANSIENT_RETRIES:
@@ -886,11 +918,16 @@ async def run_agent_fallback_chain(
                     )
             continue
 
-    error_detail = "; ".join(agent_errors) if agent_errors else "unknown error"
-    intent_response = intent.IntentResponse(language=language or hass.config.language)
+    resolved_lang = language or hass.config.language or "en"
+    if agent_errors:
+        error_detail = "; ".join(agent_errors)
+    else:
+        error_detail = t("agents_unavailable", resolved_lang)
+    LOGGER.warning("Agent fallback chain exhausted: %s", error_detail)
+    intent_response = intent.IntentResponse(language=resolved_lang)
     intent_response.async_set_error(
         intent.IntentResponseErrorCode.UNKNOWN,
-        f"All AI agents failed to respond: {error_detail}",
+        error_detail,
     )
     from homeassistant.components.conversation import ConversationResult
 

@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 import logging
+import re
+from pathlib import Path
 
-from custom_components.kadermanager.conversation_utils import get_conversation_history
+from custom_components.claw_assistant.conversation_utils import get_conversation_history
 
 from homeassistant.components.conversation import ConversationResult
 from homeassistant.config_entries import ConfigEntry
@@ -19,6 +21,7 @@ from .agent_fallback import (
     run_agent_fallback_chain,
 )
 from .config import DEFAULT_THRESHOLDS
+from .i18n import t
 from .ha_guide_store import async_refresh_homeassistant_guide_store
 from .loop_controller import (
     record_continuation,
@@ -96,6 +99,52 @@ def _rewrite_short_followup(text: str, task_loop: dict) -> str:
         return "打开全部设备"
 
     return text
+
+
+_ATTACHMENT_RE = re.compile(r"\[ATTACHMENT:([\w/]+):(.+?)\]")
+
+
+def _extract_attachment_tags(text: str) -> tuple[str, list[tuple[str, str]]]:
+    attachments: list[tuple[str, str]] = []
+    for m in _ATTACHMENT_RE.finditer(text):
+        attachments.append((m.group(1), m.group(2)))
+    clean = _ATTACHMENT_RE.sub("", text).strip()
+    if not clean and attachments:
+        clean = "The user sent an image, please describe its content."
+    return clean, attachments
+
+
+def _install_attachment_hook(hass: HomeAssistant) -> None:
+    from homeassistant.components.conversation.chat_log import ChatLog, UserContent, Attachment
+
+    if getattr(ChatLog, "_claw_attachment_hooked", False):
+        return
+
+    _original_add = ChatLog.async_add_user_content
+
+    def _hooked_add(self: ChatLog, content: UserContent) -> None:
+        pending = hass.data.pop("claw_pending_attachments", None)
+        if pending and not content.attachments:
+            att_list = []
+            for mime, fpath in pending:
+                p = Path(fpath)
+                if p.is_file():
+                    att_list.append(Attachment(
+                        media_content_id="",
+                        mime_type=mime,
+                        path=p,
+                    ))
+            if att_list:
+                content = UserContent(
+                    content=content.content,
+                    attachments=att_list,
+                )
+                LOGGER.info("Injected %d attachment(s) into ChatLog", len(att_list))
+        _original_add(self, content)
+
+    ChatLog.async_add_user_content = _hooked_add
+    ChatLog._claw_attachment_hooked = True
+    LOGGER.debug("ChatLog attachment hook installed")
 
 
 def _build_continuation_prompt(
@@ -180,7 +229,7 @@ async def _execute_conversation_turn_inner(
             language=language or hass.config.language
         )
         intent_response.async_set_speech(
-            "Iteration budget exhausted. Please start a new conversation."
+            t("budget_exhausted", language or hass.config.language)
         )
 
         return ConversationResult(
@@ -189,6 +238,10 @@ async def _execute_conversation_turn_inner(
 
     reset_continuation_count(hass)
     text = _rewrite_short_followup(text, task_loop)
+    text, pending_attachments = _extract_attachment_tags(text)
+    if pending_attachments:
+        hass.data["claw_pending_attachments"] = pending_attachments
+        _install_attachment_hook(hass)
     task_loop = record_user_turn(hass, text=text)
     LOGGER.info("Task loop turn %s: %s...", task_loop["turn_count"], text[:50])
 
@@ -358,6 +411,7 @@ async def _execute_conversation_turn_inner(
                         user_text=original_text,
                         assistant_text=final_text,
                         tool_calls=tool_calls,
+                        conversation_id=conversation_id,
                     )
                 tool_calls_state = get_tool_calls_state(hass)
                 tool_calls_state.clear()
@@ -420,6 +474,7 @@ async def _execute_conversation_turn_inner(
                             user_text=original_text,
                             assistant_text=final_text,
                             tool_calls=tool_calls,
+                            conversation_id=conversation_id,
                         )
                     tool_calls_state = get_tool_calls_state(hass)
                     tool_calls_state.clear()

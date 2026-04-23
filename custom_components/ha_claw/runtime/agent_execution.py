@@ -9,6 +9,7 @@ from homeassistant.components import conversation
 from homeassistant.components.conversation import intent, trace
 from homeassistant.util import ulid
 
+from .i18n import t
 from .response_format import apply_agent_response_format, get_response_text
 
 LOGGER = logging.getLogger(__name__)
@@ -41,7 +42,7 @@ async def process_agent_turn(
         intent_response = intent.IntentResponse(language=user_input.language)
         intent_response.async_set_error(
             intent.IntentResponseErrorCode.NO_INTENT_MATCH,
-            "No valid input was received. Please try again.",
+            t("no_valid_input", user_input.language),
         )
         return conversation.ConversationResult(
             conversation_id=user_input.conversation_id or ulid.ulid(),

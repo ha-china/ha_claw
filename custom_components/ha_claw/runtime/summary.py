@@ -7,7 +7,7 @@ import logging
 import re
 from typing import Any
 
-from custom_components.kadermanager.const import (
+from custom_components.claw_assistant.const import (
     CONVERSATION_MODE_ADD_NAME,
     CONVERSATION_MODE_DETAILED,
 )

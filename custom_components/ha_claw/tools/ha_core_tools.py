@@ -1057,7 +1057,10 @@ class BatchControlTool(llm.Tool):
 
 class NotifyTool(llm.Tool):
     name = "Notify"
-    description = "Send a notification."
+    description = (
+        "Send a notification. "
+        "target: 'persistent_notification' (default), 'wechat:account_id:user_id' (push to WeChat), or a notify service target."
+    )
     parameters = vol.Schema(
         {
             vol.Required("message"): str,
@@ -1073,7 +1076,20 @@ class NotifyTool(llm.Tool):
         title = tool_input.tool_args.get("title", "AI Assistant")
         target = tool_input.tool_args.get("target", "persistent_notification")
         try:
-            if target == "persistent_notification":
+            if target.startswith("wechat:"):
+                parts = target.split(":", 2)
+                svc_data: dict[str, Any] = {
+                    "channel": "wechat/user_id",
+                    "message": message,
+                }
+                if len(parts) >= 2:
+                    svc_data["wechat_account_id"] = parts[1]
+                if len(parts) >= 3:
+                    svc_data["target"] = parts[2]
+                await hass.services.async_call(
+                    "cn_im_hub", "send_message", svc_data, blocking=True,
+                )
+            elif target == "persistent_notification":
                 await hass.services.async_call(
                     "persistent_notification",
                     "create",
@@ -1090,3 +1106,62 @@ class NotifyTool(llm.Tool):
             return {"success": True, "message": "Notification sent"}
         except Exception as err:
             return {"success": False, "error": str(err)}
+
+
+class IntentCallTool(llm.Tool):
+    name = "IntentCall"
+    description = "List or call third-party intent handlers registered in HA (e.g. Holidays, Almanac, TuneFreePlayMusic). action=list to discover available intents; action=call to execute one by intent_type with optional slots dict."
+    parameters = vol.Schema({
+        vol.Required("action"): vol.In(["list", "call"]),
+        vol.Optional("intent_type"): str,
+        vol.Optional("slots"): dict,
+    })
+
+    async def async_call(self, hass: HomeAssistant, tool_input: llm.ToolInput, llm_context: llm.LLMContext) -> JsonObjectType:
+        from homeassistant.helpers import intent as intent_mod
+
+        action = tool_input.tool_args["action"]
+
+        if action == "list":
+            handlers = intent_mod.async_get(hass)
+            items = []
+            for h in handlers:
+                if h.intent_type.startswith("Hass"):
+                    continue
+                slot_info = {}
+                if h.slot_schema:
+                    for k, v in h.slot_schema.items():
+                        key_name = k.schema if hasattr(k, "schema") else str(k)
+                        slot_info[key_name] = getattr(k, "description", "") or ""
+                items.append({
+                    "intent_type": h.intent_type,
+                    "description": h.description or "",
+                    "slots": slot_info,
+                })
+            return {"success": True, "count": len(items), "intents": items}
+
+        if action == "call":
+            intent_type = tool_input.tool_args.get("intent_type", "")
+            if not intent_type:
+                return {"success": False, "error": "intent_type is required"}
+            raw_slots = tool_input.tool_args.get("slots") or {}
+            slots = {k: {"value": v} for k, v in raw_slots.items()}
+            try:
+                result = await intent_mod.async_handle(
+                    hass,
+                    "claw_assistant",
+                    intent_type,
+                    slots=slots,
+                )
+                speech = ""
+                if result.speech:
+                    speech = (
+                        result.speech.get("plain", {}).get("speech", "")
+                        if isinstance(result.speech, dict)
+                        else str(result.speech)
+                    )
+                return {"success": True, "speech": speech}
+            except Exception as err:
+                return {"success": False, "error": str(err)}
+
+        return {"success": False, "error": f"Unknown action: {action}"}

@@ -40,6 +40,7 @@ class HeartbeatTask:
     notes: str = ""
     enabled: bool = True
     delete_after_success: bool = False
+    notify_channel: str = ""
 
     @property
     def when(self) -> str:
@@ -143,6 +144,7 @@ def parse_heartbeat_tasks(markdown: str) -> list[HeartbeatTask]:
                     fields.get("delete_after_success", "false"),
                     default=False,
                 ),
+                notify_channel=fields.get("notify_channel", ""),
             )
         )
 
@@ -177,6 +179,8 @@ def serialize_heartbeat_tasks(tasks: list[HeartbeatTask]) -> str:
                 f"- delete_after_success: {'true' if task.delete_after_success else 'false'}",
             ]
         )
+        if task.notify_channel:
+            lines.append(f"- notify_channel: {task.notify_channel}")
         if task.notes:
             lines.append(f"- notes: {task.notes}")
         lines.append("")
@@ -195,6 +199,7 @@ def upsert_heartbeat_task_markdown(
     notes: str = "",
     enabled: bool = True,
     delete_after_success: bool = False,
+    notify_channel: str = "",
 ) -> str:
 
     next_slug = _slugify(slug or title)
@@ -208,6 +213,7 @@ def upsert_heartbeat_task_markdown(
         notes=notes.strip(),
         enabled=enabled,
         delete_after_success=delete_after_success,
+        notify_channel=notify_channel.strip(),
     )
     return serialize_heartbeat_tasks(sorted(tasks.values(), key=lambda item: item.slug))
 
@@ -230,6 +236,7 @@ def _build_task_payload(task: HeartbeatTask, task_state: dict[str, Any]) -> dict
         "notes": task.notes,
         "enabled": task.enabled,
         "delete_after_success": task.delete_after_success,
+        "notify_channel": task.notify_channel,
         "last_checked_at": task_state.get("last_checked_at", ""),
         "last_status": task_state.get("last_status", ""),
         "last_note": task_state.get("last_note", ""),
@@ -260,6 +267,7 @@ async def async_upsert_heartbeat_task(
     notes: str = "",
     enabled: bool = True,
     delete_after_success: bool = False,
+    notify_channel: str = "",
 ) -> Path:
 
     markdown = await hass.async_add_executor_job(_read_text, _heartbeat_path())
@@ -273,6 +281,7 @@ async def async_upsert_heartbeat_task(
         notes=notes,
         enabled=enabled,
         delete_after_success=delete_after_success,
+        notify_channel=notify_channel,
     )
     return await hass.async_add_executor_job(_write_text, _heartbeat_path(), updated)
 

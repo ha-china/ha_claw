@@ -10,7 +10,7 @@ from homeassistant.core import HomeAssistant
 from ..const import DOMAIN
 
 _active_conversation_id: ContextVar[str] = ContextVar(
-    "kadermanager_active_conversation_id", default="default"
+    "claw_assistant_active_conversation_id", default="default"
 )
 
 

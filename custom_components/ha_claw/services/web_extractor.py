@@ -12,17 +12,23 @@ from bs4 import BeautifulSoup, Tag
 _trafilatura_loaded: bool = False
 _trafilatura_extract = None
 _trafilatura_extract_metadata = None
+_trafilatura_config = None
 
 
 def _lazy_load_trafilatura() -> None:
-    global _trafilatura_loaded, _trafilatura_extract, _trafilatura_extract_metadata
+    global _trafilatura_loaded, _trafilatura_extract, _trafilatura_extract_metadata, _trafilatura_config
     if _trafilatura_loaded:
         return
     _trafilatura_loaded = True
     try:
+        from copy import deepcopy
         from trafilatura import extract, extract_metadata
+        from trafilatura.settings import DEFAULT_CONFIG
         _trafilatura_extract = extract
         _trafilatura_extract_metadata = extract_metadata
+        _trafilatura_config = deepcopy(DEFAULT_CONFIG)
+        _trafilatura_config['DEFAULT']['MIN_EXTRACTED_SIZE'] = '20'
+        _trafilatura_config['DEFAULT']['MIN_OUTPUT_SIZE'] = '1'
     except ImportError:
         pass
 
@@ -62,7 +68,16 @@ _JS_SHELL_SCRIPT_MARKERS = (
     "gatsby",
     "apollo-state",
 )
-_TRAFILATURA_MIN_TEXT = 80
+_TRAFILATURA_MIN_TEXT_EN = 80
+_TRAFILATURA_MIN_TEXT_ZH = 20
+_CJK_RE = re.compile(r'[\u4e00-\u9fff\u3400-\u4dbf]')
+
+
+def _min_text_threshold(text: str) -> int:
+    if not text:
+        return _TRAFILATURA_MIN_TEXT_EN
+    cjk = len(_CJK_RE.findall(text))
+    return _TRAFILATURA_MIN_TEXT_ZH if cjk > len(text) * 0.1 else _TRAFILATURA_MIN_TEXT_EN
 
 
 @dataclass(slots=True)
@@ -135,14 +150,15 @@ def _extract_with_trafilatura(
         html,
         url=url,
         output_format="markdown",
-        favor_precision=True,
+        favor_recall=True,
         include_comments=False,
-        include_tables=False,
+        include_tables=True,
         include_links=False,
-        deduplicate=True,
+        deduplicate=False,
+        config=_trafilatura_config,
     )
     content = _normalize_text(extracted or "")
-    if len(content) < _TRAFILATURA_MIN_TEXT:
+    if len(content) < _min_text_threshold(content):
         return None
 
     title = default_title
@@ -176,7 +192,7 @@ def _extract_main_container_text(html: str) -> str:
             if len(candidate) > len(best_text):
                 best_text = candidate
 
-    return best_text if len(best_text) >= _TRAFILATURA_MIN_TEXT else ""
+    return best_text if len(best_text) >= _min_text_threshold(best_text) else ""
 
 
 def _extract_node_text(node: Tag) -> str:
@@ -229,10 +245,10 @@ def _extract_schema_article(
 
         for article in _iter_json_objects(payload):
             article_body = str(article.get("articleBody", "")).strip()
-            if len(article_body) < _TRAFILATURA_MIN_TEXT:
+            if len(article_body) < _min_text_threshold(article_body):
                 continue
             content = _normalize_text(article_body)
-            if len(content) < _TRAFILATURA_MIN_TEXT:
+            if len(content) < _min_text_threshold(content):
                 continue
             title = str(article.get("headline") or default_title).strip() or default_title
             return ExtractedWebContent(

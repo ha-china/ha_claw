@@ -12,6 +12,6 @@ Read order:
 
 Purpose:
 
-- `runtime/`: primary playbooks for kadermanager
+- `runtime/`: primary playbooks for claw_assistant
 - `SKILL.md`: source-layer summary
 - `references/`: deep reference material

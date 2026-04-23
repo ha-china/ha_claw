@@ -22,6 +22,7 @@ from .runtime import (
     get_runtime_store,
 )
 from .runtime.orchestrator import execute_conversation_turn
+from .runtime.i18n import t
 from .runtime.response_format import sanitize_response_text
 
 _LOGGER = logging.getLogger(__name__)
@@ -58,7 +59,7 @@ class FallbackConversationAgent(
         self._attr_device_info = DeviceInfo(
             identifiers={(DOMAIN, entry.entry_id)},
             name=entry.title or DOMAIN,
-            manufacturer="kadermanager",
+            manufacturer="claw_assistant",
             model="AI Assistant",
         )
         self._last_active = datetime.now(UTC)
@@ -74,7 +75,7 @@ class FallbackConversationAgent(
     @property
     def state_attributes(self):
         attributes = super().state_attributes or {}
-        attributes["entity"] = "kadermanager.ai"
+        attributes["entity"] = "claw_assistant.ai"
         if self._attr_chat_response is not None:
             attributes["response_content"] = self._attr_chat_response
         if self.last_used_agent is not None:
@@ -150,7 +151,7 @@ class FallbackConversationAgent(
             intent_response = intent.IntentResponse(language=user_input.language)
             intent_response.async_set_error(
                 intent.IntentResponseErrorCode.UNKNOWN,
-                "kadermanager runtime hook is not initialized",
+                t("hook_not_ready", user_input.language),
             )
             return self._finalize_result(
                 conversation.ConversationResult(

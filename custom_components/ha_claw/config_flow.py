@@ -13,6 +13,8 @@ from homeassistant.helpers import entity_registry as er
 from homeassistant.loader import async_get_integration
 from homeassistant.helpers.selector import (
     BooleanSelector,
+    ConversationAgentSelector,
+    ConversationAgentSelectorConfig,
     SelectSelector,
     SelectSelectorConfig,
     SelectSelectorMode,
@@ -47,34 +49,47 @@ _REMOVED_OPTION_KEYS = (
 )
 
 @callback
-def get_conversation_agents(hass: HomeAssistant) -> list[dict[str, str]]:
-    entity_registry = er.async_get(hass)
-    own_config_entry_ids = {
-        entry.entry_id for entry in hass.config_entries.async_entries(DOMAIN)
+def _get_agent_options(hass: HomeAssistant) -> list[dict[str, str]]:
+    ent_reg = er.async_get(hass)
+    own_entry_ids = {
+        e.entry_id for e in hass.config_entries.async_entries(DOMAIN)
     }
-    agents = []
+    agents: list[dict[str, str]] = []
     for entity_id in hass.states.async_entity_ids("conversation"):
         try:
-            state = hass.states.get(entity_id)
-            registry_entry = entity_registry.async_get(entity_id)
-            if registry_entry and (
-                registry_entry.platform == DOMAIN
-                or registry_entry.config_entry_id in own_config_entry_ids
-            ):
+            reg = ent_reg.async_get(entity_id)
+            if reg and (reg.platform == DOMAIN or reg.config_entry_id in own_entry_ids):
                 continue
-            if state and state.attributes.get("entity") != "kadermanager.ai":
-                label = state.attributes.get("friendly_name")
-                if label in (None, ""):
-                    label = entity_id.split('.')[-1]
-                agents.append({
-                    "value": entity_id,
-                    "label": str(label),
-                })
-        except:
+            state = hass.states.get(entity_id)
+            if state and state.attributes.get("entity") == "claw_assistant.ai":
+                continue
+            label = (state.attributes.get("friendly_name") if state else None) or entity_id.split('.')[-1]
+            agents.append({"value": entity_id, "label": str(label)})
+        except Exception:  # noqa: BLE001
             continue
-    return agents if agents else [{"value": "no_agents", "label": "无可用对话代理"}]
+    return agents
 
-class KaderManagerConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
+
+@callback
+def _get_own_entity_ids(hass: HomeAssistant) -> set[str]:
+    ent_reg = er.async_get(hass)
+    own_entry_ids = {
+        e.entry_id for e in hass.config_entries.async_entries(DOMAIN)
+    }
+    own: set[str] = set()
+    for entity_id in hass.states.async_entity_ids("conversation"):
+        reg = ent_reg.async_get(entity_id)
+        if reg and (reg.platform == DOMAIN or reg.config_entry_id in own_entry_ids):
+            own.add(entity_id)
+    return own
+
+
+def _agent_selector(hass: HomeAssistant) -> SelectSelector:
+    return SelectSelector(
+        SelectSelectorConfig(options=_get_agent_options(hass), mode=SelectSelectorMode.DROPDOWN)
+    )
+
+class ClawAssistantConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     VERSION = 1
 
     def __init__(self) -> None:
@@ -99,37 +114,27 @@ class KaderManagerConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
     async def async_step_agent_settings(self, user_input: dict[str, Any] | None = None) -> FlowResult:
         errors: dict[str, str] = {}
-        available_agents = get_conversation_agents(self.hass)
-        available_agent_ids = [a["value"] for a in available_agents]
 
         if user_input is not None:
-            if not available_agent_ids or "no_agents" in available_agent_ids:
-                errors["base"] = "no_agents_available"
-            elif user_input.get(CONF_PRIMARY_AGENT) not in available_agent_ids:
+            primary = user_input.get(CONF_PRIMARY_AGENT)
+            if not primary:
                 errors[CONF_PRIMARY_AGENT] = "invalid_agent"
-            else:
+            if not errors:
                 return self.async_create_entry(
                     title=self._title,
                     data={},
                     options={
-                        CONF_PRIMARY_AGENT: user_input[CONF_PRIMARY_AGENT],
-                        CONF_FALLBACK_AGENT: user_input.get(CONF_FALLBACK_AGENT, user_input[CONF_PRIMARY_AGENT]),
+                        CONF_PRIMARY_AGENT: primary,
+                        CONF_FALLBACK_AGENT: user_input.get(CONF_FALLBACK_AGENT) or primary,
                         CONF_SECONDARY_FALLBACK_AGENT: user_input.get(CONF_SECONDARY_FALLBACK_AGENT),
                     },
                 )
 
-        default_agent = available_agent_ids[0] if available_agent_ids and available_agent_ids[0] != "no_agents" else ""
-
+        sel = _agent_selector(self.hass)
         schema = vol.Schema({
-            vol.Required(CONF_PRIMARY_AGENT, description={"suggested_value": default_agent}): SelectSelector(
-                SelectSelectorConfig(options=available_agents, mode=SelectSelectorMode.DROPDOWN)
-            ),
-            vol.Required(CONF_FALLBACK_AGENT, description={"suggested_value": default_agent}): SelectSelector(
-                SelectSelectorConfig(options=available_agents, mode=SelectSelectorMode.DROPDOWN)
-            ),
-            vol.Optional(CONF_SECONDARY_FALLBACK_AGENT): SelectSelector(
-                SelectSelectorConfig(options=available_agents, mode=SelectSelectorMode.DROPDOWN)
-            ),
+            vol.Required(CONF_PRIMARY_AGENT): sel,
+            vol.Required(CONF_FALLBACK_AGENT): sel,
+            vol.Optional(CONF_SECONDARY_FALLBACK_AGENT): sel,
         })
 
         return self.async_show_form(
@@ -197,7 +202,10 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
                     elif key in current_options and key not in self._user_input:
                         self._user_input[key] = current_options[key]
 
-            if not allow_agent_changes:
+            if allow_agent_changes:
+                if CONF_SECONDARY_FALLBACK_AGENT not in user_input or user_input.get(CONF_SECONDARY_FALLBACK_AGENT) in (None, ""):
+                    self._user_input.pop(CONF_SECONDARY_FALLBACK_AGENT, None)
+            else:
                 for key in agent_keys:
                     if key in current_options:
                         self._user_input[key] = current_options[key]
@@ -275,28 +283,21 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
         return await self._workspace_edit("USER", user_input)
 
     async def async_step_agent_settings(self, user_input: dict[str, Any] | None = None) -> FlowResult:
-        available_agents = get_conversation_agents(self.hass)
-        available_agent_ids = [agent["value"] for agent in available_agents]
         errors = {}
-
-        if not available_agents or (len(available_agents) == 1 and available_agents[0]["value"] == "no_agents"):
-            errors["base"] = "no_agents_available"
 
         if user_input is not None:
             if user_input.get("back"):
                 return await self.async_step_init()
 
-            if not available_agent_ids or "no_agents" in available_agent_ids:
-                errors["base"] = "no_agents_available"
-            else:
-                if CONF_PRIMARY_AGENT in user_input and user_input[CONF_PRIMARY_AGENT] not in available_agent_ids:
-                    errors[CONF_PRIMARY_AGENT] = "invalid_agent"
-                if CONF_FALLBACK_AGENT in user_input and user_input[CONF_FALLBACK_AGENT] not in available_agent_ids:
-                    errors[CONF_FALLBACK_AGENT] = "invalid_agent"
-                if (CONF_SECONDARY_FALLBACK_AGENT in user_input and
-                    user_input[CONF_SECONDARY_FALLBACK_AGENT] not in (None, "") and
-                    user_input[CONF_SECONDARY_FALLBACK_AGENT] not in available_agent_ids):
-                    errors[CONF_SECONDARY_FALLBACK_AGENT] = "invalid_agent"
+            primary = user_input.get(CONF_PRIMARY_AGENT)
+            fallback = user_input.get(CONF_FALLBACK_AGENT)
+            secondary = user_input.get(CONF_SECONDARY_FALLBACK_AGENT)
+            if not primary:
+                errors[CONF_PRIMARY_AGENT] = "invalid_agent"
+            own_ids = _get_own_entity_ids(self.hass)
+            for key, val in ((CONF_PRIMARY_AGENT, primary), (CONF_FALLBACK_AGENT, fallback), (CONF_SECONDARY_FALLBACK_AGENT, secondary)):
+                if val and val in own_ids:
+                    errors[key] = "invalid_agent"
 
             if not errors:
                 self._process_user_input(user_input, exclude_keys=["back", "next_step", "save_and_exit"],
@@ -304,25 +305,16 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
                 return self.async_create_entry(title="", data=self._user_input)
 
         current_primary = self._config_entry.options.get(CONF_PRIMARY_AGENT, DEFAULT_PRIMARY_AGENT)
-        if current_primary not in available_agent_ids and available_agent_ids and available_agent_ids[0] != "no_agents":
-            current_primary = available_agent_ids[0]
-
         current_fallback = self._config_entry.options.get(CONF_FALLBACK_AGENT, DEFAULT_FALLBACK_AGENT)
-        if current_fallback not in available_agent_ids and available_agent_ids and available_agent_ids[0] != "no_agents":
-            current_fallback = available_agent_ids[0]
-
         current_secondary = self._config_entry.options.get(CONF_SECONDARY_FALLBACK_AGENT, None)
 
+        conv_sel = ConversationAgentSelector(
+            ConversationAgentSelectorConfig(language=self.hass.config.language)
+        )
         schema = vol.Schema({
-            vol.Required(CONF_PRIMARY_AGENT, description={"suggested_value": current_primary}): SelectSelector(
-                SelectSelectorConfig(options=available_agents, mode=SelectSelectorMode.DROPDOWN)
-            ),
-            vol.Required(CONF_FALLBACK_AGENT, description={"suggested_value": current_fallback}): SelectSelector(
-                SelectSelectorConfig(options=available_agents, mode=SelectSelectorMode.DROPDOWN)
-            ),
-            vol.Optional(CONF_SECONDARY_FALLBACK_AGENT, description={"suggested_value": current_secondary}): SelectSelector(
-                SelectSelectorConfig(options=available_agents, mode=SelectSelectorMode.DROPDOWN)
-            ),
+            vol.Required(CONF_PRIMARY_AGENT, description={"suggested_value": current_primary}): conv_sel,
+            vol.Required(CONF_FALLBACK_AGENT, description={"suggested_value": current_fallback}): conv_sel,
+            vol.Optional(CONF_SECONDARY_FALLBACK_AGENT, description={"suggested_value": current_secondary}): conv_sel,
             vol.Optional("back", default=False): bool,
         })
 

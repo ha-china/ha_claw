@@ -30,7 +30,7 @@ MAX_SEARCH_SNIPPET_CHARS = 1600
 RUNTIME_COLLECTION = "runtime"
 SOURCE_COLLECTION = "source"
 COLLECTION_PURPOSE = {
-    RUNTIME_COLLECTION: "Primary runtime playbooks adapted for kadermanager",
+    RUNTIME_COLLECTION: "Primary runtime playbooks adapted for claw_assistant",
     SOURCE_COLLECTION: "Original migrated source material and deep references",
 }
 
@@ -217,9 +217,9 @@ def get_homeassistant_guide_overview() -> dict[str, object]:
         SOURCE_COLLECTION: sum(1 for document in documents if document.collection == SOURCE_COLLECTION),
     }
     usage_rules = [
-        "Read runtime docs first for kadermanager behavior.",
+        "Read runtime docs first for claw_assistant behavior.",
         "Only consult source docs when runtime docs are insufficient or when you explicitly need the original teaching material.",
-        "Inside kadermanager never require HA_TOKEN, mcporter, hab, hub, or terminal setup.",
+        "Inside claw_assistant never require HA_TOKEN, mcporter, hab, hub, or terminal setup.",
         "Use Home Assistant internal permissions, native intents, entity state APIs, and services instead.",
     ]
     return {
@@ -252,7 +252,7 @@ def build_homeassistant_guide_prompt_block() -> str:
     quickstart = runtime_docs.get("10_quickstart.md")
 
     lines = [
-        "Home Assistant requests inside kadermanager follow an internal operating model.",
+        "Home Assistant requests inside claw_assistant follow an internal operating model.",
         "Start by understanding the system with GetSystemIndex or GetLiveContext.",
         "Resolve concrete entities with SmartDiscovery or EntityQuery before acting.",
         "Execute actions with DeviceSkill first, then ServiceCall when precise service data is required.",

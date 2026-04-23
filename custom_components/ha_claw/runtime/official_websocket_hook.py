@@ -11,7 +11,7 @@ from homeassistant.components.conversation.const import ChatLogEventType
 from homeassistant.core import callback
 from homeassistant.helpers.chat_session import async_get_chat_session
 
-_PATCH_KEY = "_kadermanager_streaming_conversation_process"
+_PATCH_KEY = "_claw_assistant_streaming_conversation_process"
 _NO_HANDLER = object()
 _UNSET = object()
 
@@ -75,7 +75,7 @@ async def streaming_websocket_process(
 
 def install_official_websocket_process_hook(hass) -> None:
 
-    domain_data = hass.data.setdefault("kadermanager", {})
+    domain_data = hass.data.setdefault("claw_assistant", {})
     if _PATCH_KEY in domain_data:
         return
     handlers = hass.data.setdefault("websocket_api", {})
@@ -85,7 +85,7 @@ def install_official_websocket_process_hook(hass) -> None:
 
 def uninstall_official_websocket_process_hook(hass) -> None:
 
-    domain_data = hass.data.setdefault("kadermanager", {})
+    domain_data = hass.data.setdefault("claw_assistant", {})
     original_handler = domain_data.pop(_PATCH_KEY, _UNSET)
     if original_handler is _UNSET:
         return

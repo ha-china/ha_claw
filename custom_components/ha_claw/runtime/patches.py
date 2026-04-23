@@ -28,10 +28,10 @@ _RESULT_PATCHED = "_ha_crack_result_patched"
 _RESULT_ORIGINAL = "_ha_crack_original_result_extraction"
 _STREAM_CLOSURE_PATCHED = "_ha_crack_stream_closure_patched"
 _STREAM_CLOSURE_ORIGINAL = "_ha_crack_original_stream_closure"
-_PIPELINE_FILTER_PATCHED = "_kadermanager_tool_filter_patched"
-_PIPELINE_FILTER_ORIGINAL = "_kadermanager_original_process_event"
-_TOOL_PROGRESS_PATCHED = "_kadermanager_tool_progress_patched"
-_TOOL_PROGRESS_ORIGINAL = "_kadermanager_tool_progress_original"
+_PIPELINE_FILTER_PATCHED = "_claw_assistant_tool_filter_patched"
+_PIPELINE_FILTER_ORIGINAL = "_claw_assistant_original_process_event"
+_TOOL_PROGRESS_PATCHED = "_claw_assistant_tool_progress_patched"
+_TOOL_PROGRESS_ORIGINAL = "_claw_assistant_tool_progress_original"
 
 
 def _pop_empty_trailing_assistant(chat_log) -> None:
@@ -111,7 +111,7 @@ def unpatch_local_intents() -> None:
     delattr(conv_module, _LOCAL_INTENTS_ORIGINAL)
     if hasattr(conv_module, _LOCAL_INTENTS_PATCHED):
         delattr(conv_module, _LOCAL_INTENTS_PATCHED)
-    LOGGER.debug("Restored async_handle_intents after kadermanager unload")
+    LOGGER.debug("Restored async_handle_intents after claw_assistant unload")
 
 
 def patch_chat_log_result_extraction(hass: HomeAssistant) -> None:
@@ -157,7 +157,7 @@ def unpatch_chat_log_result_extraction() -> None:
     delattr(conv_util, _RESULT_ORIGINAL)
     if hasattr(conv_util, _RESULT_PATCHED):
         delattr(conv_util, _RESULT_PATCHED)
-    LOGGER.debug("Restored chat log result extraction after kadermanager unload")
+    LOGGER.debug("Restored chat log result extraction after claw_assistant unload")
 
 
 def patch_chat_log_stream_closure(hass: HomeAssistant) -> None:
@@ -216,7 +216,7 @@ def unpatch_chat_log_stream_closure() -> None:
     delattr(chat_log_module.ChatLog, _STREAM_CLOSURE_ORIGINAL)
     if hasattr(chat_log_module.ChatLog, _STREAM_CLOSURE_PATCHED):
         delattr(chat_log_module.ChatLog, _STREAM_CLOSURE_PATCHED)
-    LOGGER.debug("Restored chat log stream closure after kadermanager unload")
+    LOGGER.debug("Restored chat log stream closure after claw_assistant unload")
 
 
 def patch_chatlog_tools(hass: HomeAssistant) -> None:
@@ -317,7 +317,7 @@ def patch_hide_tool_calls_from_pipeline(hass: HomeAssistant) -> None:
     setattr(PipelineRun, _PIPELINE_FILTER_PATCHED, True)
     LOGGER.debug(
         "Patched PipelineRun.process_event to hide tool_calls/tool_result deltas "
-        "from the Assist frontend for kadermanager-owned pipelines"
+        "from the Assist frontend for claw_assistant-owned pipelines"
     )
 
 
@@ -333,7 +333,7 @@ def unpatch_hide_tool_calls_from_pipeline() -> None:
     delattr(PipelineRun, _PIPELINE_FILTER_ORIGINAL)
     if hasattr(PipelineRun, _PIPELINE_FILTER_PATCHED):
         delattr(PipelineRun, _PIPELINE_FILTER_PATCHED)
-    LOGGER.debug("Restored PipelineRun.process_event after kadermanager unload")
+    LOGGER.debug("Restored PipelineRun.process_event after claw_assistant unload")
 
 
 def _is_streaming_enabled(hass: HomeAssistant) -> bool:
@@ -356,7 +356,7 @@ async def _emit_typewriter(hass: HomeAssistant, chat_log, text: str) -> None:
     await asyncio.sleep(0)
     for ch in text:
         listener(chat_log, {"content": ch})
-        await asyncio.sleep(0.03)
+        await asyncio.sleep(0.01)
 
 
 def patch_tool_progress(hass: HomeAssistant) -> None:
@@ -435,4 +435,4 @@ def unpatch_tool_progress() -> None:
     delattr(chat_log_module.ChatLog, _TOOL_PROGRESS_ORIGINAL)
     if hasattr(chat_log_module.ChatLog, _TOOL_PROGRESS_PATCHED):
         delattr(chat_log_module.ChatLog, _TOOL_PROGRESS_PATCHED)
-    LOGGER.debug("Restored ChatLog.async_add_assistant_content after kadermanager unload")
+    LOGGER.debug("Restored ChatLog.async_add_assistant_content after claw_assistant unload")

@@ -82,14 +82,29 @@ async def _run_shell(hass: HomeAssistant, params: dict) -> JsonObjectType:
     cwd = params.get("cwd") or hass.config.config_dir
 
     started = time.monotonic()
+    tmp_script = None
     try:
+        if "\n" in command or "<<" in command:
+            import tempfile
+            tmp_script = tempfile.NamedTemporaryFile(
+                mode="w", suffix=".sh", dir=cwd, delete=False
+            )
+            tmp_script.write(command)
+            tmp_script.flush()
+            tmp_script.close()
+            exec_cmd = f"/bin/sh {tmp_script.name}"
+        else:
+            exec_cmd = command
         proc = await asyncio.create_subprocess_shell(
-            command,
+            exec_cmd,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
             cwd=cwd,
         )
     except Exception as err:
+        if tmp_script:
+            import os
+            os.unlink(tmp_script.name)
         return {"success": False, "error": f"spawn failed: {err}"}
 
     try:
@@ -103,6 +118,13 @@ async def _run_shell(hass: HomeAssistant, params: dict) -> JsonObjectType:
             "timeout": True,
             "elapsed": round(time.monotonic() - started, 3),
         }
+    finally:
+        if tmp_script:
+            import os
+            try:
+                os.unlink(tmp_script.name)
+            except OSError:
+                pass
 
     elapsed = round(time.monotonic() - started, 3)
     stdout = (stdout_b or b"").decode("utf-8", errors="replace")
@@ -181,9 +203,7 @@ async def _search_github_repositories(query: str) -> list[dict[str, object]]:
                             {
                                 "name": item.get("name"),
                                 "full_name": full_name,
-                                "description": item.get("description", "")[:150]
-                                if item.get("description")
-                                else "",
+                                "description": (item.get("description") or "")[:300],
                                 "stars": item.get("stargazers_count"),
                                 "html_url": item.get("html_url", ""),
                             }
@@ -215,11 +235,12 @@ def _find_repo_by_query(hacs_data, query: str):
 
 def _serialize_hacs_repo(repo) -> dict[str, object]:
     latest = repo.data.last_version or repo.data.last_commit
+    desc = repo.data.description or ""
     return {
         "id": str(getattr(repo.data, "id", "")),
         "name": repo.data.name,
         "full_name": repo.data.full_name,
-        "description": repo.data.description or "",
+        "description": desc[:300] if desc else "",
         "installed": bool(repo.data.installed),
         "installed_version": repo.data.installed_version,
         "latest": latest,
@@ -1453,8 +1474,8 @@ class HACSTool(llm.Tool):
     description = """HACS store tool.
 
 Available actions:
-- action=list: List HACS repositories
-- action=search: Search the local HACS cache
+- action=list: List installed HACS repos. page/page_size for pagination
+- action=search: Search local HACS cache. page/page_size for pagination
 - action=github_search: Search GitHub remotely for discovery
 - action=info: Fetch repository details and README
 - action=install / update: Install or update a repository using repository/source/query
@@ -1468,7 +1489,9 @@ Supported params:
 - source: any repository source URL
 - query: search term or repository keyword
 - category: integration/lovelace/plugin/theme/appdaemon/python_script/template
-- params: management params such as version/show_beta/state"""
+- params: management params such as version/show_beta/state
+- page: page number (default 1)
+- page_size: items per page (default 15)"""
     parameters = vol.Schema(
         {
             vol.Required("action"): str,
@@ -1477,6 +1500,8 @@ Supported params:
             vol.Optional("query", default=""): str,
             vol.Optional("category", default="integration"): str,
             vol.Optional("params", default={}): vol.Any(dict, str),
+            vol.Optional("page", default=1): int,
+            vol.Optional("page_size", default=15): int,
         }
     )
 
@@ -1489,6 +1514,8 @@ Supported params:
         query = tool_input.tool_args.get("query", "")
         category = tool_input.tool_args.get("category", "integration")
         params = tool_input.tool_args.get("params", {})
+        page = max(1, tool_input.tool_args.get("page", 1))
+        page_size = max(1, min(30, tool_input.tool_args.get("page_size", 15)))
 
         if isinstance(params, str):
             try:
@@ -1505,10 +1532,27 @@ Supported params:
                 return {"success": False, "error": "HACS is not installed"}
 
             if action == "list":
-                repos = []
+                all_repos = []
                 for repo in hacs_data.repositories.list_all:
-                    repos.append(_serialize_hacs_repo(repo))
-                return {"success": True, "total": len(repos), "repositories": repos}
+                    if not repo.data.installed:
+                        continue
+                    latest = repo.data.last_version or repo.data.last_commit
+                    desc = repo.data.description or ""
+                    all_repos.append({
+                        "name": repo.data.name,
+                        "full_name": repo.data.full_name,
+                        "description": desc[:300] if desc else "",
+                        "installed_version": repo.data.installed_version,
+                        "latest": latest,
+                        "update_available": bool(
+                            latest and latest != repo.data.installed_version
+                        ),
+                        "category": str(getattr(repo.data, "category", "")),
+                    })
+                total = len(all_repos)
+                start = (page - 1) * page_size
+                paged = all_repos[start:start + page_size]
+                return {"success": True, "total": total, "page": page, "page_size": page_size, "pages": (total + page_size - 1) // page_size, "repositories": paged}
 
             if action == "search":
                 if not query:
@@ -1521,22 +1565,19 @@ Supported params:
                         or query_lower in (repo.data.description or "").lower()
                         or query_lower in " ".join(repo.data.topics or []).lower()
                     ):
-                        results.append(
-                            {
-                                "name": repo.data.name,
-                                "full_name": repo.data.full_name,
-                                "description": repo.data.description[:200]
-                                if repo.data.description
-                                else "",
-                                "installed": repo.data.installed,
-                                "stars": repo.data.stargazers_count,
-                                "domain": getattr(repo.data, "domain", None),
-                                "category": str(getattr(repo.data, "category", "")),
-                            }
-                        )
-                        if len(results) >= 20:
-                            break
-                return {"success": True, "results": results}
+                        desc = repo.data.description or ""
+                        results.append({
+                            "name": repo.data.name,
+                            "full_name": repo.data.full_name,
+                            "description": desc[:300] if desc else "",
+                            "installed": repo.data.installed,
+                            "stars": repo.data.stargazers_count,
+                            "category": str(getattr(repo.data, "category", "")),
+                        })
+                total = len(results)
+                start = (page - 1) * page_size
+                paged = results[start:start + page_size]
+                return {"success": True, "total": total, "page": page, "page_size": page_size, "pages": (total + page_size - 1) // page_size, "results": paged}
 
             if action == "github_search":
                 if not query:
@@ -1552,7 +1593,7 @@ Supported params:
                         readme = await repo.get_documentation()
                     except Exception:
                         readme = ""
-                    info["readme"] = readme[:2000] if readme else ""
+                    info["readme"] = readme[:1000] if readme else ""
                     return {"success": True, **info}
 
                 if not repository or "/" not in repository:
@@ -1575,17 +1616,15 @@ Supported params:
                         readme = ""
                         if resp.status == 200:
                             readme_raw = await resp.text()
-                            readme = readme_raw[:2000] if len(readme_raw) > 2000 else readme_raw
+                            readme = readme_raw[:1000] if len(readme_raw) > 1000 else readme_raw
 
                 return {
                     "success": True,
                     "name": repo_data.get("name"),
                     "full_name": repo_data.get("full_name"),
-                    "description": repo_data.get("description"),
+                    "description": (repo_data.get("description") or "")[:300],
                     "stars": repo_data.get("stargazers_count"),
-                    "topics": repo_data.get("topics", []),
                     "readme": readme,
-                    "normalized_source": normalized_source,
                 }
 
             if action in {"install", "update"}:

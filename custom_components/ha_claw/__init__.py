@@ -25,7 +25,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     await async_load_custom_entities(hass)
     await async_setup_runtime(hass, entry)
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
-    LOGGER.info("kadermanager initialized with backend-only runtime")
+    LOGGER.info("claw_assistant initialized with backend-only runtime")
     return True
 
 async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:

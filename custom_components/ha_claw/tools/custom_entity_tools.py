@@ -45,12 +45,12 @@ def _sanitize_entity(entry: dict) -> dict:
 
 class CustomEntityManagerTool(llm.Tool):
     name = "CustomEntityManager"
-    description = """Create, list, edit, or delete dynamic entities under kadermanager device (diagnostic category).
+    description = """Create, list, edit, or delete dynamic entities under claw_assistant device (diagnostic category).
 These are custom runtime entities managed by AI, with Jinja2 template support.
 
 IMPORTANT: When user asks to create an entity or helper, ALWAYS ask which kind they want:
   1. HA Helper (input_boolean/input_number/timer/template sensor etc, independent, use HelperManager)
-  2. AI Custom Entity (under kadermanager device, diagnostic, sensor/binary_sensor/switch/button, use this tool)
+  2. AI Custom Entity (under claw_assistant device, diagnostic, sensor/binary_sensor/switch/button, use this tool)
   Both work. Helpers are more standard, custom entities are more flexible. You can handle either.
 
 action=create: platform + name required.

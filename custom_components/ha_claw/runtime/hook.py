@@ -19,7 +19,7 @@ from .state import (
 LOGGER = logging.getLogger(__name__)
 
 _PIPELINE_PATCHED = False
-_PIPELINE_ORIGINAL = "_kadermanager_final_content_original_process_event"
+_PIPELINE_ORIGINAL = "_claw_assistant_final_content_original_process_event"
 
 
 def _update_injection_tracking(run: Any, delta: dict[str, Any]) -> None:
@@ -128,7 +128,7 @@ def unpatch_pipeline_for_final_content() -> None:
     PipelineRun.process_event = original_process_event
     delattr(PipelineRun, _PIPELINE_ORIGINAL)
     _PIPELINE_PATCHED = False
-    LOGGER.debug("Pipeline final-content injection restored after kadermanager unload")
+    LOGGER.debug("Pipeline final-content injection restored after claw_assistant unload")
 
 
 def install_conversation_hook(hass: HomeAssistant, entry: ConfigEntry) -> None:

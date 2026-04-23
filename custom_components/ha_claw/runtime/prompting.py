@@ -137,7 +137,6 @@ def build_base_prompt(
 
     appended_sections.extend(_build_runtime_preference_sections(runtime_config))
 
-
     context_lines = _build_unified_context(hass, conversation_id)
     shared_context = get_conversation_history().get_recent_context(
         conversation_id or "default", max_turns=3, include_tools=True

@@ -239,6 +239,7 @@ async def async_capture_passive_signal(
     user_text: str,
     assistant_text: str,
     tool_calls: Collection[str] | None = None,
+    conversation_id: str | None = None,
 ) -> dict[str, str | bool] | None:
 
     if not _normalize_text(user_text) or not _normalize_text(assistant_text):
@@ -253,6 +254,9 @@ async def async_capture_passive_signal(
         return None
 
     if signal.kind == "heartbeat":
+        notify_ch = ""
+        if conversation_id and conversation_id.startswith("wechat:"):
+            notify_ch = conversation_id
         path = await async_upsert_heartbeat_task(
             hass,
             title=signal.title or signal.objective[:48] or "follow up",
@@ -260,6 +264,7 @@ async def async_capture_passive_signal(
             objective=signal.objective or signal.value,
             steps=signal.steps or signal.value,
             delete_after_success=signal.delete_after_success,
+            notify_channel=notify_ch,
         )
         LOGGER.debug("Captured passive heartbeat signal from conversation turn")
         return {

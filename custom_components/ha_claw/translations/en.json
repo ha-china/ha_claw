@@ -7,18 +7,18 @@
     }
   },
   "config": {
-    "title": "AI Sidecar",
+    "title": "Claw Assistant",
     "step": {
       "user": {
         "title": "Initial setup",
-        "description": "## Welcome to AI Sidecar\n\nThis integration aggregates and manages Home Assistant conversation agents, giving you a single entry point, fallback routing, and more flexible response display.\n\nConfirm the integration name and submit to continue.",
+        "description": "## Welcome to Claw Assistant\n\nThis integration aggregates and manages Home Assistant conversation agents, giving you a single entry point, fallback routing, and more flexible response display.\n\nConfirm the integration name and submit to continue.",
         "data": {
           "name": "Integration Name"
         }
       },
       "agent_settings": {
         "title": "Agent Settings",
-        "description": "**Instructions:**\nConfigure the AI conversation routing chain. The system tries each agent in order until a valid reply is obtained.\n\n**Primary AI Entity** — The default agent used first\n**Backup AI Entity** — Automatically used when the primary AI fails\n**Summary AI Entity** — Optional. When set, the first two AIs answer separately and this AI summarizes them into one final reply",
+        "description": "Configure the AI conversation routing chain. The system tries each agent in order until a valid reply is obtained.\n\n▸ **Primary AI** — The default agent used first\n▸ **Backup AI** — Automatically used when the primary AI fails\n▸ **Summary AI** — Optional. Both AIs answer separately, then this AI summarizes",
         "data": {
           "primary_agent": "Primary AI entity",
           "fallback_agent": "Backup AI entity",
@@ -40,7 +40,7 @@
       },
       "agent_settings": {
         "title": "Agent Settings",
-        "description": "**Instructions:**\nConfigure the AI conversation routing chain. The system tries each agent in order until a valid reply is obtained.\n\n**Primary AI Entity** — The default agent used first\n**Backup AI Entity** — Automatically used when the primary AI fails\n**Summary AI Entity** — Optional. When set, the first two AIs answer separately and this AI summarizes them into one final reply\n\nTo remove the summary AI, click **(X)** next to the selection.",
+        "description": "Configure the AI conversation routing chain. The system tries each agent in order until a valid reply is obtained.\n\n▸ **Primary AI** — The default agent used first\n▸ **Backup AI** — Automatically used when the primary AI fails\n▸ **Summary AI** — Optional. Both AIs answer separately, then this AI summarizes",
         "data": {
           "back": "Return to main menu",
           "save_and_exit": "Save and complete",
