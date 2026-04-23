@@ -1,25 +1,21 @@
 {
-    "domain": "claw_assistant",
-    "name": "Claw Assistant",
-    "codeowners": [
-      "@knoop7"
-    ],
-    "config_flow": true,
-    "dependencies": [
-      "config",
-      "conversation",
-      "intent",
-      "recorder",
-      "websocket_api"
-    ],
-    "after_dependencies": ["assist_pipeline"],
-    "documentation": "https://github.com/ha-china/ha_claw",
-    "integration_type": "service",
-    "iot_class": "local_polling",
-    "issue_tracker": "https://github.com/ha-china/ha_claw/issues",
-    "single_config_entry": true,
-    "requirements": [
-      "trafilatura==2.0.0"
-    ],
-    "version": "6.2.0"
-  }
+  "domain": "claw_assistant",
+  "name": "Claw Assistant",
+  "after_dependencies": ["assist_pipeline"],
+  "codeowners": ["@knoop7"],
+  "config_flow": true,
+  "dependencies": [
+    "config",
+    "conversation",
+    "intent",
+    "recorder",
+    "websocket_api"
+  ],
+  "documentation": "https://github.com/ha-china/ha_claw",
+  "integration_type": "service",
+  "iot_class": "local_polling",
+  "issue_tracker": "https://github.com/ha-china/ha_claw/issues",
+  "requirements": ["trafilatura==2.0.0"],
+  "single_config_entry": true,
+  "version": "6.2.0"
+}
