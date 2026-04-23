@@ -1,5 +1,5 @@
 
-AI Sidecar (kadermanager) is a Home Assistant custom integration that provides a **unified multi-AI conversation dispatch center** for smart homes. It is not yet another conversation agent—it is the **coordination layer** for all conversation agents, responsible for routing, fallback, and summarization between multiple AIs, and empowering AIs to truly understand and operate your home environment.
+AI Sidecar (Claw) is a Home Assistant custom integration that provides a **unified multi-AI conversation dispatch center** for smart homes. It is not yet another conversation agent—it is the **coordination layer** for all conversation agents, responsible for routing, fallback, and summarization between multiple AIs, and empowering AIs to truly understand and operate your home environment.
 
 Developed and maintained independently by [@knoop7](https://github.com/knoop7).
 
