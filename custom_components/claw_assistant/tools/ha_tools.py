@@ -907,6 +907,39 @@ When response contains next_action, follow that instruction exactly."""
         }
     )
 
+    @staticmethod
+    async def _detect_config_method(
+        hass: HomeAssistant, entry: config_entries.ConfigEntry
+    ) -> dict[str, object]:
+        """Probe whether an entry supports options, subentries, or both."""
+        info: dict[str, object] = {}
+        try:
+            handler = await config_entries._async_get_flow_handler(
+                hass, entry.domain, {}
+            )
+            supported_sub = sorted(
+                handler.async_get_supported_subentry_types(entry).keys()
+            )
+            if supported_sub:
+                info["supports_subentries"] = True
+                info["subentry_types"] = supported_sub
+                info["subentry_count"] = len(entry.subentries)
+        except Exception:
+            pass
+        if "supports_subentries" not in info:
+            info["supports_subentries"] = False
+        has_options = entry.supports_options
+        info["supports_options"] = has_options
+        if has_options and info["supports_subentries"]:
+            info["config_method"] = "both"
+        elif info["supports_subentries"]:
+            info["config_method"] = "subentries"
+        elif has_options:
+            info["config_method"] = "options"
+        else:
+            info["config_method"] = "none"
+        return info
+
     async def async_call(
         self, hass: HomeAssistant, tool_input: llm.ToolInput, llm_context: llm.LLMContext
     ) -> JsonObjectType:
@@ -936,23 +969,45 @@ When response contains next_action, follow that instruction exactly."""
                     entries = hass.config_entries.async_entries(domain)
                 else:
                     entries = hass.config_entries.async_entries()
-                entry_list = [
-                    {
+                entry_list = []
+                config_method_cache: dict[str, dict[str, object]] = {}
+                for e in entries:
+                    item: dict[str, object] = {
                         "entry_id": e.entry_id,
                         "domain": e.domain,
                         "title": e.title,
                         "state": str(e.state),
                         "disabled_by": str(e.disabled_by) if e.disabled_by else None,
                     }
-                    for e in entries
-                ]
-                return {
+                    if domain:
+                        if e.domain not in config_method_cache:
+                            config_method_cache[e.domain] = await self._detect_config_method(hass, e)
+                        cm = config_method_cache[e.domain]
+                        item["config_method"] = cm.get("config_method")
+                        if cm.get("supports_subentries"):
+                            item["subentry_types"] = cm.get("subentry_types")
+                            item["subentry_count"] = len(e.subentries)
+                    entry_list.append(item)
+                resp: dict[str, object] = {
                     "success": True,
                     "message": f"Found {len(entry_list)} config entries",
                     "entries": entry_list,
                     "count": len(entry_list),
-                    "hint": "Use entry_id with config_entries/delete, config_entries/reload, config_entries/options/init, etc.",
                 }
+                if domain and entry_list:
+                    cm = config_method_cache.get(domain, {})
+                    method = cm.get("config_method", "unknown")
+                    if method == "subentries":
+                        resp["hint"] = "This integration uses SUBENTRIES for config. Use config_entries/subentries/list to see them, config_entries/subentries/flow/init to add/modify."
+                    elif method == "options":
+                        resp["hint"] = "Use config_entries/options/init with entry_id to change options."
+                    elif method == "both":
+                        resp["hint"] = "This integration supports both options and subentries."
+                    else:
+                        resp["hint"] = "Use entry_id with config_entries/delete, config_entries/reload, etc."
+                else:
+                    resp["hint"] = "Use entry_id with config_entries/delete, config_entries/reload, config_entries/options/init, etc."
+                return resp
 
             if action == "config_entries/get_single":
                 entry_id = str(params.get("entry_id", "") or "").strip()
@@ -961,11 +1016,14 @@ When response contains next_action, follow that instruction exactly."""
                 entry = hass.config_entries.async_get_entry(entry_id)
                 if entry is None:
                     return {"success": False, "error": "Config entry not found"}
-                return {
+                cm = await self._detect_config_method(hass, entry)
+                resp = {
                     "success": True,
                     "message": f"Loaded config entry {entry.title or entry.domain}",
                     "config_entry": entry.as_json_fragment,
+                    **cm,
                 }
+                return resp
 
             if action == "config_entries/get_supported_subentry_types":
                 entry_id = str(params.get("entry_id", "") or "").strip()
@@ -1288,27 +1346,19 @@ When response contains next_action, follow that instruction exactly."""
                 except data_entry_flow.UnknownHandler:
                     entry = hass.config_entries.async_get_entry(entry_id)
                     if entry is not None:
-                        try:
-                            handler = await config_entries._async_get_flow_handler(
-                                hass, entry.domain, {}
-                            )
-                            supported = sorted(
-                                handler.async_get_supported_subentry_types(entry).keys()
-                            )
-                            if supported:
-                                return {
-                                    "success": False,
-                                    "error": f"This integration does not support options flow. It uses SUBENTRIES instead.",
-                                    "subentry_types": supported,
-                                    "existing_subentries": [
-                                        {"subentry_id": s.subentry_id, "subentry_type": s.subentry_type, "title": s.title}
-                                        for s in entry.subentries.values()
-                                    ],
-                                    "next_action": f"To modify an existing subentry, call config_entries/subentries/flow/init with entry_id='{entry_id}', subentry_type, and subentry_id. To add a new one, omit subentry_id.",
-                                }
-                        except Exception:
-                            pass
-                    return {"success": False, "error": "This integration does not have an options flow. Check if it uses subentries via config_entries/get_supported_subentry_types."}
+                        cm = await self._detect_config_method(hass, entry)
+                        if cm.get("supports_subentries"):
+                            return {
+                                "success": False,
+                                "error": "This integration does not support options flow. It uses SUBENTRIES instead.",
+                                **cm,
+                                "existing_subentries": [
+                                    {"subentry_id": s.subentry_id, "subentry_type": s.subentry_type, "title": s.title}
+                                    for s in entry.subentries.values()
+                                ],
+                                "next_action": f"To modify an existing subentry, call config_entries/subentries/flow/init with entry_id='{entry_id}', subentry_type, and subentry_id. To add a new one, omit subentry_id.",
+                            }
+                    return {"success": False, "error": "This integration does not have an options flow or subentries."}
                 except data_entry_flow.UnknownStep as err:
                     return {"success": False, "error": str(err)}
                 prepared = _prepare_flow_result_json(result, configure_action="config_entries/options/configure")
