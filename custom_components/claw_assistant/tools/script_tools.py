@@ -21,7 +21,7 @@ from homeassistant.components.script.config import async_validate_config_item
 from homeassistant.config import SCRIPT_CONFIG_PATH
 from homeassistant.const import SERVICE_RELOAD
 from homeassistant.core import HomeAssistant
-from homeassistant.helpers import entity_registry as er, llm
+from homeassistant.helpers import category_registry as cr, entity_registry as er, llm
 from homeassistant.helpers.entity_component import EntityComponent
 from homeassistant.util.file import write_utf8_file_atomic
 from homeassistant.util.json import JsonObjectType
@@ -46,6 +46,7 @@ class ScriptTool(llm.Tool):
         "Params: action, script_id, entity_id, config (dict; partial on update, full on create), "
         "variables (for run), icon (emoji or mdi:name; null clears), area_id (must exist; null clears), "
         "labels (list of label_ids; replaces set), name (entity registry display override; null clears back to alias), "
+        "category_id (assign to a category; null clears), "
         "page, page_size. "
         "list returns paginated results (default page=1, page_size=10). "
         "create requires config with sequence; duplicates are rejected. "
@@ -68,6 +69,7 @@ class ScriptTool(llm.Tool):
             vol.Optional("area_id"): vol.Any(str, None),
             vol.Optional("labels"): vol.Any(list, None),
             vol.Optional("name"): vol.Any(str, None),
+            vol.Optional("category_id"): vol.Any(str, None),
         }
     )
 
@@ -85,6 +87,7 @@ class ScriptTool(llm.Tool):
         area_id = args.get("area_id", _SENTINEL) if "area_id" in args else _SENTINEL
         labels = args.get("labels", _SENTINEL) if "labels" in args else _SENTINEL
         name = args.get("name", _SENTINEL) if "name" in args else _SENTINEL
+        category_id = args.get("category_id", _SENTINEL) if "category_id" in args else _SENTINEL
 
         try:
             if action == "list":
@@ -102,14 +105,14 @@ class ScriptTool(llm.Tool):
                 return await self._create_or_update(
                     hass, config, script_id,
                     is_update=False, icon=icon, area_id=area_id,
-                    labels=labels, name=name, sentinel=_SENTINEL,
+                    labels=labels, name=name, category_id=category_id, sentinel=_SENTINEL,
                 )
 
             if action == "update":
                 return await self._create_or_update(
                     hass, config, script_id,
                     is_update=True, icon=icon, area_id=area_id,
-                    labels=labels, name=name, sentinel=_SENTINEL,
+                    labels=labels, name=name, category_id=category_id, sentinel=_SENTINEL,
                 )
 
             if action == "delete":
@@ -174,6 +177,7 @@ class ScriptTool(llm.Tool):
                 continue
             obj_id = state.entity_id.removeprefix("script.")
             reg_entry = registry.async_get(state.entity_id)
+            cat_id = reg_entry.categories.get("script") if reg_entry else None
             all_items.append({
                 "entity_id": state.entity_id,
                 "script_id": obj_id,
@@ -181,6 +185,7 @@ class ScriptTool(llm.Tool):
                 "state": state.state,
                 "icon": reg_entry.icon if reg_entry else None,
                 "area_id": reg_entry.area_id if reg_entry else None,
+                "category_id": cat_id,
             })
         total = len(all_items)
         total_pages = max(1, (total + page_size - 1) // page_size)
@@ -225,6 +230,7 @@ class ScriptTool(llm.Tool):
             "icon": reg_entry.icon if reg_entry else None,
             "area_id": reg_entry.area_id if reg_entry else None,
             "labels": sorted(reg_entry.labels) if reg_entry else [],
+            "category_id": reg_entry.categories.get("script") if reg_entry else None,
         }
 
     async def _run_script(
@@ -244,14 +250,15 @@ class ScriptTool(llm.Tool):
 
     async def _apply_registry_meta(
         self, hass: HomeAssistant, entity_id: str,
-        *, icon=None, area_id=None, labels=None, name=None, sentinel=None,
+        *, icon=None, area_id=None, labels=None, name=None, category_id=None, sentinel=None,
     ) -> dict[str, object]:
-        """Apply icon/area_id/labels/name to entity registry."""
+        """Apply icon/area_id/labels/name/category to entity registry."""
         touch_icon = icon is not sentinel
         touch_area = area_id is not sentinel
         touch_labels = labels is not sentinel
         touch_name = name is not sentinel
-        if not (touch_icon or touch_area or touch_labels or touch_name):
+        touch_category = category_id is not sentinel
+        if not (touch_icon or touch_area or touch_labels or touch_name or touch_category):
             return {}
         applied: dict[str, object] = {}
         try:
@@ -274,6 +281,17 @@ class ScriptTool(llm.Tool):
                 kwargs["labels"] = set(labels) if labels else set()
             if touch_name:
                 kwargs["name"] = name if name else None
+            if touch_category:
+                reg_ent = registry.async_get(entity_id)
+                cats = dict(reg_ent.categories) if reg_ent.categories else {}
+                if category_id:
+                    cat_reg = cr.async_get(hass)
+                    if cat_reg.async_get_category(scope="script", category_id=category_id) is None:
+                        return {"error": f"Category '{category_id}' not found in scope 'script'"}
+                    cats["script"] = category_id
+                else:
+                    cats.pop("script", None)
+                kwargs["categories"] = cats
             registry.async_update_entity(entity_id, **kwargs)
             if touch_icon:
                 applied["icon"] = kwargs.get("icon")
@@ -283,6 +301,8 @@ class ScriptTool(llm.Tool):
                 applied["labels"] = sorted(kwargs.get("labels") or [])
             if touch_name:
                 applied["name"] = kwargs.get("name")
+            if touch_category:
+                applied["category_id"] = category_id
         except Exception as err:
             _LOGGER.warning("Failed to update entity registry for %s: %s", entity_id, err)
             applied["entity_registry_error"] = str(err)
@@ -299,6 +319,7 @@ class ScriptTool(llm.Tool):
         area_id=None,
         labels=None,
         name=None,
+        category_id=None,
         sentinel=None,
     ) -> JsonObjectType:
         """Create or update a script via the same pipeline as the frontend."""
@@ -317,7 +338,7 @@ class ScriptTool(llm.Tool):
             return {"success": False, "error": "script_id is required for update"}
 
         config_patch_empty = is_update and not config
-        touch_meta = any(v is not sentinel for v in (icon, area_id, labels, name))
+        touch_meta = any(v is not sentinel for v in (icon, area_id, labels, name, category_id))
 
         target_entity_id = f"script.{script_id}" if script_id else ""
 
@@ -328,7 +349,7 @@ class ScriptTool(llm.Tool):
                 return {"success": False, "error": "script_id is required for metadata update"}
             applied = await self._apply_registry_meta(
                 hass, target_entity_id,
-                icon=icon, area_id=area_id, labels=labels, name=name, sentinel=sentinel,
+                icon=icon, area_id=area_id, labels=labels, name=name, category_id=category_id, sentinel=sentinel,
             )
             if "error" in applied:
                 return {"success": False, **applied}
@@ -423,7 +444,7 @@ class ScriptTool(llm.Tool):
             target_entity_id = f"script.{script_id}"
         applied = await self._apply_registry_meta(
             hass, target_entity_id,
-            icon=icon, area_id=area_id, labels=labels, name=name, sentinel=sentinel,
+            icon=icon, area_id=area_id, labels=labels, name=name, category_id=category_id, sentinel=sentinel,
         )
         if "error" in applied:
             return {"success": False, **applied}
