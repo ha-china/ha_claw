@@ -3,11 +3,19 @@ from __future__ import annotations
 import logging
 import time
 from dataclasses import dataclass, field
-from typing import Dict, List, Optional, Any
+from typing import Dict, List, Optional, Any, TYPE_CHECKING
 
 from .runtime.response_format import sanitize_response_text
 
+if TYPE_CHECKING:
+    from homeassistant.core import HomeAssistant
+    from homeassistant.helpers.storage import Store
+
 _LOGGER = logging.getLogger(__name__)
+
+STORAGE_VERSION = 1
+STORAGE_KEY = "claw_assistant_conversation_history"
+STORAGE_SAVE_DELAY = 5.0
 
 DEFAULT_END_WORDS = [
     "好", "行", "可以", "没了", "没有了", "就这样", "算了", "不用了", "谢谢",
@@ -78,12 +86,14 @@ class ConversationHistory:
 
     def __init__(
         self,
-        max_turns: int = 10,
+        max_turns: int = 30,
         max_age_hours: float = 24.0,
     ):
         self._histories: Dict[str, List[ConversationTurn]] = {}
+        self._last_touched: Dict[str, float] = {}
         self.max_turns = max_turns
         self.max_age_seconds = max_age_hours * 3600
+        self._store: Optional["Store"] = None
 
     def add_turn(
         self,
@@ -105,9 +115,12 @@ class ConversationHistory:
         )
 
         self._histories[conversation_id].append(turn)
+        self._last_touched[conversation_id] = turn.timestamp
 
         if len(self._histories[conversation_id]) > self.max_turns:
             self._histories[conversation_id] = self._histories[conversation_id][-self.max_turns:]
+
+        self._schedule_save()
 
     def get_history(self, conversation_id: str) -> List[ConversationTurn]:
 
@@ -144,12 +157,69 @@ class ConversationHistory:
 
         return "\n".join(lines)
 
-    def clear(self, conversation_id: str = None) -> None:
+    def clear(self, conversation_id: str = None) -> int:
 
         if conversation_id:
+            removed = len(self._histories.get(conversation_id, []))
             self._histories.pop(conversation_id, None)
-        else:
-            self._histories.clear()
+            self._last_touched.pop(conversation_id, None)
+            self._schedule_save()
+            return removed
+        removed = sum(len(turns) for turns in self._histories.values())
+        self._histories.clear()
+        self._last_touched.clear()
+        self._schedule_save()
+        return removed
+
+    def get_recent_across_conversations(
+        self,
+        minutes: float = 30.0,
+        max_turns_per_conv: int = 5,
+    ) -> List[Dict[str, Any]]:
+        """Return turns from all conversations whose last_touched is within the last N minutes.
+
+        Useful after a window/conversation_id has been closed to recall what the user
+        was just discussing."""
+        now = time.time()
+        cutoff = now - minutes * 60
+        result: List[Dict[str, Any]] = []
+        for conv_id, last_ts in self._last_touched.items():
+            if last_ts < cutoff:
+                continue
+            turns = self._histories.get(conv_id, [])
+            if not turns:
+                continue
+            recent_turns = [t for t in turns if t.timestamp >= cutoff][-max_turns_per_conv:]
+            if not recent_turns:
+                continue
+            result.append(
+                {
+                    "conversation_id": conv_id,
+                    "last_touched": time.strftime(
+                        "%Y-%m-%d %H:%M:%S", time.localtime(last_ts)
+                    ),
+                    "last_touched_seconds_ago": int(now - last_ts),
+                    "turn_count": len(recent_turns),
+                    "turns": [
+                        {
+                            "user": t.user_message,
+                            "assistant": (
+                                t.assistant_response[:500] + "..."
+                                if len(t.assistant_response) > 500
+                                else t.assistant_response
+                            ),
+                            "tool_calls": t.tool_calls,
+                            "at": time.strftime(
+                                "%H:%M:%S", time.localtime(t.timestamp)
+                            ),
+                        }
+                        for t in recent_turns
+                    ],
+                }
+            )
+        # Most recent conversation first
+        result.sort(key=lambda x: x["last_touched_seconds_ago"])
+        return result
 
     def _cleanup_old_turns(self, conversation_id: str) -> None:
 
@@ -180,6 +250,10 @@ class ConversationHistory:
 
         for conv_id in empty_conversations:
             del self._histories[conv_id]
+            self._last_touched.pop(conv_id, None)
+
+        if removed:
+            self._schedule_save()
 
         return removed
 
@@ -204,8 +278,116 @@ class ConversationHistory:
             "newest_turn": time.strftime("%Y-%m-%d %H:%M", time.localtime(newest)) if newest else None,
         }
 
+    # -------- Persistence --------
+
+    def attach_store(self, store: "Store") -> None:
+        """Attach an HA Store; subsequent mutations will schedule debounced saves."""
+        self._store = store
+
+    def _data_to_save(self) -> Dict[str, Any]:
+        return {
+            "histories": {
+                conv_id: [
+                    {
+                        "user_message": t.user_message,
+                        "assistant_response": t.assistant_response,
+                        "timestamp": t.timestamp,
+                        "tool_calls": list(t.tool_calls or []),
+                        "metadata": dict(t.metadata or {}),
+                    }
+                    for t in turns
+                ]
+                for conv_id, turns in self._histories.items()
+            },
+            "last_touched": dict(self._last_touched),
+        }
+
+    def _schedule_save(self) -> None:
+        if self._store is None:
+            return
+        try:
+            self._store.async_delay_save(self._data_to_save, STORAGE_SAVE_DELAY)
+        except Exception as err:  # pragma: no cover
+            _LOGGER.debug("Failed to schedule history save: %s", err)
+
+    def load_from_dict(self, data: Dict[str, Any]) -> int:
+        """Load persisted data and drop anything older than max_age_seconds."""
+        if not data:
+            return 0
+        histories = data.get("histories") or {}
+        last_touched = data.get("last_touched") or {}
+        now = time.time()
+        cutoff = now - self.max_age_seconds
+        loaded = 0
+        for conv_id, turns in histories.items():
+            kept: List[ConversationTurn] = []
+            for t in turns or []:
+                ts = float(t.get("timestamp", 0) or 0)
+                if ts <= 0 or ts < cutoff:
+                    continue
+                kept.append(
+                    ConversationTurn(
+                        user_message=str(t.get("user_message", "")),
+                        assistant_response=str(t.get("assistant_response", "")),
+                        timestamp=ts,
+                        tool_calls=list(t.get("tool_calls") or []),
+                        metadata=dict(t.get("metadata") or {}),
+                    )
+                )
+            if kept:
+                self._histories[conv_id] = kept[-self.max_turns:]
+                loaded += len(self._histories[conv_id])
+        for conv_id, ts in last_touched.items():
+            try:
+                ts_f = float(ts)
+            except (TypeError, ValueError):
+                continue
+            if ts_f < cutoff:
+                continue
+            if conv_id in self._histories:
+                self._last_touched[conv_id] = ts_f
+        return loaded
+
 
 _conversation_history: Optional[ConversationHistory] = None
+
+
+async def async_setup_history_store(hass: "HomeAssistant") -> ConversationHistory:
+    """Load persisted history from disk and attach the store for future saves.
+
+    Safe to call multiple times; subsequent calls are no-ops if already attached.
+    """
+    from homeassistant.helpers.storage import Store
+
+    history = get_conversation_history()
+    if history._store is not None:
+        return history
+    store: Store = Store(hass, STORAGE_VERSION, STORAGE_KEY)
+    try:
+        data = await store.async_load()
+    except Exception as err:
+        _LOGGER.warning("Failed to load conversation history from store: %s", err)
+        data = None
+    if data:
+        loaded = history.load_from_dict(data)
+        _LOGGER.info(
+            "Restored %d conversation turns from storage (24h retention)", loaded
+        )
+    history.attach_store(store)
+    # Drop anything expired and persist cleaned snapshot
+    history.cleanup_all()
+    return history
+
+
+async def async_flush_history_store(hass: "HomeAssistant") -> None:
+    """Force-flush any pending history save (called on unload)."""
+    history = get_conversation_history()
+    if history._store is None:
+        return
+    try:
+        await history._store.async_save(history._data_to_save())
+    except Exception as err:  # pragma: no cover
+        _LOGGER.debug("Failed to flush history store: %s", err)
 
 
 def get_conversation_history() -> ConversationHistory:
