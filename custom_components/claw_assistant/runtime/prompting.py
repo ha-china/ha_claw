@@ -126,8 +126,22 @@ def build_base_prompt(
     runtime_config: ConversationRuntimeConfig,
 ) -> str:
 
+    from .state import get_channel_type, is_im_channel
+
     base_prompt = build_internal_llm_prompt(text)
     appended_sections: list[str] = []
+
+    ch_type = get_channel_type(conversation_id)
+    if is_im_channel(conversation_id):
+        appended_sections.append(
+            f"## Channel\nType: {ch_type} (IM). "
+            "[IMAGE:entity/url] tags are supported — gateway delivers media directly."
+        )
+    else:
+        appended_sections.append(
+            "## Channel\nType: ha (Home Assistant frontend). "
+            "[IMAGE:...] tags are NOT supported here. Use CameraAnalyze for vision tasks."
+        )
 
     topic_hint = build_homeassistant_topic_hint(text)
     if topic_hint:

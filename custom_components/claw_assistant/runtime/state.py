@@ -23,6 +23,22 @@ def reset_active_conversation(token: Token[str]) -> None:
 
     _active_conversation_id.reset(token)
 
+_IM_PREFIXES = ("wechat:", "feishu:", "dingtalk:", "qq:")
+
+
+def is_im_channel(conversation_id: str | None) -> bool:
+    return bool(conversation_id and conversation_id.startswith(_IM_PREFIXES))
+
+
+def get_channel_type(conversation_id: str | None) -> str:
+    if not conversation_id:
+        return "ha"
+    for prefix in _IM_PREFIXES:
+        if conversation_id.startswith(prefix):
+            return prefix.rstrip(":")
+    return "ha"
+
+
 RUNTIME_STORE_KEY = "runtime_state"
 
 _LEGACY_BUCKETS: dict[str, str] = {
