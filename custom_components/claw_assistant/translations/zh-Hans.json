@@ -1,5 +1,14 @@
 {
   "title": "Claw Assistant",
+  "selector": {
+    "conversation_mode": {
+      "options": {
+        "no_name": "不显示名称",
+        "add_name": "显示 AI 名称",
+        "detailed": "完整显示"
+      }
+    }
+  },
   "entity": {
     "sensor": {
       "heartbeat": {
