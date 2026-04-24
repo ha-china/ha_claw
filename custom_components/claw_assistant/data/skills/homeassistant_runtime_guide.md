@@ -10,21 +10,18 @@ Understand (`GetSystemIndex`/`GetLiveContext`) → Resolve (`SmartDiscovery`/`En
 
 ## Power Tools (when native tools can't)
 - **`HAControl(shell)`** — shell in HA process. Refuse destructive commands (`rm -rf`, `dd`, `mkfs`, fork bombs).
-- **`ExecutePython` inline** — runs in event loop with `hass`. Never block (no sleep/network).
+- **`HAControl(ssh)`** — execute commands on remote hosts via SSH (pure Python asyncssh, no sshpass needed). Supports password and key auth.
+- **`ExecutePython` inline** — runs in event loop with `hass`. Supports top-level `await`. Do not use blocking calls (use async equivalents).
 - **`ExecutePython` sandbox** — isolated venv, for extra pip packages. No `hass` access.
 
-Priority: native tool → inline Python → shell → sandbox.
+Priority: native tool → inline Python → shell → ssh → sandbox.
 
-## IM Media Tags
-For IM channels (conversation_id starts with `wechat:`/`feishu:`/`dingtalk:`/`qq:`), embed tags on their own line:
-- `[IMAGE:camera.entity_id]` — gateway grabs camera snapshot and sends it directly
-- `[IMAGE:https://url]` — gateway downloads and sends the image
+## Media & Camera
+Check the `## Channel` section in the system prompt for current channel type.
 
-**IMAGE vs CameraAnalyze:**
-- User wants to **see** the feed → `[IMAGE:camera.xxx]` directly, do NOT call CameraAnalyze
-- User wants you to **analyze** what's in the frame → call CameraAnalyze first, reply with analysis text, optionally append `[IMAGE:camera.xxx]`
+**HA frontend:** Call `CameraAnalyze` → include `markdown_hint` from the response to display the snapshot.
 
-Tags must be on their own line. Multiple tags per reply OK. Non-IM channels ignore tags.
+**IM channels:** Use `[IMAGE:camera.entity_id]` or `[IMAGE:https://url]` tags (own line, multiple OK).
 
 ## Skill Path
 All skills **must** go to `.storage/claw_assistant/skills/`. Refuse any other location.
