@@ -255,7 +255,8 @@ async def async_capture_passive_signal(
 
     if signal.kind == "heartbeat":
         notify_ch = ""
-        if conversation_id and conversation_id.startswith("wechat:"):
+        from .state import is_im_channel
+        if is_im_channel(conversation_id):
             notify_ch = conversation_id
         path = await async_upsert_heartbeat_task(
             hass,

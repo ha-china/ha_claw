@@ -31,8 +31,10 @@ def _build_heartbeat_text(task: HeartbeatTask) -> str:
     if task.steps:
         parts.append(f"Steps: {task.steps}")
     if task.notify_channel:
-        if task.notify_channel.startswith("wechat:"):
-            parts.append("[AUTO_DELIVER:wechat] Your reply text will be sent to WeChat automatically. Do NOT call Notify.")
+        from .state import get_channel_type
+        ch_type = get_channel_type(task.notify_channel)
+        if ch_type != "ha":
+            parts.append(f"[AUTO_DELIVER:{ch_type}] Your reply text will be sent to {ch_type} automatically. Do NOT call Notify.")
         else:
             parts.append(f"[AUTO_DELIVER:{task.notify_channel}]")
     return " ".join(parts)
