@@ -145,6 +145,66 @@ async def _run_shell(hass: HomeAssistant, params: dict) -> JsonObjectType:
     }
 
 
+async def _run_ssh(params: dict) -> JsonObjectType:
+    import asyncssh
+
+    host = str(params.get("host", "")).strip()
+    if not host:
+        return {"success": False, "error": "Missing required parameter: host"}
+    command = str(params.get("command", "")).strip()
+    if not command:
+        return {"success": False, "error": "Missing required parameter: command"}
+
+    username = str(params.get("username", "root")).strip()
+    password = params.get("password") or None
+    port = int(params.get("port", 22) or 22)
+    timeout = max(1, min(int(params.get("timeout", _SHELL_DEFAULT_TIMEOUT) or _SHELL_DEFAULT_TIMEOUT), _SHELL_MAX_TIMEOUT))
+
+    connect_kwargs: dict[str, Any] = {
+        "host": host,
+        "port": port,
+        "username": username,
+        "known_hosts": None,
+    }
+    if password:
+        connect_kwargs["password"] = password
+    key_file = params.get("key_file") or None
+    if key_file:
+        connect_kwargs["client_keys"] = [key_file]
+
+    started = time.monotonic()
+    try:
+        async with asyncssh.connect(**connect_kwargs) as conn:
+            result = await asyncio.wait_for(conn.run(command), timeout=timeout)
+    except asyncio.TimeoutError:
+        return {
+            "success": False,
+            "error": f"SSH command exceeded {timeout}s",
+            "timeout": True,
+            "elapsed": round(time.monotonic() - started, 3),
+        }
+    except Exception as err:
+        return {"success": False, "error": f"SSH connection/execution failed: {err}"}
+
+    elapsed = round(time.monotonic() - started, 3)
+    stdout = (result.stdout or "")
+    stderr = (result.stderr or "")
+    if len(stdout) > _SHELL_MAX_OUTPUT:
+        stdout = stdout[:_SHELL_MAX_OUTPUT] + f"\n...[truncated, {len(stdout)} bytes total]"
+    if len(stderr) > _SHELL_MAX_OUTPUT:
+        stderr = stderr[:_SHELL_MAX_OUTPUT] + f"\n...[truncated, {len(stderr)} bytes total]"
+
+    rc = result.exit_status if result.exit_status is not None else -1
+    return {
+        "success": rc == 0,
+        "returncode": rc,
+        "stdout": stdout,
+        "stderr": stderr,
+        "elapsed": elapsed,
+        "host": host,
+    }
+
+
 def _normalize_repo_source(value: str) -> dict[str, str]:
 
     raw = value.strip()
@@ -532,6 +592,9 @@ Available actions:
 - shell: Run a shell command via `/bin/sh -c` asynchronously. params: {command, timeout=30, cwd}.
   Returns stdout/stderr/returncode/elapsed. Default cwd is the HA config directory.
   Example: {"command": "curl -sS https://api.github.com/zen"}
+  IMPORTANT: Before using shell to modify automations.yaml / configuration.yaml / sensors.yaml,
+  politely explain to the user what you want to change and why, then wait for explicit confirmation.
+  Prefer the Automation tool for automation changes (safer, uses official API). Reading these files is fine.
 - check_config: Validate the current Home Assistant configuration
 - list_integrations: List installed integrations
 - get_integration: Get details for one integration (params: {domain: "integration_domain"})
@@ -542,7 +605,10 @@ Available actions:
 - reload_themes/reload_resources/reload_scripts/reload_automations: Reload related HA resources
 - get_system_log: Get recent HA system error/warning log entries from memory (params: {limit: 20})
 - get_error_log: Read the HA error log file tail (params: {lines: 50}). Works even if shell is unavailable.
-- get_diagnostics: Get diagnostic info for an integration (params: {domain}). Returns entry state, unavailable entities, related errors."""
+- get_diagnostics: Get diagnostic info for an integration (params: {domain}). Returns entry state, unavailable entities, related errors.
+- ssh: Execute a command on a remote host via SSH (pure Python, no sshpass needed).
+  params: {host, command, username="root", password, key_file, port=22, timeout=30}.
+  Returns stdout/stderr/returncode/elapsed. Supports password or key-based auth."""
     parameters = vol.Schema(
         {
             vol.Required("action"): str,
@@ -564,6 +630,9 @@ Available actions:
 
         if action == "shell":
             return await _run_shell(hass, params)
+
+        if action == "ssh":
+            return await _run_ssh(params)
 
         if action == "list_integrations":
             entries = hass.config_entries.async_entries()
