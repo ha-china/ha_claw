@@ -263,7 +263,11 @@ Available actions:
 
 Rules:
 - Only paths inside the Home Assistant config directory are allowed
-- Any write must be staged first, then applied after user confirmation"""
+- Any write must be staged first, then applied after user confirmation
+
+IMPORTANT: For core config files (automations.yaml / configuration.yaml / sensors.yaml),
+politely explain to the user what you want to change and why, then wait for explicit confirmation
+before staging any write. Prefer the Automation tool for automation edits. Reading these files is fine."""
     parameters = vol.Schema(
         {
             vol.Required("action"): vol.In(
@@ -737,175 +741,611 @@ class ListServicesTool(llm.Tool):
         return {"success": False, "error": f"Domain {domain} does not exist or has no services"}
 
 
-class AutomationTool(llm.Tool):
-    name = "Automation"
-    description = """Manage Home Assistant automations: list, trigger, enable, disable, or create.
-
-For create:
-- `config` must be a full automation config dict: {alias, trigger, action, [condition, mode, description]}.
-- Optional `automation_id` pins the storage id; otherwise a slug of alias is used.
-- Writes to `<config>/automations.yaml` (creates the file if missing) and reloads automations.
-- Does NOT overwrite an existing entry with the same id unless `overwrite=true`."""
+class RegistryTool(llm.Tool):
+    name = "Registry"
+    description = (
+        "Manage Home Assistant registries: area, floor, label, category, entity. "
+        "Actions: list, get, create, update, delete, remove, rename. "
+        "Top-level fields: registry, action, area_id, floor_id, label_id, category_id, entity_id, scope, params. "
+        "label get/update/delete accept label_id or name. label create is idempotent by name. "
+        "entity params support labels (replace), labels_add (append), labels_remove. "
+        "Each label item may be an id, a name, or an object with name/icon/color/description; "
+        "unknown names are auto-created, existing labels have missing fields filled in only. "
+        "Use action=list on the label registry to discover valid color values."
+    )
     parameters = vol.Schema(
         {
-            vol.Required("action"): vol.In(["list", "trigger", "enable", "disable", "create"]),
+            vol.Required("registry"): vol.In(["area", "floor", "label", "category", "entity"]),
+            vol.Required("action"): vol.In(["list", "get", "create", "update", "delete", "remove", "rename"]),
+            vol.Optional("area_id", default=""): str,
+            vol.Optional("floor_id", default=""): str,
+            vol.Optional("label_id", default=""): str,
+            vol.Optional("category_id", default=""): str,
             vol.Optional("entity_id", default=""): str,
-            vol.Optional("config", default={}): dict,
-            vol.Optional("automation_id", default=""): str,
-            vol.Optional("overwrite", default=False): bool,
+            vol.Optional("scope", default=""): str,
+            vol.Optional("params", default={}): dict,
         }
     )
 
     async def async_call(
         self, hass: HomeAssistant, tool_input: llm.ToolInput, llm_context: llm.LLMContext
     ) -> JsonObjectType:
-        action = tool_input.tool_args.get("action", "list")
-        entity_id = tool_input.tool_args.get("entity_id", "")
+        registry_type = tool_input.tool_args.get("registry", "")
+        action = tool_input.tool_args.get("action", "")
+        params = tool_input.tool_args.get("params") or {}
 
         try:
-            if action == "list":
-                automations = [
-                    state for state in hass.states.async_all()
-                    if state.entity_id.startswith("automation.")
-                ]
-                return {
-                    "success": True,
-                    "automations": [
-                        {
-                            "entity_id": automation.entity_id,
-                            "name": automation.name,
-                            "state": automation.state,
-                        }
-                        for automation in automations
-                    ],
-                }
-
-            if action == "trigger" and entity_id:
-                await hass.services.async_call(
-                    "automation", "trigger", {"entity_id": entity_id}, blocking=True
-                )
-                return {"success": True, "message": f"Triggered {entity_id}"}
-
-            if action == "enable" and entity_id:
-                await hass.services.async_call(
-                    "automation", "turn_on", {"entity_id": entity_id}, blocking=True
-                )
-                return {"success": True, "message": f"Enabled {entity_id}"}
-
-            if action == "disable" and entity_id:
-                await hass.services.async_call(
-                    "automation", "turn_off", {"entity_id": entity_id}, blocking=True
-                )
-                return {"success": True, "message": f"Disabled {entity_id}"}
-
-            if action == "create":
-                return await self._create_automation(
-                    hass,
-                    config=tool_input.tool_args.get("config") or {},
-                    automation_id=str(tool_input.tool_args.get("automation_id", "")).strip(),
-                    overwrite=bool(tool_input.tool_args.get("overwrite", False)),
-                )
-
-            return {"success": False, "error": "Invalid action or missing required parameters"}
+            if registry_type == "area":
+                return await self._handle_area(hass, action, tool_input, params)
+            if registry_type == "floor":
+                return await self._handle_floor(hass, action, tool_input, params)
+            if registry_type == "label":
+                return await self._handle_label(hass, action, tool_input, params)
+            if registry_type == "category":
+                return await self._handle_category(hass, action, tool_input, params)
+            if registry_type == "entity":
+                return await self._handle_entity(hass, action, tool_input, params)
+            return {"success": False, "error": f"Unknown registry: {registry_type}"}
         except Exception as err:
-            _LOGGER.error("AutomationTool error: %s", err)
+            _LOGGER.error("RegistryTool error: %s", err)
             return {"success": False, "error": str(err)}
 
-    async def _create_automation(
-        self,
-        hass: HomeAssistant,
-        *,
-        config: dict,
-        automation_id: str,
-        overwrite: bool,
+    async def _handle_area(
+        self, hass: HomeAssistant, action: str, tool_input: llm.ToolInput, params: dict
     ) -> JsonObjectType:
-        import re
+        from homeassistant.helpers import area_registry as ar
 
-        from homeassistant.components.automation.config import (
-            async_validate_config_item,
+        registry = ar.async_get(hass)
+        area_id = tool_input.tool_args.get("area_id", "") or params.get("area_id", "")
+
+        if action == "list":
+            areas = [
+                {
+                    "area_id": entry.id,
+                    "name": entry.name,
+                    "icon": entry.icon,
+                    "floor_id": entry.floor_id,
+                    "aliases": list(entry.aliases),
+                    "labels": list(entry.labels),
+                }
+                for entry in registry.async_list_areas()
+            ]
+            return {"success": True, "areas": areas, "count": len(areas)}
+
+        if action == "get":
+            if not area_id:
+                return {"success": False, "error": "area_id is required for get"}
+            entry = registry.async_get_area(area_id)
+            if not entry:
+                return {"success": False, "error": f"Area not found: {area_id}"}
+            return {
+                "success": True,
+                "area_id": entry.id,
+                "name": entry.name,
+                "icon": entry.icon,
+                "floor_id": entry.floor_id,
+                "aliases": list(entry.aliases),
+                "labels": list(entry.labels),
+                "picture": entry.picture,
+            }
+
+        if action == "create":
+            name = params.get("name", "")
+            if not name:
+                return {"success": False, "error": "name is required for create"}
+            data = {"name": name}
+            for key in ("icon", "floor_id", "picture", "temperature_entity_id", "humidity_entity_id"):
+                if key in params:
+                    data[key] = params[key]
+            if "aliases" in params:
+                data["aliases"] = set(params["aliases"])
+            if "labels" in params:
+                data["labels"] = set(params["labels"])
+            entry = registry.async_create(**data)
+            return {"success": True, "area_id": entry.id, "name": entry.name}
+
+        if action == "update":
+            if not area_id:
+                return {"success": False, "error": "area_id is required for update"}
+            data = {"area_id": area_id}
+            for key in ("name", "icon", "floor_id", "picture", "temperature_entity_id", "humidity_entity_id"):
+                if key in params:
+                    data[key] = params[key]
+            if "aliases" in params:
+                data["aliases"] = set(params["aliases"])
+            if "labels" in params:
+                data["labels"] = set(params["labels"])
+            entry = registry.async_update(**data)
+            return {"success": True, "area_id": entry.id, "name": entry.name}
+
+        if action == "delete":
+            if not area_id:
+                return {"success": False, "error": "area_id is required for delete"}
+            registry.async_delete(area_id)
+            return {"success": True, "message": f"Deleted area {area_id}"}
+
+        return {"success": False, "error": f"Unknown action for area: {action}"}
+
+    async def _handle_floor(
+        self, hass: HomeAssistant, action: str, tool_input: llm.ToolInput, params: dict
+    ) -> JsonObjectType:
+        from homeassistant.helpers import floor_registry as fr
+
+        registry = fr.async_get(hass)
+        floor_id = tool_input.tool_args.get("floor_id", "") or params.get("floor_id", "")
+
+        if action == "list":
+            floors = [
+                {
+                    "floor_id": entry.floor_id,
+                    "name": entry.name,
+                    "icon": entry.icon,
+                    "level": entry.level,
+                    "aliases": list(entry.aliases),
+                }
+                for entry in registry.async_list_floors()
+            ]
+            return {"success": True, "floors": floors, "count": len(floors)}
+
+        if action == "get":
+            if not floor_id:
+                return {"success": False, "error": "floor_id is required for get"}
+            entry = registry.async_get_floor(floor_id)
+            if not entry:
+                return {"success": False, "error": f"Floor not found: {floor_id}"}
+            return {
+                "success": True,
+                "floor_id": entry.floor_id,
+                "name": entry.name,
+                "icon": entry.icon,
+                "level": entry.level,
+                "aliases": list(entry.aliases),
+            }
+
+        if action == "create":
+            name = params.get("name", "")
+            if not name:
+                return {"success": False, "error": "name is required for create"}
+            data = {"name": name}
+            for key in ("icon", "level"):
+                if key in params:
+                    data[key] = params[key]
+            if "aliases" in params:
+                data["aliases"] = set(params["aliases"])
+            entry = registry.async_create(**data)
+            return {"success": True, "floor_id": entry.floor_id, "name": entry.name}
+
+        if action == "update":
+            if not floor_id:
+                return {"success": False, "error": "floor_id is required for update"}
+            data = {"floor_id": floor_id}
+            for key in ("name", "icon", "level"):
+                if key in params:
+                    data[key] = params[key]
+            if "aliases" in params:
+                data["aliases"] = set(params["aliases"])
+            entry = registry.async_update(**data)
+            return {"success": True, "floor_id": entry.floor_id, "name": entry.name}
+
+        if action == "delete":
+            if not floor_id:
+                return {"success": False, "error": "floor_id is required for delete"}
+            registry.async_delete(floor_id)
+            return {"success": True, "message": f"Deleted floor {floor_id}"}
+
+        return {"success": False, "error": f"Unknown action for floor: {action}"}
+
+    async def _handle_label(
+        self, hass: HomeAssistant, action: str, tool_input: llm.ToolInput, params: dict
+    ) -> JsonObjectType:
+        from homeassistant.helpers import label_registry as lr
+        from homeassistant.components.config.label_registry import (
+            SUPPORTED_LABEL_THEME_COLORS,
         )
-        from homeassistant.components.config.view import _read, _write
-        from homeassistant.config import AUTOMATION_CONFIG_PATH
-        from homeassistant.const import CONF_ID, SERVICE_RELOAD
 
-        if not isinstance(config, dict) or not config:
-            return {"success": False, "error": "Missing required parameter: config (dict)"}
-        alias = str(config.get("alias", "")).strip()
-        if not alias:
-            return {"success": False, "error": "config.alias is required"}
-        if "trigger" not in config:
-            return {"success": False, "error": "config.trigger is required"}
-        if "action" not in config:
-            return {"success": False, "error": "config.action is required"}
+        registry = lr.async_get(hass)
+        raw_identifier = (
+            tool_input.tool_args.get("label_id", "")
+            or params.get("label_id", "")
+            or params.get("name", "")
+        )
 
-        if not automation_id:
-            slug = re.sub(r"[^a-z0-9_]+", "_", alias.lower()).strip("_")
-            automation_id = slug or f"auto_{int(time.time())}"
+        def _resolve_label_id(ident: str) -> str | None:
+            if not ident:
+                return None
+            # Try direct label_id match
+            if registry.async_get_label(ident):
+                return ident
+            # Fallback: match by name (case-insensitive)
+            ident_lower = ident.strip().lower()
+            for entry in registry.async_list_labels():
+                if entry.name.lower() == ident_lower:
+                    return entry.label_id
+            return None
 
-        entry = dict(config)
-        entry[CONF_ID] = automation_id
+        # Only resolve when an action needs an existing label
+        label_id = None
+        if action in ("get", "update", "delete"):
+            label_id = _resolve_label_id(raw_identifier)
 
-        try:
-            await async_validate_config_item(hass, automation_id, entry)
-        except vol.Invalid as err:
-            return {"success": False, "error": f"Invalid automation config: {err}"}
-
-        path = hass.config.path(AUTOMATION_CONFIG_PATH)
-        current = await hass.async_add_executor_job(_read, path)
-        if current is None:
-            current = []
-        if not isinstance(current, list):
+        if action == "list":
+            labels = [
+                {
+                    "label_id": entry.label_id,
+                    "name": entry.name,
+                    "icon": entry.icon,
+                    "color": entry.color,
+                    "description": entry.description,
+                }
+                for entry in registry.async_list_labels()
+            ]
             return {
-                "success": False,
-                "error": (
-                    f"{path} is not a list of automations; this file is managed "
-                    "by Home Assistant's UI. Aborting to preserve user data."
-                ),
+                "success": True,
+                "labels": labels,
+                "count": len(labels),
+                "supported_colors": sorted(SUPPORTED_LABEL_THEME_COLORS),
             }
 
-        replaced = False
-        for idx, item in enumerate(current):
-            if isinstance(item, dict) and str(item.get(CONF_ID, "")) == automation_id:
-                if not overwrite:
-                    return {
-                        "success": False,
-                        "error": (
-                            f"automation id '{automation_id}' already exists; "
-                            "retry with overwrite=true to replace it."
-                        ),
-                    }
-                merged = dict(item)
-                merged.update(entry)
-                current[idx] = merged
-                replaced = True
-                break
-        if not replaced:
-            current.append(entry)
+        if action == "get":
+            if not raw_identifier:
+                return {"success": False, "error": "label_id or name is required for get"}
+            if not label_id:
+                return {
+                    "success": False,
+                    "error": f"Label not found by id or name: '{raw_identifier}'. Use action=list to see available labels.",
+                }
+            entry = registry.async_get_label(label_id)
+            return {
+                "success": True,
+                "label_id": entry.label_id,
+                "name": entry.name,
+                "icon": entry.icon,
+                "color": entry.color,
+                "description": entry.description,
+            }
 
-        await hass.async_add_executor_job(_write, path, current)
+        if action == "create":
+            name = params.get("name", "")
+            if not name:
+                return {"success": False, "error": "name is required for create"}
+            # If a label with this name already exists, return it idempotently
+            existing = registry.async_get_label_by_name(name)
+            if existing:
+                return {
+                    "success": True,
+                    "label_id": existing.label_id,
+                    "name": existing.name,
+                    "color": existing.color,
+                    "icon": existing.icon,
+                    "description": existing.description,
+                    "message": "Label already exists; returning existing entry.",
+                }
+            data = {"name": name}
+            for key in ("icon", "color", "description"):
+                if key in params:
+                    data[key] = params[key]
+            entry = registry.async_create(**data)
+            return {
+                "success": True,
+                "label_id": entry.label_id,
+                "name": entry.name,
+                "color": entry.color,
+                "icon": entry.icon,
+                "description": entry.description,
+            }
 
-        try:
-            await hass.services.async_call(
-                "automation", SERVICE_RELOAD, {}, blocking=True
+        if action == "update":
+            if not raw_identifier:
+                return {"success": False, "error": "label_id or name is required for update"}
+            if not label_id:
+                return {
+                    "success": False,
+                    "error": f"Label not found by id or name: '{raw_identifier}'. Use action=list to see available labels.",
+                }
+            data = {"label_id": label_id}
+            for key in ("name", "icon", "color", "description"):
+                if key in params:
+                    data[key] = params[key]
+            entry = registry.async_update(**data)
+            return {
+                "success": True,
+                "label_id": entry.label_id,
+                "name": entry.name,
+                "color": entry.color,
+                "icon": entry.icon,
+                "description": entry.description,
+            }
+
+        if action == "delete":
+            if not raw_identifier:
+                return {"success": False, "error": "label_id or name is required for delete"}
+            if not label_id:
+                return {
+                    "success": False,
+                    "error": f"Label not found by id or name: '{raw_identifier}'. Use action=list to see available labels.",
+                }
+            registry.async_delete(label_id)
+            return {"success": True, "message": f"Deleted label {label_id}"}
+
+        return {"success": False, "error": f"Unknown action for label: {action}"}
+
+    async def _handle_category(
+        self, hass: HomeAssistant, action: str, tool_input: llm.ToolInput, params: dict
+    ) -> JsonObjectType:
+        from homeassistant.helpers import category_registry as cr
+
+        registry = cr.async_get(hass)
+        scope = tool_input.tool_args.get("scope", "") or params.get("scope", "")
+        category_id = tool_input.tool_args.get("category_id", "") or params.get("category_id", "")
+
+        if action == "list":
+            if not scope:
+                return {"success": False, "error": "scope is required for list (e.g. 'automation', 'entity')"}
+            categories = [
+                {
+                    "category_id": entry.category_id,
+                    "name": entry.name,
+                    "icon": entry.icon,
+                }
+                for entry in registry.async_list_categories(scope=scope)
+            ]
+            return {"success": True, "categories": categories, "count": len(categories), "scope": scope}
+
+        if action == "get":
+            if not scope or not category_id:
+                return {"success": False, "error": "scope and category_id are required for get"}
+            entry = registry.async_get_category(scope=scope, category_id=category_id)
+            if not entry:
+                return {"success": False, "error": f"Category not found: {category_id} in scope {scope}"}
+            return {
+                "success": True,
+                "category_id": entry.category_id,
+                "name": entry.name,
+                "icon": entry.icon,
+                "scope": scope,
+            }
+
+        if action == "create":
+            if not scope:
+                return {"success": False, "error": "scope is required for create"}
+            name = params.get("name", "")
+            if not name:
+                return {"success": False, "error": "name is required for create"}
+            data = {"scope": scope, "name": name}
+            if "icon" in params:
+                data["icon"] = params["icon"]
+            entry = registry.async_create(**data)
+            return {"success": True, "category_id": entry.category_id, "name": entry.name, "scope": scope}
+
+        if action == "update":
+            if not scope or not category_id:
+                return {"success": False, "error": "scope and category_id are required for update"}
+            data = {"scope": scope, "category_id": category_id}
+            for key in ("name", "icon"):
+                if key in params:
+                    data[key] = params[key]
+            entry = registry.async_update(**data)
+            return {"success": True, "category_id": entry.category_id, "name": entry.name}
+
+        if action == "delete":
+            if not scope or not category_id:
+                return {"success": False, "error": "scope and category_id are required for delete"}
+            registry.async_delete(scope=scope, category_id=category_id)
+            return {"success": True, "message": f"Deleted category {category_id} in scope {scope}"}
+
+        return {"success": False, "error": f"Unknown action for category: {action}"}
+
+    async def _handle_entity(
+        self, hass: HomeAssistant, action: str, tool_input: llm.ToolInput, params: dict
+    ) -> JsonObjectType:
+        from homeassistant.helpers import entity_registry as er
+
+        registry = er.async_get(hass)
+        entity_id = tool_input.tool_args.get("entity_id", "") or params.get("entity_id", "")
+
+        if action == "list":
+            entities = []
+            for entry in list(registry.entities.values())[:100]:
+                entities.append({
+                    "entity_id": entry.entity_id,
+                    "name": entry.name or entry.original_name,
+                    "area_id": entry.area_id,
+                    "labels": list(entry.labels),
+                    "disabled_by": entry.disabled_by.value if entry.disabled_by else None,
+                })
+            return {"success": True, "entities": entities, "count": len(registry.entities), "shown": len(entities)}
+
+        if action == "get":
+            if not entity_id:
+                return {"success": False, "error": "entity_id is required for get"}
+            entry = registry.async_get(entity_id)
+            if not entry:
+                return {"success": False, "error": f"Entity not found: {entity_id}"}
+            return {
+                "success": True,
+                "entity_id": entry.entity_id,
+                "name": entry.name,
+                "original_name": entry.original_name,
+                "area_id": entry.area_id,
+                "device_id": entry.device_id,
+                "labels": list(entry.labels),
+                "categories": dict(entry.categories),
+                "icon": entry.icon,
+                "disabled_by": entry.disabled_by.value if entry.disabled_by else None,
+                "hidden_by": entry.hidden_by.value if entry.hidden_by else None,
+            }
+
+        if action in ("update", "rename"):
+            if not entity_id:
+                return {"success": False, "error": "entity_id is required for update"}
+            entry = registry.async_get(entity_id)
+            if not entry:
+                return {"success": False, "error": f"Entity not found: {entity_id}"}
+
+            changes = {}
+            for key in ("name", "icon", "area_id", "device_class"):
+                if key in params:
+                    changes[key] = params[key]
+            if "new_entity_id" in params:
+                changes["new_entity_id"] = params["new_entity_id"]
+
+            # Labels: support three modes
+            # - labels (list/set): REPLACE all labels with the given set
+            # - labels_add (list): APPEND to existing labels
+            # - labels_remove (list): REMOVE from existing labels
+            # Each value may be a label_id OR a label name (case-insensitive).
+            # Unknown labels are auto-created by name (so AI-provided Chinese names just work).
+            labels_touched = any(
+                k in params for k in ("labels", "labels_add", "labels_remove")
             )
-        except Exception as err:
-            return {
-                "success": False,
-                "error": f"wrote {path} but reload failed: {err}",
-                "automation_id": automation_id,
-                "path": path,
-            }
+            if labels_touched:
+                from homeassistant.helpers import label_registry as lr
 
-        return {
-            "success": True,
-            "message": (
-                f"{'Updated' if replaced else 'Created'} automation "
-                f"'{alias}' (id={automation_id})"
-            ),
-            "automation_id": automation_id,
-            "entity_id": f"automation.{automation_id}",
-            "path": path,
-        }
+                lreg = lr.async_get(hass)
+
+                def _resolve_or_create(item, *, auto_create: bool) -> str | None:
+                    """Accept a string (id/name) or a dict with {name, icon, color, description}."""
+                    if isinstance(item, dict):
+                        ident = str(item.get("name") or item.get("label_id") or "").strip()
+                        extras = {
+                            k: item[k]
+                            for k in ("icon", "color", "description")
+                            if k in item and item[k] is not None
+                        }
+                    else:
+                        ident = str(item or "").strip()
+                        extras = {}
+                    if not ident:
+                        return None
+                    # Existing by id
+                    if lreg.async_get_label(ident):
+                        existing_id = ident
+                    else:
+                        by_name = lreg.async_get_label_by_name(ident)
+                        existing_id = by_name.label_id if by_name else None
+                    if existing_id:
+                        # Already exists: never re-create, never modify. Just use it.
+                        return existing_id
+                    if auto_create:
+                        try:
+                            created = lreg.async_create(name=ident, **extras)
+                            return created.label_id
+                        except Exception as err:
+                            _LOGGER.warning(
+                                "Failed to auto-create label %r: %s", ident, err
+                            )
+                            return None
+                    return None
+
+                def _coerce_to_list(raw) -> list:
+                    """Accept list/tuple/set, single string, delimited string, or single dict.
+                    List items may be strings or dicts with {name, icon, color, description}."""
+                    if raw is None:
+                        return []
+                    if isinstance(raw, dict):
+                        return [raw]
+                    if isinstance(raw, (list, tuple, set)):
+                        out = []
+                        for v in raw:
+                            if isinstance(v, dict):
+                                out.append(v)
+                            else:
+                                s = str(v).strip()
+                                if s:
+                                    out.append(s)
+                        return out
+                    if isinstance(raw, str):
+                        text = raw.strip()
+                        if not text:
+                            return []
+                        # Split on common separators: , ，、; ； / | newline
+                        import re as _re
+                        parts = _re.split(r"[,\uFF0C\u3001;\uFF1B/|\n]+", text)
+                        parts = [p.strip() for p in parts if p.strip()]
+                        return parts or [text]
+                    s = str(raw).strip()
+                    return [s] if s else []
+
+                def _resolve_list(values, *, auto_create: bool) -> tuple[set[str], list[str]]:
+                    resolved: set[str] = set()
+                    unknown: list[str] = []
+                    for v in _coerce_to_list(values):
+                        rid = _resolve_or_create(v, auto_create=auto_create)
+                        if rid:
+                            resolved.add(rid)
+                        else:
+                            label = v.get("name") if isinstance(v, dict) else v
+                            unknown.append(str(label))
+                    return resolved, unknown
+
+                current = set(entry.labels)
+                unknown_all: list[str] = []
+
+                if "labels" in params:
+                    new_set, unk = _resolve_list(params["labels"], auto_create=True)
+                    unknown_all.extend(unk)
+                    current = new_set
+                if "labels_add" in params:
+                    add_set, unk = _resolve_list(params["labels_add"], auto_create=True)
+                    unknown_all.extend(unk)
+                    current = current | add_set
+                if "labels_remove" in params:
+                    # For remove, don't auto-create; just resolve what exists
+                    rem_set, unk = _resolve_list(params["labels_remove"], auto_create=False)
+                    # Unknown removes are not errors — just ignored
+                    current = current - rem_set
+
+                changes["labels"] = current
+                if unknown_all:
+                    _LOGGER.info(
+                        "Labels could not be resolved/created: %s", unknown_all
+                    )
+
+            if "disabled_by" in params:
+                if params["disabled_by"] is None:
+                    changes["disabled_by"] = None
+                else:
+                    changes["disabled_by"] = er.RegistryEntryDisabler.USER
+            if "hidden_by" in params:
+                if params["hidden_by"] is None:
+                    changes["hidden_by"] = None
+                else:
+                    changes["hidden_by"] = er.RegistryEntryHider.USER
+            if "categories" in params:
+                categories = dict(entry.categories)
+                for scope, cat_id in params["categories"].items():
+                    if cat_id is None and scope in categories:
+                        del categories[scope]
+                    elif cat_id is not None:
+                        categories[scope] = cat_id
+                changes["categories"] = categories
+
+            if not changes:
+                return {"success": False, "error": "No changes specified in params"}
+
+            updated = registry.async_update_entity(entity_id, **changes)
+            result_entity_id = changes.get("new_entity_id", entity_id)
+            result: dict[str, Any] = {
+                "success": True,
+                "entity_id": result_entity_id,
+                "message": f"Updated entity {entity_id}"
+                + (f" -> {result_entity_id}" if "new_entity_id" in changes else ""),
+            }
+            if labels_touched:
+                result["labels"] = sorted(updated.labels)
+                if "unknown_all" in locals() and unknown_all:
+                    result["unresolved_labels"] = unknown_all
+            return result
+
+        if action == "remove":
+            if not entity_id:
+                return {"success": False, "error": "entity_id is required for remove"}
+            if entity_id not in registry.entities:
+                return {"success": False, "error": f"Entity not found: {entity_id}"}
+            registry.async_remove(entity_id)
+            return {"success": True, "message": f"Removed entity {entity_id}"}
+
+        return {"success": False, "error": f"Unknown action for entity: {action}"}
 
 
 class ScriptExecuteTool(llm.Tool):

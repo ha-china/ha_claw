@@ -23,6 +23,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     async_setup_heartbeat_ticker(hass)
     from .runtime.custom_entity_store import async_load_custom_entities
     await async_load_custom_entities(hass)
+    from .conversation_utils import async_setup_history_store
+    await async_setup_history_store(hass)
     await async_setup_runtime(hass, entry)
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
     LOGGER.info("claw_assistant initialized with backend-only runtime")
@@ -35,6 +37,8 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     hass.data[DOMAIN].pop(entry.entry_id)
     if not hass.data[DOMAIN]:
         async_unload_heartbeat_ticker(hass)
+        from .conversation_utils import async_flush_history_store
+        await async_flush_history_store(hass)
         await async_unload_runtime(hass)
     return True
 
