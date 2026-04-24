@@ -867,11 +867,19 @@ To INSTALL a new integration:
   Put form field values directly in params alongside flow_id (no user_input wrapper needed).
 
 To CHECK existing entries: config_entries/get — params: {domain: "xxx"} (optional)
-To CHANGE options: config_entries/options/init → config_entries/options/configure
+To CHANGE options: config_entries/options/init — params: {entry_id: "..."} → config_entries/options/configure
+  NOTE: If options/init returns "Invalid handler", the integration uses SUBENTRIES instead — see below.
 To DELETE: config_entries/delete — params: {entry_id: "..."}
 To RELOAD: config_entries/reload — params: {entry_id: "..."}
 To RECONFIGURE: config_entries/flow/init — params: {handler: "domain", entry_id: "..."}
-To manage SUBENTRIES: config_entries/subentries/flow/init → configure → done
+
+SUBENTRIES (many modern integrations use subentries instead of options for per-model/per-agent config):
+  To CHECK if subentries are supported: config_entries/get_supported_subentry_types — params: {entry_id: "..."}
+  To LIST existing subentries: config_entries/subentries/list — params: {entry_id: "..."}
+  To ADD new subentry: config_entries/subentries/flow/init — params: {entry_id: "...", subentry_type: "..."} → returns flow_id + form
+  To MODIFY existing subentry: config_entries/subentries/flow/init — params: {entry_id: "...", subentry_type: "...", subentry_id: "..."} → reconfigure flow
+  To fill/submit form: config_entries/subentries/flow/configure — params: {flow_id: "...", field1: value1, ...}
+  To DELETE subentry: config_entries/subentries/delete — params: {entry_id: "...", subentry_id: "..."}
 
 When response contains next_action, follow that instruction exactly."""
 
@@ -1278,7 +1286,29 @@ When response contains next_action, follow that instruction exactly."""
                 try:
                     result = await hass.config_entries.options.async_init(entry_id)
                 except data_entry_flow.UnknownHandler:
-                    return {"success": False, "error": "Invalid handler specified"}
+                    entry = hass.config_entries.async_get_entry(entry_id)
+                    if entry is not None:
+                        try:
+                            handler = await config_entries._async_get_flow_handler(
+                                hass, entry.domain, {}
+                            )
+                            supported = sorted(
+                                handler.async_get_supported_subentry_types(entry).keys()
+                            )
+                            if supported:
+                                return {
+                                    "success": False,
+                                    "error": f"This integration does not support options flow. It uses SUBENTRIES instead.",
+                                    "subentry_types": supported,
+                                    "existing_subentries": [
+                                        {"subentry_id": s.subentry_id, "subentry_type": s.subentry_type, "title": s.title}
+                                        for s in entry.subentries.values()
+                                    ],
+                                    "next_action": f"To modify an existing subentry, call config_entries/subentries/flow/init with entry_id='{entry_id}', subentry_type, and subentry_id. To add a new one, omit subentry_id.",
+                                }
+                        except Exception:
+                            pass
+                    return {"success": False, "error": "This integration does not have an options flow. Check if it uses subentries via config_entries/get_supported_subentry_types."}
                 except data_entry_flow.UnknownStep as err:
                     return {"success": False, "error": str(err)}
                 prepared = _prepare_flow_result_json(result, configure_action="config_entries/options/configure")
