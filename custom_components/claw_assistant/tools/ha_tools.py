@@ -322,6 +322,7 @@ def _prepare_flow_result_json(
     result: data_entry_flow.FlowResult,
     *,
     include_entry_result: bool = False,
+    configure_action: str = "config_entries/flow/configure",
 ) -> dict[str, object]:
     flow_type = result.get("type")
 
@@ -358,8 +359,8 @@ def _prepare_flow_result_json(
             "flow_id": flow_id,
             "step_id": result.get("step_id"),
             "url": result.get("url", ""),
-            "example_call": {"action": "config_entries/flow/configure", "params": {"flow_id": flow_id}},
-            "next_action": "Tell user to open the URL in browser to complete authentication. Then call ConfigEntries with example_call to check completion.",
+            "example_call": {"action": configure_action, "params": {"flow_id": flow_id}},
+            "next_action": f"Tell user to open the URL in browser to complete authentication. Then call ConfigEntries with action='{configure_action}' to check completion.",
         }
 
     if flow_type == data_entry_flow.FlowResultType.EXTERNAL_STEP_DONE:
@@ -367,8 +368,8 @@ def _prepare_flow_result_json(
         return {
             "type": "external_done",
             "flow_id": flow_id,
-            "example_call": {"action": "config_entries/flow/configure", "params": {"flow_id": flow_id}},
-            "next_action": "Call ConfigEntries with example_call to proceed.",
+            "example_call": {"action": configure_action, "params": {"flow_id": flow_id}},
+            "next_action": f"Call ConfigEntries with action='{configure_action}' to proceed.",
         }
 
     if flow_type == data_entry_flow.FlowResultType.SHOW_PROGRESS:
@@ -378,8 +379,8 @@ def _prepare_flow_result_json(
             "flow_id": flow_id,
             "step_id": result.get("step_id"),
             "progress_action": result.get("progress_action"),
-            "example_call": {"action": "config_entries/flow/configure", "params": {"flow_id": flow_id}},
-            "next_action": "Wait a few seconds, then call ConfigEntries with example_call to check if progress is done.",
+            "example_call": {"action": configure_action, "params": {"flow_id": flow_id}},
+            "next_action": f"Wait a few seconds, then call ConfigEntries with action='{configure_action}' to check if progress is done.",
         }
 
     if flow_type == data_entry_flow.FlowResultType.SHOW_PROGRESS_DONE:
@@ -387,8 +388,8 @@ def _prepare_flow_result_json(
         return {
             "type": "progress_done",
             "flow_id": flow_id,
-            "example_call": {"action": "config_entries/flow/configure", "params": {"flow_id": flow_id}},
-            "next_action": "Call ConfigEntries with example_call to proceed to next step.",
+            "example_call": {"action": configure_action, "params": {"flow_id": flow_id}},
+            "next_action": f"Call ConfigEntries with action='{configure_action}' to proceed to next step.",
         }
 
     if flow_type == data_entry_flow.FlowResultType.MENU:
@@ -400,10 +401,10 @@ def _prepare_flow_result_json(
             "step_id": result.get("step_id"),
             "menu_options": menu_options,
             "example_call": {
-                "action": "config_entries/flow/configure",
+                "action": configure_action,
                 "params": {"flow_id": flow_id, "next_step_id": menu_options[0] if menu_options else ""},
             },
-            "next_action": f"Call ConfigEntries with action='config_entries/flow/configure'. Set next_step_id to one of: {menu_options}",
+            "next_action": f"Call ConfigEntries with action='{configure_action}'. Set next_step_id to one of: {menu_options}",
         }
 
     flow_id = result.get("flow_id")
@@ -439,10 +440,10 @@ def _prepare_flow_result_json(
         "fields": fields,
         "errors": result.get("errors"),
         "example_call": {
-            "action": "config_entries/flow/configure",
+            "action": configure_action,
             "params": example_params,
         },
-        "next_action": f"Call ConfigEntries with action='config_entries/flow/configure' and params shown in example_call. Fill in the field values.",
+        "next_action": f"Call ConfigEntries with action='{configure_action}' and params shown in example_call. Fill in the field values.",
     }
 
 
@@ -1280,7 +1281,7 @@ When response contains next_action, follow that instruction exactly."""
                     return {"success": False, "error": "Invalid handler specified"}
                 except data_entry_flow.UnknownStep as err:
                     return {"success": False, "error": str(err)}
-                prepared = _prepare_flow_result_json(result)
+                prepared = _prepare_flow_result_json(result, configure_action="config_entries/options/configure")
                 resp = {
                     "success": True,
                     "message": f"Options flow started for {entry_id} — fill in fields and call options/configure",
@@ -1323,7 +1324,7 @@ When response contains next_action, follow that instruction exactly."""
                         "schema_errors": err.schema_errors,
                         "submitted_input": user_input,
                     }
-                prepared = _prepare_flow_result_json(result)
+                prepared = _prepare_flow_result_json(result, configure_action="config_entries/options/configure")
                 flow_errors = result.get("errors")
                 if flow_errors:
                     prepared["form_errors"] = flow_errors
@@ -1452,7 +1453,7 @@ When response contains next_action, follow that instruction exactly."""
                     return {"success": False, "error": str(err)}
                 except data_entry_flow.UnknownStep as err:
                     return {"success": False, "error": str(err)}
-                prepared = _prepare_flow_result_json(result)
+                prepared = _prepare_flow_result_json(result, configure_action="config_entries/subentries/flow/configure")
                 resp = {
                     "success": True,
                     "message": f"Subentry flow started for {entry_id}:{subentry_type} — fill in fields and call subentries/flow/configure",
@@ -1495,7 +1496,7 @@ When response contains next_action, follow that instruction exactly."""
                         "schema_errors": err.schema_errors,
                         "submitted_input": user_input,
                     }
-                prepared = _prepare_flow_result_json(result)
+                prepared = _prepare_flow_result_json(result, configure_action="config_entries/subentries/flow/configure")
                 flow_errors = result.get("errors")
                 if flow_errors:
                     prepared["form_errors"] = flow_errors
