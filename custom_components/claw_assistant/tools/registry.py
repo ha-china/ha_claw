@@ -30,6 +30,7 @@ from .ha_core_tools import (
     ValidateServiceTool,
 )
 from .custom_entity_tools import CustomEntityManagerTool
+from .dashboard_card_tools import DashboardCardTool
 from .ha_tools import ConfigEntriesTool, HAControlTool, HACSTool
 from .helper_tools import HelperManagerTool
 from .misc_tools import (
@@ -122,6 +123,7 @@ TOOL_REGISTRY: dict[str, dict[str, Any]] = {
     "DiscardProposal": {"category": "core", "desc": "Remove a pending proposal without applying it. Params: slug", "priority": 2},
     "ApplyProposal": {"category": "core", "desc": "Approve and apply a pending proposal. Params: slug, approved_by", "priority": 2},
     "Registry": {"category": "system", "desc": "Manage HA registries (areas/floors/labels/categories/entities). Use this for: creating/renaming/deleting areas, assigning entities to areas, adding labels, renaming entities. Params: registry(area/floor/label/category/entity), action(list/get/create/update/delete/rename), *_id, params(dict)", "priority": 1},
+    "DashboardCard": {"category": "system", "desc": "Create/manage Lovelace dashboard views and html-card-pro cards. Supports masonry and sections view types. Auto-installs via HACS if missing. Workflow: check_dependency→list_dashboards→get_dashboard→add_view/add_card. Params: action, dashboard_url, view_index, card_index, section_index(-1=auto for sections views), title, icon, content(HTML/CSS/JS), card_config. Returns mandatory _action_required instructions.", "priority": 2},
 }
 
 CORE_TOOLS = [
@@ -193,6 +195,7 @@ def build_tool_map() -> dict[str, type]:
         "CustomEntityManager": CustomEntityManagerTool,
         "IntentCall": IntentCallTool,
         "Registry": RegistryTool,
+        "DashboardCard": DashboardCardTool,
     }
 
 

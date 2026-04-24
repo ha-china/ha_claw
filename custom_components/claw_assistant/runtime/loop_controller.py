@@ -258,6 +258,34 @@ def record_continuation(
     return count < DEFAULT_THRESHOLDS.max_continuations_per_turn
 
 
+TOOL_REPEAT_BAIL_PROMPT = (
+    "[MANDATORY — TOOL REPEAT LIMIT REACHED]\n"
+    "Tool '{tool_name}' has been called {count} times (limit: {limit}). "
+    "This approach is NOT working. You MUST NOT call '{tool_name}' again for this task.\n"
+    "Options:\n"
+    "1. Analyze WHY the repeated calls failed and try a fundamentally DIFFERENT approach using other tools.\n"
+    "2. If no viable alternative exists, respond with kind=final and honestly explain to the user "
+    "what you attempted, why it did not work, and suggest what they could try manually.\n"
+    "You decide. Do NOT repeat the same tool."
+)
+
+
+def check_tool_repeat(
+    hass: HomeAssistant,
+    *,
+    tool_name: str,
+    max_repeat: int,
+) -> str | None:
+    task_loop = get_task_loop_state(hass)
+    steps = task_loop.get("steps", [])
+    count = sum(1 for s in steps if s.get("tool_name") == tool_name)
+    if count < max_repeat:
+        return None
+    return TOOL_REPEAT_BAIL_PROMPT.format(
+        tool_name=tool_name, count=count, limit=max_repeat,
+    )
+
+
 def get_loop_status(hass: HomeAssistant) -> dict[str, Any]:
 
     task_loop = get_task_loop_state(hass)
