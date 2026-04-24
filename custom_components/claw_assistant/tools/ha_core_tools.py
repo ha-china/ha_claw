@@ -745,18 +745,19 @@ class RegistryTool(llm.Tool):
     name = "Registry"
     description = (
         "Manage Home Assistant registries: area, floor, label, category, entity. "
-        "Actions: list, get, create, update, delete, remove, rename. "
+        "Actions: list, get, create, update, delete, remove, rename, expose. "
         "Top-level fields: registry, action, area_id, floor_id, label_id, category_id, entity_id, scope, params. "
         "label get/update/delete accept label_id or name. label create is idempotent by name. "
         "entity params support labels (replace), labels_add (append), labels_remove. "
         "Each label item may be an id, a name, or an object with name/icon/color/description; "
         "unknown names are auto-created, existing labels have missing fields filled in only. "
-        "Use action=list on the label registry to discover valid color values."
+        "Use action=list on the label registry to discover valid color values. "
+        "entity expose: params={should_expose: true/false, assistant: 'conversation'} to expose/hide entity from assistant."
     )
     parameters = vol.Schema(
         {
             vol.Required("registry"): vol.In(["area", "floor", "label", "category", "entity"]),
-            vol.Required("action"): vol.In(["list", "get", "create", "update", "delete", "remove", "rename"]),
+            vol.Required("action"): vol.In(["list", "get", "create", "update", "delete", "remove", "rename", "expose"]),
             vol.Optional("area_id", default=""): str,
             vol.Optional("floor_id", default=""): str,
             vol.Optional("label_id", default=""): str,
@@ -1344,6 +1345,16 @@ class RegistryTool(llm.Tool):
                 return {"success": False, "error": f"Entity not found: {entity_id}"}
             registry.async_remove(entity_id)
             return {"success": True, "message": f"Removed entity {entity_id}"}
+
+        if action == "expose":
+            if not entity_id:
+                return {"success": False, "error": "entity_id is required for expose"}
+            should_expose = params.get("should_expose", True)
+            assistant = params.get("assistant", "conversation")
+            from homeassistant.components.homeassistant.exposed_entities import async_expose_entity
+            async_expose_entity(hass, assistant, entity_id, bool(should_expose))
+            word = "Exposed" if should_expose else "Unexposed"
+            return {"success": True, "message": f"{word} {entity_id} to {assistant}"}
 
         return {"success": False, "error": f"Unknown action for entity: {action}"}
 

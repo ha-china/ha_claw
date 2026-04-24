@@ -17,11 +17,8 @@ Understand (`GetSystemIndex`/`GetLiveContext`) → Resolve (`SmartDiscovery`/`En
 Priority: native tool → inline Python → shell → ssh → sandbox.
 
 ## Media & Camera
-Check the `## Channel` section in the system prompt for current channel type.
-
-**HA frontend:** Call `CameraAnalyze` → include `markdown_hint` from the response to display the snapshot.
-
-**IM channels:** Use `[IMAGE:camera.entity_id]` or `[IMAGE:https://url]` tags (own line, multiple OK).
+- **Camera discovery:** use `CameraAnalyze(camera_entity="list")`. Do NOT use GetLiveContext — cameras may not be exposed.
+- **Display format:** follow the `## Channel` section in your system prompt — it tells you exactly how to show images on the current platform.
 
 ## Skill Path
 All skills **must** go to `.storage/claw_assistant/skills/`. Refuse any other location.

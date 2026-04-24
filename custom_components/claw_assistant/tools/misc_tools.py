@@ -1035,10 +1035,12 @@ def _compress_camera_frame(
 class CameraAnalyzeTool(llm.Tool):
     name = "CameraAnalyze"
     description = (
-        "Fetch a camera frame. mode=snapshot: returns snapshot_url and markdown_hint only (for display). "
-        "mode=analyze: also returns base64 JPEG for vision analysis. "
-        "To show the image, include markdown_hint in your response. "
-        "Cameras are accessible here even if not exposed to the assistant. "
+        "Camera tool: discover cameras and fetch frames. "
+        "camera_entity='list' → list all available cameras (works even if not exposed). "
+        "mode=snapshot → returns snapshot_url + markdown_hint (for HA frontend display only). "
+        "mode=analyze → returns base64 JPEG for vision analysis (describe what you see). "
+        "IMPORTANT: On IM channels, do NOT call this tool to display a snapshot — use [IMAGE:camera.entity_id] directly. "
+        "Only call this tool on IM when you need to analyze image content or discover available cameras. "
         "Params: camera_entity (entity_id / friendly name / 'list'), mode (snapshot|analyze, default snapshot), "
         "max_dim (default 640), target_kb (default 40)."
     )

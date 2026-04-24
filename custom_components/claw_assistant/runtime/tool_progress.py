@@ -60,9 +60,10 @@ def _tool_desc(name: str, a: dict, lang: str) -> str:
         return "🧬 正在执行代码..." if zh else "🧬 Executing code..."
     if name == "CameraAnalyze":
         cam = e(str(a.get("camera_entity", "")))[:20]
-        if zh:
-            return f"📷 正在分析摄像头: {cam}..." if cam else "📷 正在分析摄像头..."
-        return f"📷 Analyzing: {cam}..." if cam else "📷 Camera snapshot..."
+        mode = str(a.get("mode", "snapshot")).lower()
+        if mode == "analyze":
+            return (f"📷 正在分析摄像头: {cam}..." if cam else "📷 正在分析摄像头...") if zh else (f"📷 Analyzing: {cam}..." if cam else "📷 Analyzing camera...")
+        return (f"📷 正在获取摄像头: {cam}..." if cam else "📷 正在查询摄像头...") if zh else (f"📷 Camera: {cam}..." if cam else "📷 Camera query...")
     if name == "ThinkContinue":
         return "⚡️ 正在思考中..." if zh else "⚡️ Deep reasoning..."
     if name == "ParallelToolCall":

@@ -134,13 +134,21 @@ def build_base_prompt(
     ch_type = get_channel_type(conversation_id)
     if is_im_channel(conversation_id):
         appended_sections.append(
-            f"## Channel\nType: {ch_type} (IM). "
-            "[IMAGE:entity/url] tags are supported — gateway delivers media directly."
+            f"## Channel\nType: {ch_type} (IM)\n"
+            "Display format:\n"
+            "- Show image/camera: `[IMAGE:camera.entity_id]` or `[IMAGE:https://url]` (own line). Gateway delivers media.\n"
+            "- Discover cameras: call `CameraAnalyze(camera_entity=\"list\")`.\n"
+            "- Analyze camera content: call `CameraAnalyze(mode=\"analyze\")`, describe result, optionally append `[IMAGE:camera.entity_id]`.\n"
+            "- Do NOT call CameraAnalyze just to show a snapshot — use `[IMAGE:...]` directly."
         )
     else:
         appended_sections.append(
-            "## Channel\nType: ha (Home Assistant frontend). "
-            "[IMAGE:...] tags are NOT supported here. Use CameraAnalyze for vision tasks."
+            "## Channel\nType: ha (Home Assistant frontend)\n"
+            "Display format:\n"
+            "- Show image/camera: call `CameraAnalyze(mode=\"snapshot\")`, include `markdown_hint` from response in your reply.\n"
+            "- Discover cameras: call `CameraAnalyze(camera_entity=\"list\")`.\n"
+            "- Analyze camera content: call `CameraAnalyze(mode=\"analyze\")`, describe result, include `markdown_hint`.\n"
+            "- `[IMAGE:...]` tags are NOT supported on this platform."
         )
 
     topic_hint = build_homeassistant_topic_hint(text)
