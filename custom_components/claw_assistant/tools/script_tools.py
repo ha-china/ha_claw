@@ -35,14 +35,22 @@ class ScriptTool(llm.Tool):
 
     name = "Script"
     description = (
-        "Manage Home Assistant scripts via official APIs (not shell/ConfigFile). "
+        "Manage Home Assistant scripts via official APIs. "
         "Actions: list, get, create, update, delete, run. "
-        "Params: action, script_id, entity_id, config (dict, partial on update), "
-        "variables (for run), icon, area_id, page, page_size. "
-        "list returns paginated results (default page=1, page_size=10); response includes page/total_pages/total. "
-        "create requires config with sequence. update merges partial config over existing; "
-        "icon and area_id target the entity registry entry (area must already exist). "
-        "run executes the script with optional variables dict."
+        "TWO update paths: "
+        "1) Metadata only (icon/area/labels/name): pass empty config + metadata params → applies directly to entity registry, instant. "
+        "2) Config change (alias/description/sequence): pass config dict → validate → atomic write → reload → post-verify. "
+        "IMPORTANT: rename = config.alias (the script's own internal name, stored in YAML). When user says 'rename', ALWAYS use config.alias, NEVER the name param. "
+        "name param = entity registry friendly-name override (a separate display layer on top of alias; rarely needed, null clears back to alias). "
+        "For description: config.description. "
+        "Params: action, script_id, entity_id, config (dict; partial on update, full on create), "
+        "variables (for run), icon (emoji or mdi:name; null clears), area_id (must exist; null clears), "
+        "labels (list of label_ids; replaces set), name (entity registry display override; null clears back to alias), "
+        "page, page_size. "
+        "list returns paginated results (default page=1, page_size=10). "
+        "create requires config with sequence; duplicates are rejected. "
+        "run executes the script with optional variables dict. "
+        "After update, response includes verified=true/false and current_config for self-check; if wrong, do a targeted small fix."
     )
 
     parameters = vol.Schema(
@@ -58,6 +66,8 @@ class ScriptTool(llm.Tool):
             vol.Optional("page_size", default=10): vol.Coerce(int),
             vol.Optional("icon"): vol.Any(str, None),
             vol.Optional("area_id"): vol.Any(str, None),
+            vol.Optional("labels"): vol.Any(list, None),
+            vol.Optional("name"): vol.Any(str, None),
         }
     )
 
@@ -73,6 +83,8 @@ class ScriptTool(llm.Tool):
         _SENTINEL = object()
         icon = args.get("icon", _SENTINEL) if "icon" in args else _SENTINEL
         area_id = args.get("area_id", _SENTINEL) if "area_id" in args else _SENTINEL
+        labels = args.get("labels", _SENTINEL) if "labels" in args else _SENTINEL
+        name = args.get("name", _SENTINEL) if "name" in args else _SENTINEL
 
         try:
             if action == "list":
@@ -89,13 +101,15 @@ class ScriptTool(llm.Tool):
             if action == "create":
                 return await self._create_or_update(
                     hass, config, script_id,
-                    is_update=False, icon=icon, area_id=area_id, sentinel=_SENTINEL,
+                    is_update=False, icon=icon, area_id=area_id,
+                    labels=labels, name=name, sentinel=_SENTINEL,
                 )
 
             if action == "update":
                 return await self._create_or_update(
                     hass, config, script_id,
-                    is_update=True, icon=icon, area_id=area_id, sentinel=_SENTINEL,
+                    is_update=True, icon=icon, area_id=area_id,
+                    labels=labels, name=name, sentinel=_SENTINEL,
                 )
 
             if action == "delete":
@@ -228,6 +242,52 @@ class ScriptTool(llm.Tool):
         )
         return {"success": True, "message": f"Executed {target_entity_id}"}
 
+    async def _apply_registry_meta(
+        self, hass: HomeAssistant, entity_id: str,
+        *, icon=None, area_id=None, labels=None, name=None, sentinel=None,
+    ) -> dict[str, object]:
+        """Apply icon/area_id/labels/name to entity registry."""
+        touch_icon = icon is not sentinel
+        touch_area = area_id is not sentinel
+        touch_labels = labels is not sentinel
+        touch_name = name is not sentinel
+        if not (touch_icon or touch_area or touch_labels or touch_name):
+            return {}
+        applied: dict[str, object] = {}
+        try:
+            registry = er.async_get(hass)
+            if registry.async_get(entity_id) is None:
+                return {"entity_registry": "entity not yet registered; retry after it exists"}
+            kwargs: dict[str, object] = {}
+            if touch_icon:
+                kwargs["icon"] = icon if icon else None
+            if touch_area:
+                if area_id:
+                    from homeassistant.helpers import area_registry as ar
+                    areas = ar.async_get(hass)
+                    if areas.async_get_area(area_id) is None:
+                        return {"error": f"Area '{area_id}' not found"}
+                    kwargs["area_id"] = area_id
+                else:
+                    kwargs["area_id"] = None
+            if touch_labels:
+                kwargs["labels"] = set(labels) if labels else set()
+            if touch_name:
+                kwargs["name"] = name if name else None
+            registry.async_update_entity(entity_id, **kwargs)
+            if touch_icon:
+                applied["icon"] = kwargs.get("icon")
+            if touch_area:
+                applied["area_id"] = kwargs.get("area_id")
+            if touch_labels:
+                applied["labels"] = sorted(kwargs.get("labels") or [])
+            if touch_name:
+                applied["name"] = kwargs.get("name")
+        except Exception as err:
+            _LOGGER.warning("Failed to update entity registry for %s: %s", entity_id, err)
+            applied["entity_registry_error"] = str(err)
+        return applied
+
     async def _create_or_update(
         self,
         hass: HomeAssistant,
@@ -237,6 +297,8 @@ class ScriptTool(llm.Tool):
         is_update: bool,
         icon=None,
         area_id=None,
+        labels=None,
+        name=None,
         sentinel=None,
     ) -> JsonObjectType:
         """Create or update a script via the same pipeline as the frontend."""
@@ -255,8 +317,28 @@ class ScriptTool(llm.Tool):
             return {"success": False, "error": "script_id is required for update"}
 
         config_patch_empty = is_update and not config
-        touch_icon = icon is not sentinel
-        touch_area = area_id is not sentinel
+        touch_meta = any(v is not sentinel for v in (icon, area_id, labels, name))
+
+        target_entity_id = f"script.{script_id}" if script_id else ""
+
+        if config_patch_empty:
+            if not touch_meta:
+                return {"success": False, "error": "Nothing to update (no config and no metadata params)"}
+            if not script_id:
+                return {"success": False, "error": "script_id is required for metadata update"}
+            applied = await self._apply_registry_meta(
+                hass, target_entity_id,
+                icon=icon, area_id=area_id, labels=labels, name=name, sentinel=sentinel,
+            )
+            if "error" in applied:
+                return {"success": False, **applied}
+            return {
+                "success": True,
+                "message": f"Updated metadata for {target_entity_id}",
+                "script_id": script_id,
+                "entity_id": target_entity_id,
+                **({"applied_registry": applied} if applied else {}),
+            }
 
         if is_update:
             existing = await self._load_existing_config(hass, script_id)
@@ -272,7 +354,6 @@ class ScriptTool(llm.Tool):
         if not config:
             return {"success": False, "error": "Missing required parameter: config (dict)"}
 
-        # Scripts require a sequence; alias is optional (falls back to object_id).
         if "sequence" not in config:
             return {"success": False, "error": "config.sequence is required"}
 
@@ -282,6 +363,7 @@ class ScriptTool(llm.Tool):
             base = alias or "script"
             slug = re.sub(r"[^a-z0-9_]+", "_", base.lower()).strip("_")
             script_id = slug or f"script_{int(time.time())}"
+            target_entity_id = f"script.{script_id}"
 
         if not is_update:
             dup = await self._load_existing_config(hass, script_id)
@@ -304,11 +386,6 @@ class ScriptTool(llm.Tool):
 
         entry = dict(config)
 
-        try:
-            await async_validate_config_item(hass, script_id, entry)
-        except vol.Invalid as err:
-            return {"success": False, "error": f"Invalid script config: {err}"}
-
         async def hook(action: str, config_key: str) -> None:
             await hass.services.async_call(
                 SCRIPT_DOMAIN, SERVICE_RELOAD, {}, blocking=True
@@ -323,62 +400,53 @@ class ScriptTool(llm.Tool):
             data_validator=async_validate_config_item,
         )
 
+        try:
+            await view.data_validator(hass, script_id, entry)
+        except (vol.Invalid, Exception) as err:
+            return {"success": False, "error": f"Invalid script config: {err}"}
+
         path = hass.config.path(SCRIPT_CONFIG_PATH)
 
-        wrote_yaml = False
-        if not (config_patch_empty and (touch_icon or touch_area)):
-            async with view.mutation_lock:
-                current = await view.read_config(hass)
-                if not isinstance(current, dict):
-                    current = {}
-                view._write_value(hass, current, script_id, entry)
-                await hass.async_add_executor_job(
-                    lambda: write_utf8_file_atomic(path, dump(current))
-                )
-            await hook("create_update", script_id)
-            wrote_yaml = True
+        async with view.mutation_lock:
+            current = await view.read_config(hass)
+            if not isinstance(current, dict):
+                current = {}
+            view._write_value(hass, current, script_id, entry)
+            await hass.async_add_executor_job(
+                lambda: write_utf8_file_atomic(path, dump(current))
+            )
+        await hook("create_update", script_id)
+        if is_update:
+            _LOGGER.info("Script '%s' updated (frontend-validated + atomic write)", script_id)
 
-        target_entity_id = f"script.{script_id}"
-        applied: dict[str, object] = {}
-        if touch_icon or touch_area:
-            try:
-                registry = er.async_get(hass)
-                if registry.async_get(target_entity_id) is None:
-                    applied["entity_registry"] = "entity not yet registered; retry after it exists"
-                else:
-                    kwargs: dict[str, object] = {}
-                    if touch_icon:
-                        kwargs["icon"] = icon if icon else None
-                    if touch_area:
-                        if area_id:
-                            from homeassistant.helpers import area_registry as ar
+        if not target_entity_id:
+            target_entity_id = f"script.{script_id}"
+        applied = await self._apply_registry_meta(
+            hass, target_entity_id,
+            icon=icon, area_id=area_id, labels=labels, name=name, sentinel=sentinel,
+        )
+        if "error" in applied:
+            return {"success": False, **applied}
 
-                            areas = ar.async_get(hass)
-                            if areas.async_get_area(area_id) is None:
-                                return {
-                                    "success": False,
-                                    "error": f"Area '{area_id}' not found; use Registry area action=list to discover.",
-                                }
-                            kwargs["area_id"] = area_id
-                        else:
-                            kwargs["area_id"] = None
-                    registry.async_update_entity(target_entity_id, **kwargs)
-                    applied["icon"] = kwargs.get("icon") if touch_icon else None
-                    applied["area_id"] = kwargs.get("area_id") if touch_area else None
-            except Exception as err:
-                _LOGGER.warning("Failed to update entity registry for %s: %s", target_entity_id, err)
-                applied["entity_registry_error"] = str(err)
+        verified_config = await self._load_existing_config(hass, script_id)
+        verify_ok = verified_config is not None
+        if not verify_ok:
+            _LOGGER.warning("Post-update verification: script '%s' not found after write", script_id)
 
         action_word = "Updated" if is_update else "Created"
         display = str(config.get("alias") or script_id)
-        return {
+        result: dict[str, object] = {
             "success": True,
             "message": f"{action_word} script '{display}' (id={script_id})",
             "script_id": script_id,
             "entity_id": target_entity_id,
-            "yaml_rewritten": wrote_yaml,
-            **({"applied_registry": applied} if applied else {}),
+            "verified": verify_ok,
         }
+        if verify_ok and verified_config:
+            result["current_config"] = verified_config
+        if applied:
+            result["applied_registry"] = applied
+        return result
 
     async def _delete_script(
         self, hass: HomeAssistant, entity_id: str, script_id: str

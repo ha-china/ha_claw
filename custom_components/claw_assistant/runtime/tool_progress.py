@@ -325,6 +325,31 @@ def _tool_desc(name: str, a: dict, lang: str) -> str:
             return f"{icon} Registry {reg}.{act}..."
         return f"{icon} Registry op..."
 
+    if name == "DashboardCard":
+        act = e(str(a.get("action", "")))
+        _DC_ZH = {
+            "check_dependency": "检查依赖",
+            "list_dashboards": "列举仪表盘",
+            "get_dashboard": "查看仪表盘",
+            "add_view": "添加视图",
+            "add_card": "添加卡片",
+            "update_card": "更新卡片",
+            "remove_card": "删除卡片",
+        }
+        _DC_EN = {
+            "check_dependency": "Checking dependency",
+            "list_dashboards": "Listing dashboards",
+            "get_dashboard": "Reading dashboard",
+            "add_view": "Adding view",
+            "add_card": "Adding card",
+            "update_card": "Updating card",
+            "remove_card": "Removing card",
+        }
+        if zh:
+            desc = _DC_ZH.get(act, f"仪表盘操作: {act}")
+            return f"🎨 正在{desc}..."
+        desc = _DC_EN.get(act, f"Dashboard: {act}")
+        return f"🎨 {desc}..."
     if name.startswith("Hass"):
         eid = e(str(a.get("name", a.get("entity_id", ""))))[:22]
         tag = name.replace("Hass", "")

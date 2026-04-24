@@ -59,12 +59,14 @@
           "next_step": "Next step",
           "conversation_mode": "Dialogue Mode",
           "enable_web_search": "Web Search",
-          "enable_streaming_effect": "Streaming Display"
+          "enable_streaming_effect": "Streaming Display",
+          "max_tool_repeat": "Tool Repeat Limit"
         },
         "data_description": {
           "conversation_mode": "• **No name** — Minimal mode, reply content only\n• **Show AI name** — Recommended, prefixes reply with the responding AI's name\n• **Full display** — Shows the complete process including tool calls and details",
           "enable_web_search": "When enabled, the AI can automatically supplement replies with online search results",
-          "enable_streaming_effect": "When enabled, tool progress messages appear with a typewriter effect; when disabled, they appear instantly"
+          "enable_streaming_effect": "When enabled, tool progress messages appear with a typewriter effect; when disabled, they appear instantly",
+          "max_tool_repeat": "Max times AI can call the same tool repeatedly. Once exceeded, AI is forced to stop the current approach and try alternatives or admit it cannot solve the problem"
         }
       },
       "workspace_editor": {

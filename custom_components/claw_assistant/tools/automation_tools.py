@@ -28,14 +28,21 @@ class AutomationTool(llm.Tool):
 
     name = "Automation"
     description = (
-        "Manage Home Assistant automations via official APIs (not shell/ConfigFile). "
-        "Actions: list, get, create, update, confirm_draft, delete, trigger, enable, disable. "
-        "Params: action, automation_id, entity_id, config (dict or JSON string, partial on update), icon, area_id, page, page_size. "
-        "list returns paginated results (default page=1, page_size=10); response includes page/total_pages/total. "
-        "create requires full config; if the same name/id already exists, auto-promotes to update. "
-        "update uses safe draft-swap: creates a draft copy, disables the original, returns draft info. "
-        "Call confirm_draft with automation_id of the ORIGINAL to finalize (delete original, promote draft). "
-        "icon and area_id target the entity registry entry (area must already exist)."
+        "Manage Home Assistant automations via official APIs. "
+        "Actions: list, get, create, update, delete, trigger, enable, disable, confirm_draft. "
+        "TWO update paths: "
+        "1) Metadata only (icon/area/labels/name): pass empty config + metadata params → applies directly to entity registry, instant. "
+        "2) Config change (alias/description/trigger/condition/action): pass config dict → validate → atomic write → reload → post-verify. "
+        "IMPORTANT: rename = config.alias (the automation's own internal name, stored in YAML). When user says 'rename', ALWAYS use config.alias, NEVER the name param. "
+        "name param = entity registry friendly-name override (a separate display layer on top of alias; rarely needed, null clears back to alias). "
+        "For description: config.description. "
+        "Params: action, automation_id, entity_id, config (dict or JSON; partial on update, full on create), "
+        "icon (emoji or mdi:name; null clears), area_id (must exist; null clears), "
+        "labels (list of label_ids; replaces set), name (entity registry display override; null clears back to alias), "
+        "page, page_size. "
+        "list returns paginated results (default page=1, page_size=10). "
+        "create requires full config; if same alias/id exists, auto-promotes to update. "
+        "After update, response includes verified=true/false and current_config for self-check; if wrong, do a targeted small fix."
     )
 
     parameters = vol.Schema(
@@ -50,6 +57,8 @@ class AutomationTool(llm.Tool):
             vol.Optional("page_size", default=10): vol.Coerce(int),
             vol.Optional("icon"): vol.Any(str, None),
             vol.Optional("area_id"): vol.Any(str, None),
+            vol.Optional("labels"): vol.Any(list, None),
+            vol.Optional("name"): vol.Any(str, None),
         }
     )
 
@@ -68,6 +77,8 @@ class AutomationTool(llm.Tool):
         _SENTINEL = object()
         icon = args.get("icon", _SENTINEL) if "icon" in args else _SENTINEL
         area_id = args.get("area_id", _SENTINEL) if "area_id" in args else _SENTINEL
+        labels = args.get("labels", _SENTINEL) if "labels" in args else _SENTINEL
+        name = args.get("name", _SENTINEL) if "name" in args else _SENTINEL
 
         try:
             if action == "list":
@@ -99,13 +110,15 @@ class AutomationTool(llm.Tool):
             if action == "create":
                 return await self._create_or_update_automation(
                     hass, config, automation_id,
-                    is_update=False, icon=icon, area_id=area_id, sentinel=_SENTINEL,
+                    is_update=False, icon=icon, area_id=area_id,
+                    labels=labels, name=name, sentinel=_SENTINEL,
                 )
 
             if action == "update":
-                return await self._safe_draft_update(
+                return await self._inplace_update(
                     hass, config, automation_id, entity_id,
-                    icon=icon, area_id=area_id, sentinel=_SENTINEL,
+                    icon=icon, area_id=area_id,
+                    labels=labels, name=name, sentinel=_SENTINEL,
                 )
 
             if action == "confirm_draft":
@@ -224,7 +237,11 @@ class AutomationTool(llm.Tool):
         automation_id: str,
         entry: dict,
     ) -> None:
-        """Write automation entry to YAML and reload."""
+        """Write automation entry to YAML and reload.
+
+        Mirrors EditAutomationConfigView.post() exactly:
+        data_validator → mutation_lock → _write_value → atomic write → post_write_hook.
+        """
         from homeassistant.components.config.automation import EditAutomationConfigView
         from homeassistant.helpers import config_validation as cv
 
@@ -237,6 +254,9 @@ class AutomationTool(llm.Tool):
             AUTOMATION_DOMAIN, "config", AUTOMATION_CONFIG_PATH,
             cv.string, post_write_hook=hook, data_validator=async_validate_config_item,
         )
+
+        await view.data_validator(hass, automation_id, entry)
+
         path = hass.config.path(AUTOMATION_CONFIG_PATH)
         async with view.mutation_lock:
             current = await view.read_config(hass)
@@ -248,12 +268,14 @@ class AutomationTool(llm.Tool):
 
     async def _apply_registry_meta(
         self, hass: HomeAssistant, entity_id: str,
-        *, icon=None, area_id=None, sentinel=None,
+        *, icon=None, area_id=None, labels=None, name=None, sentinel=None,
     ) -> dict[str, object]:
-        """Apply icon/area_id to entity registry. Returns applied dict."""
+        """Apply icon/area_id/labels/name to entity registry. Returns applied dict."""
         touch_icon = icon is not sentinel
         touch_area = area_id is not sentinel
-        if not touch_icon and not touch_area:
+        touch_labels = labels is not sentinel
+        touch_name = name is not sentinel
+        if not (touch_icon or touch_area or touch_labels or touch_name):
             return {}
         applied: dict[str, object] = {}
         try:
@@ -272,11 +294,19 @@ class AutomationTool(llm.Tool):
                     kwargs["area_id"] = area_id
                 else:
                     kwargs["area_id"] = None
+            if touch_labels:
+                kwargs["labels"] = set(labels) if labels else set()
+            if touch_name:
+                kwargs["name"] = name if name else None
             registry.async_update_entity(entity_id, **kwargs)
             if touch_icon:
                 applied["icon"] = kwargs.get("icon")
             if touch_area:
                 applied["area_id"] = kwargs.get("area_id")
+            if touch_labels:
+                applied["labels"] = sorted(kwargs.get("labels") or [])
+            if touch_name:
+                applied["name"] = kwargs.get("name")
         except Exception as err:
             _LOGGER.warning("Failed to update entity registry for %s: %s", entity_id, err)
             applied["entity_registry_error"] = str(err)
@@ -302,9 +332,11 @@ class AutomationTool(llm.Tool):
         is_update: bool,
         icon=None,
         area_id=None,
+        labels=None,
+        name=None,
         sentinel=None,
     ) -> JsonObjectType:
-        """Create a new automation. If same id/alias already exists, auto-promote to safe draft update."""
+        """Create a new automation. If same id/alias already exists, auto-promote to in-place update."""
         parsed = self._parse_config(config)
         if isinstance(parsed, str):
             return {"success": False, "error": parsed}
@@ -327,20 +359,20 @@ class AutomationTool(llm.Tool):
 
         dup = await self._load_existing_config(hass, automation_id)
         if dup is not None:
-            _LOGGER.info("Auto-promote create→safe draft update: id '%s' exists", automation_id)
-            return await self._safe_draft_update(
+            _LOGGER.info("Auto-promote create→in-place update: id '%s' exists", automation_id)
+            return await self._inplace_update(
                 hass, config, automation_id, f"automation.{automation_id}",
-                icon=icon, area_id=area_id, sentinel=sentinel,
+                icon=icon, area_id=area_id, labels=labels, name=name, sentinel=sentinel,
             )
         for state in hass.states.async_all():
             if not state.entity_id.startswith("automation."):
                 continue
             if state.attributes.get("friendly_name", "").strip().lower() == alias.lower():
                 existing_aid = state.entity_id.removeprefix("automation.")
-                _LOGGER.info("Auto-promote create→safe draft update: alias '%s' matches %s", alias, state.entity_id)
-                return await self._safe_draft_update(
+                _LOGGER.info("Auto-promote create→in-place update: alias '%s' matches %s", alias, state.entity_id)
+                return await self._inplace_update(
                     hass, config, existing_aid, state.entity_id,
-                    icon=icon, area_id=area_id, sentinel=sentinel,
+                    icon=icon, area_id=area_id, labels=labels, name=name, sentinel=sentinel,
                 )
 
         entry = dict(config)
@@ -348,15 +380,14 @@ class AutomationTool(llm.Tool):
             del entry[CONF_ID]
 
         try:
-            await async_validate_config_item(hass, automation_id, entry)
-        except vol.Invalid as err:
+            await self._write_automation(hass, automation_id, entry)
+        except (vol.Invalid, Exception) as err:
             return {"success": False, "error": f"Invalid automation config: {err}"}
-
-        await self._write_automation(hass, automation_id, entry)
 
         target_entity_id = f"automation.{automation_id}"
         applied = await self._apply_registry_meta(
-            hass, target_entity_id, icon=icon, area_id=area_id, sentinel=sentinel,
+            hass, target_entity_id,
+            icon=icon, area_id=area_id, labels=labels, name=name, sentinel=sentinel,
         )
         if "error" in applied:
             return {"success": False, **applied}
@@ -369,7 +400,7 @@ class AutomationTool(llm.Tool):
             **({"applied_registry": applied} if applied else {}),
         }
 
-    async def _safe_draft_update(
+    async def _inplace_update(
         self,
         hass: HomeAssistant,
         config,
@@ -378,15 +409,15 @@ class AutomationTool(llm.Tool):
         *,
         icon=None,
         area_id=None,
+        labels=None,
+        name=None,
         sentinel=None,
     ) -> JsonObjectType:
-        """Safe update via draft-verify-swap pattern.
+        """Update automation with safety guarantees.
 
-        1. Load original config
-        2. Create draft copy with merged changes (id=<orig>_draft)
-        3. Disable original
-        4. Validate + write draft
-        5. Auto-confirm: delete original, rewrite draft with original id/alias
+        - Metadata only (icon/area/labels/name): apply to registry directly.
+        - Config changes (alias/description/trigger/condition/action): validate →
+          atomic write → reload → post-verify.
         """
         parsed = self._parse_config(config)
         if isinstance(parsed, str):
@@ -398,60 +429,76 @@ class AutomationTool(llm.Tool):
         if not automation_id:
             return {"success": False, "error": "automation_id or entity_id is required for update"}
 
+        target_entity_id = f"automation.{automation_id}"
+        touch_meta = any(v is not sentinel for v in (icon, area_id, labels, name))
+
+        if not config:
+            if not touch_meta:
+                return {"success": False, "error": "Nothing to update (no config and no metadata params)"}
+            applied = await self._apply_registry_meta(
+                hass, target_entity_id,
+                icon=icon, area_id=area_id, labels=labels, name=name, sentinel=sentinel,
+            )
+            if "error" in applied:
+                return {"success": False, **applied}
+            return {
+                "success": True,
+                "message": f"Updated metadata for {target_entity_id}",
+                "automation_id": automation_id,
+                "entity_id": target_entity_id,
+                **({"applied_registry": applied} if applied else {}),
+            }
+
         original = await self._load_existing_config(hass, automation_id)
         if original is None:
             return {"success": False, "error": f"Automation '{automation_id}' not found"}
 
-        original_alias = str(original.get("alias", "")).strip()
-
         merged = dict(original)
-        if config:
-            merged.update(config)
-        final_alias = str(merged.get("alias", original_alias)).strip()
-
-        draft_id = f"{automation_id}_draft"
-        draft_entry = dict(merged)
-        draft_entry.pop(CONF_ID, None)
-        draft_entry["alias"] = f"[Draft] {final_alias}"
-
-        try:
-            await async_validate_config_item(hass, draft_id, draft_entry)
-        except vol.Invalid as err:
-            return {"success": False, "error": f"Invalid config: {err}"}
-
-        await self._write_automation(hass, draft_id, draft_entry)
-        _LOGGER.info("Draft '%s' created for original '%s'", draft_id, automation_id)
-
-        await self._delete_automation(hass, f"automation.{automation_id}", automation_id)
-        _LOGGER.info("Original '%s' deleted", automation_id)
+        merged.update(config)
+        final_alias = str(merged.get("alias", "")).strip() or automation_id
 
         final_entry = dict(merged)
         final_entry.pop(CONF_ID, None)
         final_entry["alias"] = final_alias
 
-        await self._delete_automation(hass, f"automation.{draft_id}", draft_id)
-        await self._write_automation(hass, automation_id, final_entry)
-        _LOGGER.info("Draft promoted to '%s'", automation_id)
+        try:
+            await self._write_automation(hass, automation_id, final_entry)
+        except (vol.Invalid, Exception) as err:
+            return {"success": False, "error": f"Failed to write automation: {err}"}
+        _LOGGER.info("Automation '%s' updated (frontend-validated + atomic write)", automation_id)
 
-        target_entity_id = f"automation.{automation_id}"
         applied = await self._apply_registry_meta(
-            hass, target_entity_id, icon=icon, area_id=area_id, sentinel=sentinel,
+            hass, target_entity_id,
+            icon=icon, area_id=area_id, labels=labels, name=name, sentinel=sentinel,
         )
         if "error" in applied:
             return {"success": False, **applied}
 
-        return {
+        verified = await self._load_existing_config(hass, automation_id)
+        verify_ok = verified is not None
+        if not verify_ok:
+            _LOGGER.warning("Post-update verification: automation '%s' not found after write", automation_id)
+
+        result: dict[str, object] = {
             "success": True,
-            "message": f"Updated automation '{final_alias}' (id={automation_id}) via safe draft-swap",
+            "message": f"Updated automation '{final_alias}' (id={automation_id})",
             "automation_id": automation_id,
             "entity_id": target_entity_id,
-            **({"applied_registry": applied} if applied else {}),
+            "verified": verify_ok,
         }
+        if verify_ok and verified:
+            result["current_config"] = verified
+        if applied:
+            result["applied_registry"] = applied
+        return result
 
     async def _confirm_draft(
         self, hass: HomeAssistant, automation_id: str, entity_id: str
     ) -> JsonObjectType:
-        """Confirm a pending draft: delete original, promote draft."""
+        """Deprecated: update is now atomic in-place. Kept for backward compat.
+
+        If a legacy draft (<id>_draft) exists, promote it via in-place update.
+        """
         if not automation_id and entity_id:
             automation_id = entity_id.removeprefix("automation.")
         if not automation_id:
@@ -460,25 +507,28 @@ class AutomationTool(llm.Tool):
         draft_id = f"{automation_id}_draft"
         draft = await self._load_existing_config(hass, draft_id)
         if draft is None:
-            return {"success": False, "error": f"No pending draft found for '{automation_id}' (expected '{draft_id}')"}
+            return {
+                "success": True,
+                "message": f"No pending draft; update is now atomic in-place. Nothing to confirm for '{automation_id}'.",
+            }
 
         draft_alias = str(draft.get("alias", "")).strip()
-        final_alias = draft_alias.removeprefix("[Draft] ").strip() if draft_alias.startswith("[Draft] ") else draft_alias
-
-        original = await self._load_existing_config(hass, automation_id)
-        if original is not None:
-            await self._delete_automation(hass, f"automation.{automation_id}", automation_id)
+        final_alias = (
+            draft_alias.removeprefix("[Draft] ").strip()
+            if draft_alias.startswith("[Draft] ")
+            else draft_alias
+        )
 
         final_entry = dict(draft)
         final_entry.pop(CONF_ID, None)
         final_entry["alias"] = final_alias
 
-        await self._delete_automation(hass, f"automation.{draft_id}", draft_id)
         await self._write_automation(hass, automation_id, final_entry)
+        await self._delete_automation(hass, f"automation.{draft_id}", draft_id)
 
         return {
             "success": True,
-            "message": f"Draft confirmed. Automation '{final_alias}' (id={automation_id}) is now live.",
+            "message": f"Legacy draft promoted. Automation '{final_alias}' (id={automation_id}) is now live.",
             "automation_id": automation_id,
             "entity_id": f"automation.{automation_id}",
         }

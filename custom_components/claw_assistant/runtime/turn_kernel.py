@@ -9,7 +9,7 @@ from typing import Any
 from homeassistant.helpers import intent
 
 from .internal_llm import reset_runtime_tool_mode, set_runtime_tool_mode
-from .loop_controller import finalize_kernel_step, record_kernel_step
+from .loop_controller import check_tool_repeat, finalize_kernel_step, record_kernel_step
 from .native_chatlog_bridge import (
     append_final_message_and_pause,
     append_step_message_and_pause,
@@ -220,6 +220,21 @@ async def execute_kernel_turn(
                 )
                 await append_final_message_and_pause(agent_id=agent_id, content=final_text)
                 return _finalize_result(result, final_text)
+
+            if step.tool_name:
+                from ..const import CONF_MAX_TOOL_REPEAT, DEFAULT_MAX_TOOL_REPEAT
+                max_repeat = DEFAULT_MAX_TOOL_REPEAT
+                for entry in hass.config_entries.async_entries("claw_assistant"):
+                    max_repeat = int(entry.options.get(CONF_MAX_TOOL_REPEAT, DEFAULT_MAX_TOOL_REPEAT))
+                    break
+                bail_prompt = check_tool_repeat(hass, tool_name=step.tool_name, max_repeat=max_repeat)
+                if bail_prompt:
+                    LOGGER.warning(
+                        "Tool repeat limit reached: %s called %d+ times (limit %d)",
+                        step.tool_name, max_repeat, max_repeat,
+                    )
+                    extra_system_prompt = _append_prompt(extra_system_prompt, bail_prompt)
+                    continue
 
             record = record_kernel_step(
                 hass,
