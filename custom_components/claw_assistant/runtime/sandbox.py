@@ -76,14 +76,32 @@ def _ensure_venv_sync(hass: HomeAssistant) -> Path:
     return python_bin
 
 
-async def _run_subprocess(args: list[str], timeout: int) -> tuple[int, str, str]:
+async def _run_subprocess(
+    args: list[str],
+    timeout: int,
+    *,
+    env: dict[str, str] | None = None,
+    cwd: str | None = None,
+    stdin: str | None = None,
+) -> tuple[int, str, str]:
+    proc_env: dict[str, str] | None = None
+    if env is not None:
+        # Merge over the current environment so PATH/HOME/etc. stay usable.
+        proc_env = {**os.environ, **env}
+
     proc = await asyncio.create_subprocess_exec(
         *args,
         stdout=asyncio.subprocess.PIPE,
         stderr=asyncio.subprocess.PIPE,
+        stdin=asyncio.subprocess.PIPE if stdin is not None else None,
+        env=proc_env,
+        cwd=cwd,
     )
     try:
-        stdout_b, stderr_b = await asyncio.wait_for(proc.communicate(), timeout=timeout)
+        stdout_b, stderr_b = await asyncio.wait_for(
+            proc.communicate(stdin.encode("utf-8") if stdin is not None else None),
+            timeout=timeout,
+        )
     except asyncio.TimeoutError:
         proc.kill()
         await proc.wait()
@@ -96,7 +114,11 @@ async def _run_subprocess(args: list[str], timeout: int) -> tuple[int, str, str]
 
 
 async def ensure_sandbox_ready(
-    hass: HomeAssistant, requirements: list[str] | None = None, pip_timeout: int = 120
+    hass: HomeAssistant,
+    requirements: list[str] | None = None,
+    pip_timeout: int = 120,
+    *,
+    pip_index_url: str | None = None,
 ) -> Path:
 
     python_bin = await hass.async_add_executor_job(_ensure_venv_sync, hass)
@@ -110,11 +132,15 @@ async def ensure_sandbox_ready(
     if not todo:
         return python_bin
 
-    LOGGER.info("Sandbox pip install: %s", todo)
-    rc, stdout, stderr = await _run_subprocess(
-        [str(python_bin), "-m", "pip", "install", "--disable-pip-version-check", *todo],
-        timeout=pip_timeout,
-    )
+    pip_args: list[str] = [
+        str(python_bin), "-m", "pip", "install", "--disable-pip-version-check",
+    ]
+    if pip_index_url:
+        pip_args += ["--index-url", pip_index_url]
+    pip_args += todo
+
+    LOGGER.info("Sandbox pip install: %s (index=%s)", todo, pip_index_url or "default")
+    rc, stdout, stderr = await _run_subprocess(pip_args, timeout=pip_timeout)
     if rc != 0:
         raise RuntimeError(
             f"pip install failed (rc={rc}): {stderr.strip() or stdout.strip()}"
@@ -152,9 +178,38 @@ async def run_in_sandbox(
     requirements: list[str] | None = None,
     timeout: int = 60,
     pip_timeout: int = 120,
+    env: dict[str, str] | None = None,
+    cwd: str | None = None,
+    stdin: str | None = None,
+    pip_index_url: str | None = None,
+    dry_run: bool = False,
 ) -> dict[str, Any]:
+    import time as _time
 
-    python_bin = await ensure_sandbox_ready(hass, requirements, pip_timeout)
+    started = _time.perf_counter()
+
+    python_bin = await ensure_sandbox_ready(
+        hass, requirements, pip_timeout, pip_index_url=pip_index_url
+    )
+
+    if dry_run:
+        # Compile-only smoke test to catch syntax errors cheaply.
+        try:
+            compile(code, "<sandbox>", "exec")
+        except SyntaxError as err:
+            return {
+                "success": False,
+                "dry_run": True,
+                "error": f"SyntaxError: {err.msg} (line {err.lineno})",
+                "duration_ms": int((_time.perf_counter() - started) * 1000),
+            }
+        return {
+            "success": True,
+            "dry_run": True,
+            "message": "Compile OK; not executed",
+            "duration_ms": int((_time.perf_counter() - started) * 1000),
+        }
+
     script = _build_runner_script(code)
 
     with tempfile.NamedTemporaryFile(
@@ -165,13 +220,19 @@ async def run_in_sandbox(
 
     try:
         rc, stdout, stderr = await _run_subprocess(
-            [str(python_bin), tmp_path], timeout=timeout
+            [str(python_bin), tmp_path],
+            timeout=timeout,
+            env=env,
+            cwd=cwd,
+            stdin=stdin,
         )
     finally:
         try:
             os.unlink(tmp_path)
         except OSError:
             pass
+
+    duration_ms = int((_time.perf_counter() - started) * 1000)
 
     marker = "\x00KADERMGR_RESULT\x00"
     payload = None
@@ -190,6 +251,7 @@ async def run_in_sandbox(
             "stdout": user_stdout,
             "stderr": stderr,
             "returncode": rc,
+            "duration_ms": duration_ms,
             "error": stderr.strip().splitlines()[-1] if rc != 0 and stderr.strip() else None,
         }
 
@@ -200,6 +262,7 @@ async def run_in_sandbox(
             "result": result,
             "stdout": user_stdout,
             "stderr": stderr,
+            "duration_ms": duration_ms,
         }
     return {
         "success": False,
@@ -207,6 +270,7 @@ async def run_in_sandbox(
         "traceback": payload.get("traceback"),
         "stdout": user_stdout,
         "stderr": stderr,
+        "duration_ms": duration_ms,
     }
 
 

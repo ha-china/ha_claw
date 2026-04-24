@@ -84,6 +84,27 @@ def _tool_desc(name: str, a: dict, lang: str) -> str:
         if zh:
             return f"🔗 正在{act}自动化..." if act else "🔗 正在管理自动化..."
         return f"🔗 Automation: {act}..." if act else "🔗 Managing automation..."
+    if name == "Script":
+        act = e(str(a.get("action", "")))
+        sid = e(str(a.get("script_id", "") or a.get("entity_id", "")))[:20]
+        if zh:
+            _SC_ZH = {
+                "list": "列举", "get": "查询", "create": "创建",
+                "update": "更新", "delete": "删除", "run": "执行",
+            }
+            act_zh = _SC_ZH.get(act, act)
+            icon = "💫" if act in ("list", "get") else "🔗"
+            if sid and act:
+                return f"{icon} 正在{act_zh}脚本: {sid}..."
+            if act:
+                return f"{icon} 正在{act_zh}脚本..."
+            return "🔗 正在管理脚本..."
+        icon = "💫" if act in ("list", "get") else "🔗"
+        if sid and act:
+            return f"{icon} Script {act}: {sid}..."
+        if act:
+            return f"{icon} Script {act}..."
+        return "🔗 Managing script..."
     if name == "ListServices":
         d = e(str(a.get("domain", "")))
         if zh:
@@ -169,6 +190,11 @@ def _tool_desc(name: str, a: dict, lang: str) -> str:
         return f"📦 Installing skill: {n}..." if n else "📦 Installing skill..."
     if name == "ListInstalledSkills":
         return "📦 正在列举已安装技能..." if zh else "📦 Listing installed skills..."
+    if name == "GetSkillIndex":
+        kw = e(str(a.get("keyword", "")))[:20]
+        if zh:
+            return f"💫 正在检索技能: {kw}..." if kw else "💫 正在列举技能索引..."
+        return f"💫 Skill index: {kw}..." if kw else "💫 Listing skill index..."
     if name == "GetInstalledSkill":
         n = e(str(a.get("name", "")))[:20]
         if zh:
@@ -264,6 +290,39 @@ def _tool_desc(name: str, a: dict, lang: str) -> str:
         return "🔗 正在丢弃提案..." if zh else "🔗 Discarding proposal..."
     if name == "ApplyProposal":
         return "🔗 正在应用提案..." if zh else "🔗 Applying proposal..."
+    if name == "IntentCall":
+        act = e(str(a.get("action", "")))
+        it = e(str(a.get("intent_type", "")))[:20]
+        if zh:
+            if act == "list":
+                return "💫 正在列举意图处理器..."
+            return f"🔗 正在调用意图: {it}..." if it else "🔗 正在调用意图..."
+        if act == "list":
+            return "💫 Listing intents..."
+        return f"🔗 Intent: {it}..." if it else "🔗 Calling intent..."
+    if name == "Registry":
+        reg = e(str(a.get("registry", "")))
+        act = e(str(a.get("action", "")))
+        if zh:
+            _REG_ZH = {
+                "area": "区域", "floor": "楼层", "label": "标签",
+                "category": "分类", "entity": "实体",
+            }
+            _ACT_ZH = {
+                "list": "列举", "get": "查询", "create": "创建",
+                "update": "更新", "delete": "删除", "remove": "移除",
+                "rename": "重命名",
+            }
+            reg_zh = _REG_ZH.get(reg, reg)
+            act_zh = _ACT_ZH.get(act, act)
+            icon = "💫" if act in ("list", "get") else "🔗"
+            if reg and act:
+                return f"{icon} 正在{act_zh}{reg_zh}..."
+            return f"{icon} 正在操作注册表..."
+        icon = "💫" if act in ("list", "get") else "🔗"
+        if reg and act:
+            return f"{icon} Registry {reg}.{act}..."
+        return f"{icon} Registry op..."
 
     if name.startswith("Hass"):
         eid = e(str(a.get("name", a.get("entity_id", ""))))[:22]

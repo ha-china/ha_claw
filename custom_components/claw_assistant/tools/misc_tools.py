@@ -161,6 +161,20 @@ def _cap_string(value: str, limit: int) -> str:
     return value[:limit] + f"...[truncated, {len(value)} chars total]"
 
 
+def _trim_stream(value: str, limit: int = _PY_STREAM_MAX_CHARS) -> str:
+    """Trim stdout/stderr keeping the head and tail (loses middle).
+
+    Useful for long output where both the setup and the final error matter.
+    """
+    if not value or len(value) <= limit:
+        return value
+    half = limit // 2
+    head = value[:half]
+    tail = value[-(limit - half):]
+    dropped = len(value) - (len(head) + len(tail))
+    return f"{head}\n...[truncated {dropped} chars]...\n{tail}"
+
+
 def _cap_py_payload(payload: JsonObjectType) -> JsonObjectType:
 
     if not isinstance(payload, dict):
@@ -168,7 +182,7 @@ def _cap_py_payload(payload: JsonObjectType) -> JsonObjectType:
     for key in ("stdout", "stderr"):
         val = payload.get(key)
         if isinstance(val, str):
-            payload[key] = _cap_string(val, _PY_STREAM_MAX_CHARS)
+            payload[key] = _trim_stream(val, _PY_STREAM_MAX_CHARS)
     result_val = payload.get("result")
     if isinstance(result_val, str):
         payload["result"] = _cap_string(result_val, _PY_RESULT_MAX_CHARS)
@@ -187,29 +201,30 @@ def _cap_py_payload(payload: JsonObjectType) -> JsonObjectType:
 
 class ExecutePythonTool(llm.Tool):
     name = "ExecutePython"
-    description = """Execute Python code. Two modes:
-
-MODE A (default, fast): run inline inside Home Assistant. Use for reading/writing
-HA state via the `hass` object.
-    code                  : Python, assign to `result`; can use `await`.
-    Available modules     : math, datetime, json, re, random, asyncio, importlib.
-    Examples              : `result = len(hass.states.async_all())`
-                            `result = [s.entity_id for s in hass.states.async_all() if s.state=='unavailable']`
-
-MODE B (sandbox, powerful): run in an isolated child venv via subprocess.
-    sandbox=true          : force sandbox mode.
-    requirements=[...]    : pip packages to install in the sandbox (auto-triggers
-                            sandbox mode if non-empty). Installed packages are
-                            cached across calls.
-    timeout=60            : seconds.
-    No `hass` object in sandbox mode. Use for numeric work, API calls with extra
-    libraries, parsing, or anything that could crash/hang the main interpreter."""
+    description = (
+        "Execute Python code. Two modes. "
+        "inline (default): runs inside the HA process with full builtins and a "
+        "`hass` object; supports top-level `await`; stdout/stderr/traceback are "
+        "captured and returned. If the last statement is an expression its value "
+        "is returned as result (Jupyter-like). "
+        "sandbox (sandbox=true or non-empty requirements): runs in an isolated "
+        "child venv subprocess with optional env/cwd/stdin/pip_index_url. "
+        "No `hass` there. "
+        "Destructive operations (deleting files, rmtree, dropping tables, shell "
+        "`rm -rf`, etc.) must be confirmed with the user before running."
+    )
     parameters = vol.Schema(
         {
             vol.Required("code"): str,
             vol.Optional("sandbox", default=False): bool,
             vol.Optional("requirements", default=[]): list,
             vol.Optional("timeout", default=60): int,
+            vol.Optional("dry_run", default=False): bool,
+            # sandbox-only extras
+            vol.Optional("env", default={}): dict,
+            vol.Optional("cwd", default=""): str,
+            vol.Optional("stdin", default=""): str,
+            vol.Optional("pip_index_url", default=""): str,
         }
     )
 
@@ -224,6 +239,11 @@ MODE B (sandbox, powerful): run in an isolated child venv via subprocess.
             if str(item).strip()
         ]
         timeout = int(tool_input.tool_args.get("timeout", 60) or 60)
+        dry_run = bool(tool_input.tool_args.get("dry_run", False))
+        env = tool_input.tool_args.get("env") or {}
+        cwd = str(tool_input.tool_args.get("cwd", "") or "")
+        stdin_text = str(tool_input.tool_args.get("stdin", "") or "")
+        pip_index_url = str(tool_input.tool_args.get("pip_index_url", "") or "")
 
         if sandbox_flag or requirements:
             from ..runtime.sandbox import run_in_sandbox
@@ -235,6 +255,11 @@ MODE B (sandbox, powerful): run in an isolated child venv via subprocess.
                         code,
                         requirements=requirements,
                         timeout=max(5, min(timeout, 600)),
+                        env={str(k): str(v) for k, v in (env or {}).items()},
+                        cwd=cwd or None,
+                        stdin=stdin_text or None,
+                        pip_index_url=pip_index_url or None,
+                        dry_run=dry_run,
                     )
                 )
             except asyncio.TimeoutError:
@@ -242,66 +267,126 @@ MODE B (sandbox, powerful): run in an isolated child venv via subprocess.
             except Exception as err:
                 return {"success": False, "error": str(err)}
 
-        forbidden = [
-            "subprocess",
-            "__import__",
-            "file(",
-            "compile(",
-            "globals(",
-            "locals(",
-        ]
-        if "open(" in code and "pathlib" not in code:
-            forbidden.append("open(")
-        if "os." in code and "os.path" not in code:
-            forbidden.append("os.")
-        for f in forbidden:
-            if f in code:
-                return {"success": False, "error": f"Forbidden operation (use sandbox=true to bypass): {f}"}
+        return await self._run_inline(hass, code, timeout=timeout, dry_run=dry_run)
 
-        import datetime
-        import importlib
-        import math
-        import pathlib
-        import random
-        import re
+    async def _run_inline(
+        self, hass: HomeAssistant, code: str, *, timeout: int, dry_run: bool
+    ) -> JsonObjectType:
+        """Inline execution with full builtins, stdout/stderr capture, top-level
+        await, automatic trailing-expression result and structured errors."""
+        import ast
+        import builtins as _builtins
+        import contextlib
+        import io
+        import sys
+        import time
+        import traceback
 
-        safe_globals = {
-            "abs": abs, "round": round, "min": min, "max": max, "sum": sum,
-            "len": len, "range": range, "enumerate": enumerate, "zip": zip,
-            "int": int, "float": float, "str": str, "bool": bool, "list": list,
-            "dict": dict, "set": set, "tuple": tuple,
-            "sorted": sorted, "reversed": reversed, "map": map, "filter": filter,
-            "pow": pow, "divmod": divmod, "hex": hex, "bin": bin, "oct": oct,
-            "any": any, "all": all, "isinstance": isinstance, "type": type,
-            "dir": dir, "getattr": getattr, "hasattr": hasattr,
-            "print": lambda *args: None,
-            "math": math, "datetime": datetime, "json": json, "re": re,
-            "random": random, "asyncio": asyncio, "importlib": importlib,
-            "pathlib": pathlib, "open": open,
-            "hass": hass,
-        }
+        PyCF_ALLOW_TOP_LEVEL_AWAIT = 0x2000  # compile flag, Py3.8+
+
+        # Rewrite the trailing expression (if any) into an assignment to
+        # __auto_result__ so we can surface the value the same way Jupyter does
+        # — without breaking code that explicitly assigns to `result`.
+        auto_key = "__auto_result__"
+        try:
+            tree = ast.parse(code, mode="exec")
+        except SyntaxError as err:
+            return {
+                "success": False,
+                "error": f"SyntaxError: {err.msg} (line {err.lineno})",
+                "traceback": traceback.format_exc(),
+            }
+
+        if tree.body and isinstance(tree.body[-1], ast.Expr):
+            last = tree.body[-1]
+            assign = ast.Assign(
+                targets=[ast.Name(id=auto_key, ctx=ast.Store())],
+                value=last.value,
+            )
+            ast.copy_location(assign, last)
+            tree.body[-1] = assign
+            ast.fix_missing_locations(tree)
 
         try:
-            if "await " in code:
-                wrapped = (
-                    "async def __run__():\n    result = None\n"
-                    + "\n".join(f"    {line}" for line in code.split("\n"))
-                    + "\n    return result"
-                )
-                exec(wrapped, safe_globals)
-                result = await safe_globals["__run__"]()
-            else:
-                local_vars = {"result": None}
-                exec(code, safe_globals, local_vars)
-                result = local_vars.get("result")
+            compiled = compile(
+                tree, "<execute_python>", "exec",
+                flags=PyCF_ALLOW_TOP_LEVEL_AWAIT,
+            )
+        except SyntaxError as err:
+            return {
+                "success": False,
+                "error": f"SyntaxError: {err.msg} (line {err.lineno})",
+                "traceback": traceback.format_exc(),
+            }
 
-            if result is None:
-                return {"success": True, "result": "Code executed"}
-            if isinstance(result, (list, dict)):
-                return _cap_py_payload({"success": True, "result": result})
-            return _cap_py_payload({"success": True, "result": str(result)})
-        except Exception as e:
-            return {"success": False, "error": str(e)}
+        if dry_run:
+            return {"success": True, "dry_run": True, "message": "Compile OK; not executed"}
+
+        # Full builtins, plus a few convenience handles. We intentionally do
+        # NOT filter builtins — the AI is running as the HA admin here.
+        globals_: dict[str, Any] = {
+            "__builtins__": _builtins,
+            "hass": hass,
+            "asyncio": asyncio,
+            "json": json,
+        }
+
+        stdout_buf = io.StringIO()
+        stderr_buf = io.StringIO()
+        started = time.perf_counter()
+        err_info: dict[str, Any] | None = None
+
+        try:
+            with contextlib.redirect_stdout(stdout_buf), contextlib.redirect_stderr(stderr_buf):
+                # With PyCF_ALLOW_TOP_LEVEL_AWAIT, the compiled module body may
+                # evaluate to a coroutine when awaits are present. Use eval (not
+                # exec) so we can capture and await it; regular modules just
+                # return None.
+                import inspect as _inspect
+
+                maybe = eval(compiled, globals_)
+                if _inspect.iscoroutine(maybe):
+                    await asyncio.wait_for(maybe, timeout=max(1, timeout))
+        except asyncio.TimeoutError:
+            err_info = {
+                "error": f"Inline execution exceeded {timeout}s",
+                "traceback": traceback.format_exc(),
+            }
+        except SystemExit as err:
+            err_info = {
+                "error": f"SystemExit: {err.code}",
+                "traceback": traceback.format_exc(),
+            }
+        except BaseException:  # noqa: BLE001 - surface everything to AI
+            err_info = {
+                "error": traceback.format_exception_only(*sys.exc_info()[:2])[-1].strip(),
+                "traceback": traceback.format_exc(),
+            }
+
+        duration_ms = int((time.perf_counter() - started) * 1000)
+        stdout_text = _trim_stream(stdout_buf.getvalue())
+        stderr_text = _trim_stream(stderr_buf.getvalue())
+
+        if err_info is not None:
+            return _cap_py_payload({
+                "success": False,
+                **err_info,
+                "stdout": stdout_text,
+                "stderr": stderr_text,
+                "duration_ms": duration_ms,
+            })
+
+        # Prefer explicit `result`, otherwise the trailing expression value.
+        result = globals_.get("result")
+        if result is None:
+            result = globals_.get(auto_key)
+        return _cap_py_payload({
+            "success": True,
+            "result": result,
+            "stdout": stdout_text,
+            "stderr": stderr_text,
+            "duration_ms": duration_ms,
+        })
 
 
 class SystemControlTool(llm.Tool):
@@ -663,9 +748,9 @@ class HeartbeatManagerTool(llm.Tool):
                 return {"success": False, "error": "Heartbeat title is required"}
             notify_channel = tool_input.tool_args.get("notify_channel", "")
             if not notify_channel:
-                from ..runtime.state import _active_conversation_id
+                from ..runtime.state import _active_conversation_id, is_im_channel
                 conv_id = _active_conversation_id.get()
-                if conv_id and conv_id.startswith("wechat:"):
+                if is_im_channel(conv_id):
                     notify_channel = conv_id
             path = await async_upsert_heartbeat_task(
                 hass,
@@ -950,20 +1035,23 @@ def _compress_camera_frame(
 class CameraAnalyzeTool(llm.Tool):
     name = "CameraAnalyze"
     description = (
-        "Fetch a single frame from a camera and return it as base64 JPEG for vision analysis. "
-        "Heavily compressed (default longest side 640px, target 40KB) so the upstream LLM server can accept the payload. "
-        "Camera entities are accessible here even if not exposed to the assistant. "
-        "Usage: pass camera_entity='list' (or empty) to enumerate cameras; then call again with a concrete entity_id. "
-        "Params: camera_entity (entity_id / friendly name / 'list'), max_dim (default 640), target_kb (default 40)."
+        "Fetch a camera frame. mode=snapshot: returns snapshot_url and markdown_hint only (for display). "
+        "mode=analyze: also returns base64 JPEG for vision analysis. "
+        "To show the image, include markdown_hint in your response. "
+        "Cameras are accessible here even if not exposed to the assistant. "
+        "Params: camera_entity (entity_id / friendly name / 'list'), mode (snapshot|analyze, default snapshot), "
+        "max_dim (default 640), target_kb (default 40)."
     )
     parameters = vol.Schema({
         vol.Optional("camera_entity", default=""): str,
+        vol.Optional("mode", default="snapshot"): vol.In(["snapshot", "analyze"]),
         vol.Optional("max_dim", default=640): int,
         vol.Optional("target_kb", default=40): int,
     })
 
     async def async_call(self, hass: HomeAssistant, tool_input: llm.ToolInput, llm_context: llm.LLMContext) -> JsonObjectType:
         camera_entity = (tool_input.tool_args.get("camera_entity", "") or "").strip()
+        mode = (tool_input.tool_args.get("mode", "snapshot") or "snapshot").strip().lower()
         max_dim = max(160, int(tool_input.tool_args.get("max_dim", 640) or 640))
         target_kb = max(10, int(tool_input.tool_args.get("target_kb", 40) or 40))
 
@@ -1007,6 +1095,30 @@ class CameraAnalyzeTool(llm.Tool):
             }
 
         try:
+            from homeassistant.components.camera import ENTITY_IMAGE_URL
+            from homeassistant.helpers.network import get_url
+
+            snapshot_url = ""
+            try:
+                cam_state = hass.states.get(target_camera)
+                token = cam_state.attributes.get("access_token", "") if cam_state else ""
+                if token:
+                    base = get_url(hass, prefer_external=False)
+                    snapshot_url = f"{base}{ENTITY_IMAGE_URL.format(target_camera, token)}"
+            except Exception:
+                pass
+
+            if mode == "snapshot":
+                if not snapshot_url:
+                    return {"success": False, "error": f"Cannot build snapshot URL for {target_camera}"}
+                return {
+                    "success": True,
+                    "camera_entity": target_camera,
+                    "mode": "snapshot",
+                    "snapshot_url": snapshot_url,
+                    "markdown_hint": f"![{target_camera}]({snapshot_url})",
+                }
+
             from homeassistant.components.camera import async_get_image
             import base64
 
@@ -1020,9 +1132,10 @@ class CameraAnalyzeTool(llm.Tool):
             )
             base64_data = base64.b64encode(jpeg_bytes).decode("utf-8")
 
-            return {
+            result: dict[str, Any] = {
                 "success": True,
                 "camera_entity": target_camera,
+                "mode": "analyze",
                 "image_base64": base64_data,
                 "content_type": "image/jpeg",
                 "width": final_w,
@@ -1034,6 +1147,10 @@ class CameraAnalyzeTool(llm.Tool):
                     f"{len(jpeg_bytes)} bytes"
                 ),
             }
+            if snapshot_url:
+                result["snapshot_url"] = snapshot_url
+                result["markdown_hint"] = f"![{target_camera}]({snapshot_url})"
+            return result
         except Exception as err:
             _LOGGER.error("CameraAnalyzeTool error: %s", err)
             return {"success": False, "error": f"Failed to capture camera frame: {err}"}
@@ -1041,23 +1158,104 @@ class CameraAnalyzeTool(llm.Tool):
 
 class GetConversationHistoryTool(llm.Tool):
     name = "GetConversationHistory"
-    description = "Get current conversation history to review previous dialogue content."
+    description = (
+        "Inspect/manage conversation history. "
+        "action=get (default): current conversation's recent turns. "
+        "action=recent: turns from ALL conversations touched within the last N minutes — "
+        "use this to recall what was just discussed even after the user closed the window / got a new conversation_id. "
+        "action=clear: delete history for current conversation, a specific conversation_id, or all (scope=all). "
+        "action=stats: counts and oldest/newest timestamps. "
+        "Params: action, max_turns(default 5), include_tools(bool), recent_minutes(default 20), "
+        "conversation_id(optional, override target), scope(current|all for clear)."
+    )
     parameters = vol.Schema({
+        vol.Optional("action", default="get"): vol.In(["get", "recent", "clear", "stats"]),
         vol.Optional("max_turns", default=5): int,
         vol.Optional("include_tools", default=False): bool,
+        vol.Optional("recent_minutes", default=20): vol.Any(int, float),
+        vol.Optional("conversation_id", default=""): str,
+        vol.Optional("scope", default="current"): vol.In(["current", "all"]),
     })
 
     async def async_call(self, hass: HomeAssistant, tool_input: llm.ToolInput, llm_context: llm.LLMContext) -> JsonObjectType:
         from ..conversation_utils import get_conversation_history
+        from ..runtime.state import get_active_conversation_state, get_conversation_status
 
-        max_turns = tool_input.tool_args.get("max_turns", 5)
-        include_tools = tool_input.tool_args.get("include_tools", False)
+        args = tool_input.tool_args
+        action = args.get("action", "get")
+        max_turns = int(args.get("max_turns", 5) or 5)
+        include_tools = bool(args.get("include_tools", False))
+        recent_minutes = float(args.get("recent_minutes", 20) or 20)
+        explicit_conv_id = (args.get("conversation_id") or "").strip()
+        scope = args.get("scope", "current")
 
-        conv_id = llm_context.context.id if llm_context.context else "default"
         history = get_conversation_history()
+
+        def _resolve_conv_id() -> str:
+            if explicit_conv_id:
+                return explicit_conv_id
+            active = get_active_conversation_state(hass).get("id")
+            if active:
+                return active
+            last = get_conversation_status(hass).get("last_conversation_id")
+            return last or "default"
+
+        if action == "stats":
+            stats = history.get_stats()
+            stats["success"] = True
+            return stats
+
+        if action == "recent":
+            conversations = history.get_recent_across_conversations(
+                minutes=recent_minutes,
+                max_turns_per_conv=max_turns,
+            )
+            return {
+                "success": True,
+                "window_minutes": recent_minutes,
+                "conversation_count": len(conversations),
+                "conversations": conversations,
+                "message": (
+                    "No conversations touched in the last "
+                    f"{recent_minutes} minutes"
+                ) if not conversations else None,
+            }
+
+        if action == "clear":
+            if scope == "all":
+                removed = history.clear()
+                return {
+                    "success": True,
+                    "scope": "all",
+                    "removed_turns": removed,
+                }
+            target = _resolve_conv_id()
+            removed = history.clear(target)
+            return {
+                "success": True,
+                "scope": "conversation",
+                "conversation_id": target,
+                "removed_turns": removed,
+            }
+
+        # action == "get"
+        conv_id = _resolve_conv_id()
         context_str = history.get_recent_context(conv_id, max_turns, include_tools)
-
+        turns = history.get_history(conv_id)
         if not context_str:
-            return {"success": True, "history": "", "message": "No conversation history yet"}
-
-        return {"success": True, "history": context_str, "turns": len(history.get_history(conv_id))}
+            return {
+                "success": True,
+                "conversation_id": conv_id,
+                "history": "",
+                "turns": 0,
+                "message": (
+                    "No history for the current conversation. Try action=recent "
+                    "to look across conversations touched in the last 20 minutes."
+                ),
+            }
+        return {
+            "success": True,
+            "conversation_id": conv_id,
+            "history": context_str,
+            "turns": len(turns),
+        }
