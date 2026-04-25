@@ -51,7 +51,12 @@ class ScriptTool(llm.Tool):
         "list returns paginated results (default page=1, page_size=10). "
         "create requires config with sequence; duplicates are rejected. "
         "run executes the script with optional variables dict. "
-        "After update, response includes verified=true/false and current_config for self-check; if wrong, do a targeted small fix."
+        "After update, response includes verified=true/false and current_config for self-check; if wrong, do a targeted small fix. "
+        "CODING DISCIPLINE: "
+        "1) Surgical changes — only modify what the user asked for. Do NOT rewrite or 'improve' unrelated steps in the sequence. Every changed field must trace to the request. "
+        "2) Simplicity — minimum config that solves the problem. No speculative error handling, no extra conditions 'just in case'. "
+        "3) Think before writing — if the request is ambiguous, ask which interpretation is correct BEFORE sending config. "
+        "4) Verify after write — always check verified + current_config in the response. If alias/sequence differs from intent, do one targeted fix, not a full rewrite."
     )
 
     parameters = vol.Schema(

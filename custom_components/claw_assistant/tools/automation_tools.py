@@ -43,7 +43,12 @@ class AutomationTool(llm.Tool):
         "page, page_size. "
         "list returns paginated results (default page=1, page_size=10). "
         "create requires full config; if same alias/id exists, auto-promotes to update. "
-        "After update, response includes verified=true/false and current_config for self-check; if wrong, do a targeted small fix."
+        "After update, response includes verified=true/false and current_config for self-check; if wrong, do a targeted small fix. "
+        "CODING DISCIPLINE: "
+        "1) Surgical changes — only modify what the user asked for. Do NOT rewrite or 'improve' unrelated triggers/conditions/actions. Every changed field must trace to the request. "
+        "2) Simplicity — minimum config that solves the problem. No speculative error handling, no extra conditions 'just in case'. "
+        "3) Think before writing — if the request is ambiguous, ask which interpretation is correct BEFORE sending config. "
+        "4) Verify after write — always check verified + current_config in the response. If alias/trigger/action differs from intent, do one targeted fix, not a full rewrite."
     )
 
     parameters = vol.Schema(

@@ -928,7 +928,9 @@ SUBENTRIES (many modern integrations use subentries instead of options for per-m
   To fill/submit form: config_entries/subentries/flow/configure — params: {flow_id: "...", field1: value1, ...}
   To DELETE subentry: config_entries/subentries/delete — params: {entry_id: "...", subentry_id: "..."}
 
-When response contains next_action, follow that instruction exactly."""
+When response contains next_action, follow that instruction exactly.
+
+DISCIPLINE: 1) Follow the exact workflow steps above — no exploratory calls. 2) Only change what the user asked for. 3) If ambiguous, ask first. 4) Check response.config_method to pick the right path (options vs subentries) — don't guess."""
 
     _VALID_ACTIONS = [
         "integration/descriptions",
