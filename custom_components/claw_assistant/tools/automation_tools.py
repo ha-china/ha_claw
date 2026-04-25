@@ -48,7 +48,13 @@ class AutomationTool(llm.Tool):
         "1) Surgical changes — only modify what the user asked for. Do NOT rewrite or 'improve' unrelated triggers/conditions/actions. Every changed field must trace to the request. "
         "2) Simplicity — minimum config that solves the problem. No speculative error handling, no extra conditions 'just in case'. "
         "3) Think before writing — if the request is ambiguous, ask which interpretation is correct BEFORE sending config. "
-        "4) Verify after write — always check verified + current_config in the response. If alias/trigger/action differs from intent, do one targeted fix, not a full rewrite."
+        "4) Verify after write — always check verified + current_config in the response. If alias/trigger/action differs from intent, do one targeted fix, not a full rewrite. "
+        "5) Jinja2 first — PREFER Jinja2 templates and variables over hardcoded values and repetitive condition branches. "
+        "Use value_template / '{{ states(\"sensor.xxx\") }}' for dynamic values. "
+        "Use trigger variables + '{{ trigger.to_state.state }}' to avoid duplicating actions per trigger. "
+        "Use choose/if with '{{ }}' templates instead of multiple separate automations for related logic. "
+        "Use input_number/input_select/input_boolean as variables the user can adjust from the UI instead of hardcoding thresholds. "
+        "One smart automation with templates > three dumb automations with hardcoded values."
     )
 
     parameters = vol.Schema(

@@ -56,7 +56,12 @@ class ScriptTool(llm.Tool):
         "1) Surgical changes — only modify what the user asked for. Do NOT rewrite or 'improve' unrelated steps in the sequence. Every changed field must trace to the request. "
         "2) Simplicity — minimum config that solves the problem. No speculative error handling, no extra conditions 'just in case'. "
         "3) Think before writing — if the request is ambiguous, ask which interpretation is correct BEFORE sending config. "
-        "4) Verify after write — always check verified + current_config in the response. If alias/sequence differs from intent, do one targeted fix, not a full rewrite."
+        "4) Verify after write — always check verified + current_config in the response. If alias/sequence differs from intent, do one targeted fix, not a full rewrite. "
+        "5) Jinja2 first — PREFER Jinja2 templates and variables over hardcoded values. "
+        "Use data_template / '{{ states(\"sensor.xxx\") }}' for dynamic service data. "
+        "Use script variables + '{{ }}' templates to make scripts reusable across callers. "
+        "Use choose/if with templates instead of duplicating sequence steps for different cases. "
+        "One flexible script with variables > multiple near-identical scripts."
     )
 
     parameters = vol.Schema(
