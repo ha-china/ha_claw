@@ -234,8 +234,8 @@ async def _consult_agent(
     agent_id: str,
     question: str,
     context: str = "",
-    max_rounds: int = 1,
-    timeout: int = 30,
+    max_rounds: int = 30,
+    timeout: int = 120,
 ) -> dict[str, str]:
     """Call another conversation agent for one or more dialogue rounds.
 
@@ -266,7 +266,7 @@ async def _consult_agent(
         prompt = f"[PEER-CONSULT]\n[Context from calling AI]\n{context}\n\n[Question]\n{question}"
 
     dialogue: list[dict[str, str]] = []
-    max_rounds = max(1, min(max_rounds, 10))
+    max_rounds = max(1, min(max_rounds, 50))
 
     for round_num in range(max_rounds):
         user_input = conversation.ConversationInput(
@@ -291,7 +291,7 @@ async def _consult_agent(
                 await asyncio.sleep(0.5 * (2 ** attempt))
             except Exception as exc:
                 err_str = str(exc).lower()
-                is_transient = any(k in err_str for k in ("cannot connect", "server disconnected", "ssl", "timeout", "connection"))
+                is_transient = any(k in err_str for k in ("cannot connect", "server disconnected", "ssl", "timeout", "connection", "payload", "transfer", "encoding", "client"))
                 if is_transient and attempt < 2:
                     _LOGGER.warning("ConsultAgent %s round %d attempt %d transient error: %s", agent_id, round_num, attempt + 1, exc)
                     await asyncio.sleep(0.5 * (2 ** attempt))
@@ -304,16 +304,23 @@ async def _consult_agent(
             break
 
         reply = _extract_reply(result)
-        dialogue.append({"round": round_num + 1, "role": agent_name, "text": reply or "(no reply)"})
-
-        if not reply or _is_conversation_done(reply) or round_num + 1 >= max_rounds:
+        if not reply:
+            dialogue.append({"round": round_num + 1, "role": agent_name, "text": "(no reply)"})
+            break
+        low_reply = reply.lower()
+        if any(k in low_reply for k in ("error calling llm", "server disconnected", "clientpayloaderror", "transferencodingerror", "not enough data")):
+            dialogue.append({"round": round_num + 1, "role": "error", "text": reply})
+            break
+        dialogue.append({"round": round_num + 1, "role": agent_name, "text": reply})
+        if _is_conversation_done(reply) or round_num + 1 >= max_rounds:
             break
 
         prompt = f"[PEER-CONSULT]\n[Peer-AI round {round_num + 2}] Based on your previous answer, here is follow-up:\n{reply}\n\nPlease continue or conclude with [DONE] if resolved."
 
     final_reply = dialogue[-1]["text"] if dialogue else "(no reply)"
+    last_is_error = dialogue and dialogue[-1].get("role") == "error"
     return {
-        "success": True,
+        "success": not last_is_error,
         "agent_id": agent_id,
         "agent_name": agent_name,
         "rounds": len(dialogue),
@@ -345,7 +352,7 @@ Params:
 - question: what you want to discuss. Empty = list available agents only.
 - context: your current work / analysis so the other AI has full context.
 - intent: "consult" (opinion), "request" (action), "review" (check my work).
-- max_rounds: number of dialogue rounds (1-10, default 1). Set > 1 for multi-turn discussion.
+- max_rounds: safety cap on dialogue rounds (default 30, max 50). You do NOT need to set this. Just talk naturally and end with [DONE] when finished.
 
 The response always includes available_agents so you know who you can talk to."""
     parameters = vol.Schema(
@@ -354,7 +361,7 @@ The response always includes available_agents so you know who you can talk to.""
             vol.Required("question"): str,
             vol.Optional("context", default=""): str,
             vol.Optional("intent", default="consult"): vol.In(["consult", "request", "review"]),
-            vol.Optional("max_rounds", default=1): vol.All(int, vol.Range(min=1, max=10)),
+            vol.Optional("max_rounds", default=30): vol.All(int, vol.Range(min=1, max=50)),
         }
     )
 
@@ -364,7 +371,7 @@ The response always includes available_agents so you know who you can talk to.""
         agent_id = str(tool_input.tool_args.get("agent_id", "") or "").strip()
         question = str(tool_input.tool_args.get("question", "") or "").strip()
         context = str(tool_input.tool_args.get("context", "") or "").strip()
-        max_rounds = int(tool_input.tool_args.get("max_rounds", 1) or 1)
+        max_rounds = int(tool_input.tool_args.get("max_rounds", 30) or 30)
 
         peers = _resolve_peer_agents(hass)
         others = [p for p in peers if not p.get("is_you")]
@@ -395,13 +402,13 @@ class NextAgentHandoffTool(llm.Tool):
     description = """Consult the next configured AI agent. Supports multi-turn dialogue.
 
 Shortcut for AgentHandoff — auto-selects the first available peer agent.
-You keep control. Set max_rounds > 1 for the two AIs to discuss back and forth.
+You keep control. Talk naturally with the peer AI; it ends with [DONE] when finished.
 The response includes available_agents so you always know who else is available."""
     parameters = vol.Schema(
         {
             vol.Optional("question", default=""): str,
             vol.Optional("context", default=""): str,
-            vol.Optional("max_rounds", default=1): vol.All(int, vol.Range(min=1, max=10)),
+            vol.Optional("max_rounds", default=30): vol.All(int, vol.Range(min=1, max=50)),
         }
     )
 
@@ -410,7 +417,7 @@ The response includes available_agents so you always know who else is available.
     ) -> JsonObjectType:
         question = str(tool_input.tool_args.get("question", "") or "").strip()
         context = str(tool_input.tool_args.get("context", "") or "").strip()
-        max_rounds = int(tool_input.tool_args.get("max_rounds", 1) or 1)
+        max_rounds = int(tool_input.tool_args.get("max_rounds", 30) or 30)
 
         peers = _resolve_peer_agents(hass)
         others = [p for p in peers if not p.get("is_you")]
