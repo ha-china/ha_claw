@@ -265,6 +265,60 @@ def _build_next_agent_handoff_prompt(
     return "\n".join(lines)
 
 
+def _compact_text(value: str, limit: int = 1200) -> str:
+    value = " ".join(str(value or "").split())
+    if len(value) <= limit:
+        return value
+    return f"{value[:limit].rstrip()}..."
+
+
+def _build_agent_recovery_prompt(
+    *,
+    failed_agent_name: str,
+    original_text: str,
+    error: str,
+    tool_results: list[dict[str, Any]],
+    task_loop: dict[str, Any],
+) -> str:
+    lines = [
+        "## Seamless Agent Recovery",
+        f"Previous AI: {failed_agent_name}",
+        f"Failure: {_compact_text(error, 500)}",
+        "",
+        "### Original user task",
+        _compact_text(original_text, 1200),
+    ]
+    history = task_loop.get("history", [])
+    if history:
+        lines.extend(["", "### Recent progress"])
+        for item in history[-4:]:
+            role = str(item.get("role", "assistant"))
+            content = _compact_text(str(item.get("content", "")), 500)
+            if content:
+                lines.append(f"- {role}: {content}")
+    if tool_results:
+        lines.extend(["", "### Tool results already produced"])
+        for item in tool_results[-8:]:
+            status = "SUCCESS" if item.get("success", False) else "FAILED"
+            tool_name = str(item.get("tool_name", "unknown"))
+            line = f"- {tool_name}: {status}"
+            if item.get("error"):
+                line += f" - {_compact_text(str(item['error']), 300)}"
+            if item.get("result"):
+                summarized = extract_successful_tool_response([item]).strip()
+                if summarized:
+                    line += f" - Result: {_compact_text(summarized, 500)}"
+            lines.append(line)
+    lines.extend([
+        "",
+        "### Instructions",
+        "Continue the same task from here without asking the user to repeat anything.",
+        "Do not repeat successful tool calls unless a fresh check is necessary.",
+        "If the previous AI failed while streaming, ignore the broken partial answer and produce a clean final answer.",
+    ])
+    return "\n".join(lines)
+
+
 def make_agent_name_getter(hass: HomeAssistant) -> Callable[[str], str]:
 
     from homeassistant.helpers import entity_registry as er
@@ -583,11 +637,11 @@ async def run_agent_fallback_chain(
                 status = "SUCCESS" if tool_result.get("success", False) else "FAILED"
                 tool_context += f"- {tool_result.get('tool_name', 'unknown')}: {status}"
                 if tool_result.get("error"):
-                    tool_context += f" - Error: {tool_result['error']}"
+                    tool_context += f" - Error: {_compact_text(str(tool_result['error']), 300)}"
                 if tool_result.get("result"):
                     summarized = extract_successful_tool_response([tool_result]).strip()
                     if summarized:
-                        tool_context += f" - Result: {summarized[:200]}"
+                        tool_context += f" - Result: {_compact_text(summarized, 500)}"
                 tool_context += "\n"
             tool_context += (
                 "\nBased on these results, provide a response to the user. "
@@ -688,6 +742,14 @@ async def run_agent_fallback_chain(
                         stage="tool_failure",
                     )
                     agent_errors.append(f"{current_agent_id}: {failure_reason[:160]}")
+                    if agent_queue:
+                        pending_handoff_context = _build_agent_recovery_prompt(
+                            failed_agent_name=get_agent_name(current_agent_id),
+                            original_text=original_text,
+                            error=failure_reason,
+                            tool_results=previous_tool_results,
+                            task_loop=task_loop,
+                        )
                     if any(kw in failure_reason.lower() for kw in _TRANSIENT_ERROR_KEYWORDS):
                         retries = transient_retry_counts.get(current_agent_id, 0)
                         if retries < _MAX_TRANSIENT_RETRIES:
@@ -739,6 +801,14 @@ async def run_agent_fallback_chain(
                         stage="response_error",
                     )
                     agent_errors.append(f"{current_agent_id}: {failure_reason[:160]}")
+                    if agent_queue:
+                        pending_handoff_context = _build_agent_recovery_prompt(
+                            failed_agent_name=get_agent_name(current_agent_id),
+                            original_text=original_text,
+                            error=failure_reason,
+                            tool_results=previous_tool_results,
+                            task_loop=task_loop,
+                        )
                     if any(kw in failure_reason.lower() for kw in _TRANSIENT_ERROR_KEYWORDS):
                         retries = transient_retry_counts.get(current_agent_id, 0)
                         if retries < _MAX_TRANSIENT_RETRIES:
@@ -894,7 +964,18 @@ async def run_agent_fallback_chain(
             successful_tool_response = extract_successful_tool_response(
                 get_tool_results_state(hass)
             )
-            if successful_tool_response:
+            current_tool_results = _snapshot_tool_results(get_tool_results_state(hass))
+            if current_tool_results:
+                previous_tool_results.extend(current_tool_results)
+            if agent_queue:
+                pending_handoff_context = _build_agent_recovery_prompt(
+                    failed_agent_name=get_agent_name(current_agent_id),
+                    original_text=original_text,
+                    error=err_msg,
+                    tool_results=previous_tool_results,
+                    task_loop=task_loop,
+                )
+            if successful_tool_response and not agent_queue:
                 result = _build_synthesized_result(
                     language=language or hass.config.language,
                     conversation_id=conversation_id,
