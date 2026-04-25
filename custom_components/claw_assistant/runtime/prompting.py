@@ -150,7 +150,9 @@ def _build_peer_agents_section(
     if len(entries) < 2:
         return ""
 
-    return "## Peer AI Agents\n" + "\n".join(entries) + "\nUse friendly names only when referring to peers in user-facing replies."
+    you_name = next((e.name or e.original_name for aid in [current_aid] for e in [ent_reg.async_get(aid)] if e), current_aid.split(".")[-1] if current_aid else "")
+    header = f"You are: **{you_name}**\n" if you_name else ""
+    return "## Peer AI Agents\n" + header + "\n".join(entries) + "\nUse friendly names only when referring to peers in user-facing replies."
 
 
 def build_base_prompt(
