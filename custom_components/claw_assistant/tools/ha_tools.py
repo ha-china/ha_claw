@@ -600,6 +600,8 @@ Available actions:
 - list_integrations: List installed integrations
 - get_integration: Get details for one integration (params: {domain: "integration_domain"})
 - list_entities_by_integration: List entities for one integration (params: {domain: "integration_domain"})
+- list_devices: List devices from device registry. Same data as frontend config/device_registry/list.
+  params: {domain: "optional_filter", entry_id: "optional_filter"}. Returns id, name, manufacturer, model, area_id, etc.
 - reload_integration: Reload one integration (params: {domain: "integration_domain"})
 - rename_entry: Rename a config entry (params: {domain: "integration_domain", name: "new_name"})
 - navigate: Navigate to a page (path: "/lovelace", "/config", "/developer-tools/service", etc.)
@@ -686,27 +688,72 @@ Available actions:
             domain = params.get("domain", "")
             if not domain:
                 return {"success": False, "error": "Missing required parameter: domain"}
-            from homeassistant.helpers import entity_registry as er
+            from homeassistant.helpers import device_registry as dr, entity_registry as er
 
-            registry = er.async_get(hass)
+            ent_reg = er.async_get(hass)
+            dev_reg = dr.async_get(hass)
             entities = []
-            for entity in registry.entities.values():
+            for entity in ent_reg.entities.values():
                 if entity.platform == domain:
                     state = hass.states.get(entity.entity_id)
-                    entities.append(
-                        {
-                            "entity_id": entity.entity_id,
-                            "name": entity.name or entity.original_name,
-                            "state": state.state if state else "unknown",
-                            "device_class": entity.device_class
-                            or entity.original_device_class,
-                        }
-                    )
+                    item: dict[str, object] = {
+                        "entity_id": entity.entity_id,
+                        "name": entity.name or entity.original_name,
+                        "state": state.state if state else "unknown",
+                        "device_class": entity.device_class
+                        or entity.original_device_class,
+                    }
+                    if entity.device_id:
+                        dev = dev_reg.async_get(entity.device_id)
+                        if dev:
+                            item["device_id"] = dev.id
+                            item["device_name"] = dev.name
+                            item["device_model"] = dev.model
+                            item["manufacturer"] = dev.manufacturer
+                    entities.append(item)
             return {
                 "success": True,
                 "integration": domain,
                 "entities": entities,
                 "count": len(entities),
+            }
+
+        if action == "list_devices":
+            from homeassistant.helpers import device_registry as dr
+
+            dev_reg = dr.async_get(hass)
+            filter_domain = str(params.get("domain", "") or "").strip()
+            filter_entry_id = str(params.get("entry_id", "") or "").strip()
+            devices = []
+            for dev in dev_reg.devices.values():
+                if filter_entry_id and filter_entry_id not in dev.config_entries:
+                    continue
+                if filter_domain:
+                    entry_domains = {
+                        e.domain for eid in dev.config_entries
+                        if (e := hass.config_entries.async_get_entry(eid)) is not None
+                    }
+                    if filter_domain not in entry_domains:
+                        continue
+                devices.append({
+                    "id": dev.id,
+                    "name": dev.name_by_user or dev.name,
+                    "manufacturer": dev.manufacturer,
+                    "model": dev.model,
+                    "model_id": dev.model_id,
+                    "area_id": dev.area_id,
+                    "hw_version": dev.hw_version,
+                    "sw_version": dev.sw_version,
+                    "config_entries": list(dev.config_entries),
+                    "identifiers": [list(i) for i in dev.identifiers],
+                    "via_device_id": dev.via_device_id,
+                    "disabled_by": str(dev.disabled_by) if dev.disabled_by else None,
+                    "entry_type": str(dev.entry_type) if dev.entry_type else None,
+                })
+            return {
+                "success": True,
+                "devices": devices,
+                "count": len(devices),
             }
 
         if action == "navigate":
