@@ -138,19 +138,23 @@ class ScriptTool(llm.Tool):
         return hass.data.get(SCRIPT_DOMAIN)
 
     async def _load_existing_config(
-        self, hass: HomeAssistant, object_id: str
+        self, hass: HomeAssistant, object_id: str, *, from_yaml: bool = False,
     ) -> dict | None:
         """Return the current raw config dict for a script, or None.
 
         Prefer in-memory entity (runtime truth); fall back to scripts.yaml.
+
+        Set from_yaml=True to skip in-memory cache and read the YAML file
+        directly — use this for post-write verification.
         """
-        component = self._get_component(hass)
-        if component is not None:
-            entity = component.get_entity(f"script.{object_id}")
-            if entity is not None:
-                raw = getattr(entity, "raw_config", None)
-                if isinstance(raw, dict):
-                    return dict(raw)
+        if not from_yaml:
+            component = self._get_component(hass)
+            if component is not None:
+                entity = component.get_entity(f"script.{object_id}")
+                if entity is not None:
+                    raw = getattr(entity, "raw_config", None)
+                    if isinstance(raw, dict):
+                        return dict(raw)
         path = hass.config.path(SCRIPT_CONFIG_PATH)
         if not os.path.isfile(path):
             return None
@@ -449,7 +453,7 @@ class ScriptTool(llm.Tool):
         if "error" in applied:
             return {"success": False, **applied}
 
-        verified_config = await self._load_existing_config(hass, script_id)
+        verified_config = await self._load_existing_config(hass, script_id, from_yaml=True)
         verify_ok = verified_config is not None
         if not verify_ok:
             _LOGGER.warning("Post-update verification: script '%s' not found after write", script_id)

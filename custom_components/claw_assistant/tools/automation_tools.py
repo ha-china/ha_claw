@@ -135,16 +135,45 @@ class AutomationTool(llm.Tool):
             _LOGGER.error("AutomationTool error: %s", err)
             return {"success": False, "error": str(err)}
 
+    def _resolve_config_id(
+        self, hass: HomeAssistant, entity_id: str, automation_id: str,
+    ) -> tuple[str, str]:
+        """Resolve entity_id and the YAML config id (unique_id).
+
+        entity object_id (automation.xxx) != YAML id in many cases.
+        The entity's unique_id IS the YAML id field.
+        Returns (entity_id, config_id).
+        """
+        if not entity_id and automation_id:
+            entity_id = f"automation.{automation_id}"
+        component = hass.data.get(DATA_COMPONENT)
+        if component is not None and entity_id:
+            auto = component.get_entity(entity_id)
+            if auto is not None:
+                uid = getattr(auto, "unique_id", None)
+                if uid:
+                    return entity_id, uid
+        if entity_id and not automation_id:
+            automation_id = entity_id.removeprefix("automation.")
+        return entity_id, automation_id
+
     async def _list_automations(
         self, hass: HomeAssistant, *, page: int = 1, page_size: int = 10
     ) -> JsonObjectType:
         """List automations with pagination."""
         registry = er.async_get(hass)
+        component = hass.data.get(DATA_COMPONENT)
         all_items = []
         for state in hass.states.async_all():
             if not state.entity_id.startswith("automation."):
                 continue
             auto_id = state.entity_id.removeprefix("automation.")
+            if component is not None:
+                auto = component.get_entity(state.entity_id)
+                if auto is not None:
+                    uid = getattr(auto, "unique_id", None)
+                    if uid:
+                        auto_id = uid
             reg_entry = registry.async_get(state.entity_id)
             cat_id = reg_entry.categories.get("automation") if reg_entry else None
             all_items.append({
@@ -191,7 +220,7 @@ class AutomationTool(llm.Tool):
         if raw_config is None:
             return {"success": False, "error": f"Cannot get config for {entity_id}"}
 
-        config_id = raw_config.get("id", entity_id.removeprefix("automation."))
+        config_id = getattr(automation, "unique_id", None) or raw_config.get("id", entity_id.removeprefix("automation."))
         registry = er.async_get(hass)
         reg_entry = registry.async_get(entity_id)
         return {
@@ -206,22 +235,26 @@ class AutomationTool(llm.Tool):
         }
 
     async def _load_existing_config(
-        self, hass: HomeAssistant, automation_id: str
+        self, hass: HomeAssistant, automation_id: str, *, from_yaml: bool = False,
     ) -> dict | None:
         """Return the current raw config dict for an automation, or None.
 
         Prefer the in-memory loaded entity (fast, reflects runtime state). Fall
         back to reading automations.yaml directly when the entity is not loaded
         (e.g. disabled or failed to load).
+
+        Set from_yaml=True to skip in-memory cache and read the YAML file
+        directly — use this for post-write verification.
         """
-        component = hass.data.get(DATA_COMPONENT)
-        if component is not None:
-            auto = component.get_entity(f"automation.{automation_id}")
-            if auto is not None:
-                raw = getattr(auto, "raw_config", None)
-                if isinstance(raw, dict):
-                    return dict(raw)
-        # Fallback: read automations.yaml
+        if not from_yaml:
+            component = hass.data.get(DATA_COMPONENT)
+            if component is not None:
+                auto = component.get_entity(f"automation.{automation_id}")
+                if auto is not None:
+                    raw = getattr(auto, "raw_config", None)
+                    if isinstance(raw, dict):
+                        return dict(raw)
+        # Read automations.yaml
         path = hass.config.path(AUTOMATION_CONFIG_PATH)
         if not os.path.isfile(path):
             return None
@@ -451,7 +484,8 @@ class AutomationTool(llm.Tool):
         if not automation_id:
             return {"success": False, "error": "automation_id or entity_id is required for update"}
 
-        target_entity_id = f"automation.{automation_id}"
+        target_entity_id = entity_id or f"automation.{automation_id}"
+        target_entity_id, automation_id = self._resolve_config_id(hass, target_entity_id, automation_id)
         touch_meta = any(v is not sentinel for v in (icon, area_id, labels, name, category_id))
 
         if not config:
@@ -496,7 +530,7 @@ class AutomationTool(llm.Tool):
         if "error" in applied:
             return {"success": False, **applied}
 
-        verified = await self._load_existing_config(hass, automation_id)
+        verified = await self._load_existing_config(hass, automation_id, from_yaml=True)
         verify_ok = verified is not None
         if not verify_ok:
             _LOGGER.warning("Post-update verification: automation '%s' not found after write", automation_id)
