@@ -273,12 +273,13 @@ def _tool_desc(name: str, a: dict, lang: str) -> str:
         return f"🤝 {verb} peer AI{rounds_hint_en}..."
     if name == "NextAgentHandoff":
         q = e(str(a.get("question", "")))[:20]
+        peer = e(str(a.get("agent_name", "")))[:15] or ("下一个 AI" if zh else "next AI")
         rounds = int(a.get("max_rounds", 1) or 1)
         rounds_zh = f"(最多{rounds}轮)" if rounds > 1 else ""
         rounds_en = f"({rounds} rounds)" if rounds > 1 else ""
         if zh:
-            return f"🤝 正在咨询下一个 AI: {q}{rounds_zh}..." if q else f"🤝 正在咨询下一个 AI{rounds_zh}..."
-        return f"🤝 Consulting next AI: {q}{rounds_en}..." if q else f"🤝 Consulting next AI{rounds_en}..."
+            return f"🤝 正在咨询 {peer}: {q}{rounds_zh}..." if q else f"🤝 正在咨询 {peer}{rounds_zh}..."
+        return f"🤝 Consulting {peer}: {q}{rounds_en}..." if q else f"🤝 Consulting {peer}{rounds_en}..."
     if name == "ValidateService":
         d = e(str(a.get("domain", "")))
         s = e(str(a.get("service", "")))

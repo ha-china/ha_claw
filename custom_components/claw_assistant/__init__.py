@@ -27,8 +27,14 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     await async_setup_history_store(hass)
     await async_setup_runtime(hass, entry)
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
+    entry.async_on_unload(entry.add_update_listener(_async_update_listener))
     LOGGER.info("claw_assistant initialized with backend-only runtime")
     return True
+
+
+async def _async_update_listener(hass: HomeAssistant, entry: ConfigEntry) -> None:
+    from .runtime.patches import patch_pipeline_timeout
+    patch_pipeline_timeout(hass)
 
 async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 

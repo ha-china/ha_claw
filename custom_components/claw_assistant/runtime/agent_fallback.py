@@ -556,13 +556,15 @@ async def run_agent_fallback_chain(
             LOGGER.debug("Skipping cooled-down agents for this turn: %s", skipped_agents)
         ordered_agents = active_agents
 
-    _TRANSIENT_ERROR_KEYWORDS = ("disconnected", "connection", "timeout", "reset by peer", "broken pipe", "eof occurred")
-    _MAX_TRANSIENT_RETRIES = 1
+    _TRANSIENT_ERROR_KEYWORDS = ("disconnected", "connection", "timeout", "reset by peer", "broken pipe", "eof occurred",
+                                 "cannot connect", "server disconnected", "ssl", "clientconnector", "serverdisconnected")
+    _MAX_TRANSIENT_RETRIES = 3
     transient_retry_counts: dict[str, int] = {}
 
     agent_queue = list(ordered_agents)
     while agent_queue:
         current_agent_id = agent_queue.pop(0)
+        get_conversation_status(hass)["current_agent_id"] = current_agent_id
         tool_results_state = get_tool_results_state(hass)
         tool_results_state.clear()
         tool_calls_state = get_tool_calls_state(hass)

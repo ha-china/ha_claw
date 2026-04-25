@@ -32,6 +32,7 @@ from .const import (
     CONF_ERROR_RESPONSES,
     CONF_FALLBACK_AGENT,
     CONF_MAX_TOOL_REPEAT,
+    CONF_PIPELINE_TIMEOUT,
     CONF_PRIMARY_AGENT,
     CONF_SECONDARY_FALLBACK_AGENT,
     CONVERSATION_MODE_ADD_NAME,
@@ -40,6 +41,7 @@ from .const import (
     DEFAULT_CONVERSATION_MODE,
     DEFAULT_FALLBACK_AGENT,
     DEFAULT_MAX_TOOL_REPEAT,
+    DEFAULT_PIPELINE_TIMEOUT,
     DEFAULT_PRIMARY_AGENT,
     DOMAIN,
 )
@@ -169,7 +171,7 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
             current_options = dict(self._config_entry.options)
 
             agent_keys = [CONF_PRIMARY_AGENT, CONF_FALLBACK_AGENT, CONF_SECONDARY_FALLBACK_AGENT]
-            conversation_keys = [CONF_CONVERSATION_MODE, CONF_ENABLE_WEB_SEARCH, CONF_ENABLE_STREAMING_EFFECT, CONF_MAX_TOOL_REPEAT]
+            conversation_keys = [CONF_CONVERSATION_MODE, CONF_ENABLE_WEB_SEARCH, CONF_ENABLE_STREAMING_EFFECT, CONF_MAX_TOOL_REPEAT, CONF_PIPELINE_TIMEOUT]
 
             if not allow_agent_changes:
                 for key in agent_keys:
@@ -198,6 +200,8 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
                     elif key in conversation_keys and allow_conversation_changes:
                         if key in bool_keys:
                             self._user_input[key] = value
+                        elif key == CONF_PIPELINE_TIMEOUT and isinstance(value, (int, float)):
+                            self._user_input[key] = int(value) * 60
                         elif value not in (None, ""):
                             self._user_input[key] = value
                     elif key in bool_keys:
@@ -351,6 +355,8 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
         current_enable_web_search = self._config_entry.options.get(CONF_ENABLE_WEB_SEARCH, True)
         current_enable_streaming = self._config_entry.options.get(CONF_ENABLE_STREAMING_EFFECT, True)
         current_max_tool_repeat = self._config_entry.options.get(CONF_MAX_TOOL_REPEAT, DEFAULT_MAX_TOOL_REPEAT)
+        current_pipeline_timeout = self._config_entry.options.get(CONF_PIPELINE_TIMEOUT, DEFAULT_PIPELINE_TIMEOUT)
+        display_timeout = current_pipeline_timeout // 60 if current_pipeline_timeout else 5
 
         schema = vol.Schema({
             vol.Required(CONF_CONVERSATION_MODE, description={"suggested_value": current_mode}): SelectSelector(
@@ -367,7 +373,10 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
             vol.Optional(CONF_ENABLE_WEB_SEARCH, default=current_enable_web_search): BooleanSelector(),
             vol.Optional(CONF_ENABLE_STREAMING_EFFECT, default=current_enable_streaming): BooleanSelector(),
             vol.Optional(CONF_MAX_TOOL_REPEAT, default=current_max_tool_repeat): NumberSelector(
-                NumberSelectorConfig(min=3, max=50, step=1, mode=NumberSelectorMode.SLIDER)
+                NumberSelectorConfig(min=3, max=50, step=1, unit_of_measurement="loop", mode=NumberSelectorMode.SLIDER)
+            ),
+            vol.Optional(CONF_PIPELINE_TIMEOUT, default=display_timeout): NumberSelector(
+                NumberSelectorConfig(min=5, max=360, step=5, unit_of_measurement="min", mode=NumberSelectorMode.SLIDER)
             ),
             vol.Optional("back", default=False): bool,
         })

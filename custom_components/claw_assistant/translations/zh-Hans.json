@@ -69,13 +69,15 @@
           "conversation_mode": "对话模式",
           "enable_web_search": "联网搜索",
           "enable_streaming_effect": "流式显示",
-          "max_tool_repeat": "工具重复上限"
+          "max_tool_repeat": "工具重复上限",
+          "pipeline_timeout": "等待时长 (分钟)"
         },
         "data_description": {
           "conversation_mode": "• **不显示名称** — 精简模式，只显示回复内容\n• **显示 AI 名称** — 推荐，回复前标注响应的 AI 名称\n• **完整显示** — 显示完整调用过程，包含工具调用详情",
           "enable_web_search": "启用后，AI 可在需要时自动补充联网搜索结果以提升回答质量",
           "enable_streaming_effect": "启用后，工具调用进度等消息将以逐字打字机效果呈现；关闭则一次性显示",
-          "max_tool_repeat": "AI 对同一工具的最大重复调用次数。超过此限制后，AI 将被强制终止当前方案，转而尝试其他方法或坦诚告知用户暂时无法解决"
+          "max_tool_repeat": "AI 对同一工具的最大重复调用次数。超过此限制后，AI 将被强制终止当前方案，转而尝试其他方法或坦诚告知用户暂时无法解决",
+          "pipeline_timeout": "对话窗口等待 AI 完成的时长。处理复杂任务或多 AI 对话时，请调大以免 AI 被中途打断。"
         }
       },
       "workspace_editor": {

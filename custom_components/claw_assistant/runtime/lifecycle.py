@@ -21,10 +21,12 @@ from .patches import (
     patch_chat_log_result_extraction,
     patch_hide_tool_calls_from_pipeline,
     patch_local_intents,
+    patch_pipeline_timeout,
     patch_tool_progress,
     unpatch_chat_log_result_extraction,
     unpatch_hide_tool_calls_from_pipeline,
     unpatch_local_intents,
+    unpatch_pipeline_timeout,
     unpatch_tool_progress,
 )
 from .skill_store import async_setup_prompt_store
@@ -47,9 +49,36 @@ async def async_setup_runtime(hass: HomeAssistant, entry: ConfigEntry) -> None:
     patch_chat_log_result_extraction(hass)
     patch_hide_tool_calls_from_pipeline(hass)
     patch_tool_progress(hass)
+    patch_pipeline_timeout(hass)
     install_official_websocket_process_hook(hass)
     setup_ai_coordinator(hass, entry)
     install_conversation_hook(hass, entry)
+    _patch_ai_hub_intent_bypass()
+
+
+def _patch_ai_hub_intent_bypass() -> None:
+    """Monkey-patch ai_hub to skip intent processing for peer-AI consult calls.
+
+    When ai_hub sees [PEER-CONSULT] in the user input text, it bypasses
+    local/built-in intent matching and goes straight to LLM.
+    """
+    try:
+        from custom_components.ai_hub.conversation import AIHubConversationAgent
+        original = getattr(AIHubConversationAgent, "_async_handle_local_and_builtin_intents", None)
+        if original is None or getattr(original, "_patched_for_consult", False):
+            return
+
+        async def _patched(self, user_input, chat_log):
+            if "[PEER-CONSULT]" in getattr(user_input, "text", ""):
+                LOGGER.debug("ai_hub intent bypass active for peer consult")
+                return None
+            return await original(self, user_input, chat_log)
+
+        _patched._patched_for_consult = True
+        AIHubConversationAgent._async_handle_local_and_builtin_intents = _patched
+        LOGGER.debug("ai_hub intent bypass hook installed")
+    except Exception as exc:
+        LOGGER.debug("ai_hub intent bypass hook skipped: %s", exc)
 
 
 async def async_unload_runtime(hass: HomeAssistant) -> None:
@@ -63,4 +92,5 @@ async def async_unload_runtime(hass: HomeAssistant) -> None:
     unpatch_hide_tool_calls_from_pipeline()
     unpatch_chat_log_result_extraction()
     unpatch_local_intents()
+    unpatch_pipeline_timeout()
     async_unload_internal_llm(hass)

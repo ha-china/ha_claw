@@ -172,21 +172,61 @@ Call this tool after finishing a task so the system can manage the conversation 
         }
 
 
-def _resolve_peer_agents(hass: HomeAssistant) -> list[str]:
-    """Get all configured conversation agents except our own."""
+def _get_current_agent_id(hass: HomeAssistant) -> str:
+    from ..runtime.state import get_conversation_status
+    return str(get_conversation_status(hass).get("current_agent_id", "") or "")
+
+
+def _resolve_peer_agents(hass: HomeAssistant) -> list[dict[str, str]]:
+    """Get configured conversation agents with names and is_you flag."""
     from ..runtime.state import get_runtime_store
+    from homeassistant.helpers import entity_registry as er
+
     runtime_store = get_runtime_store(hass)
     entry = runtime_store.get("config_entry")
     if entry is None:
         return []
     from ..const import CONF_PRIMARY_AGENT, CONF_FALLBACK_AGENT, CONF_SECONDARY_FALLBACK_AGENT
+    _ROLE_LABELS = {
+        CONF_PRIMARY_AGENT: "primary",
+        CONF_FALLBACK_AGENT: "secondary",
+        CONF_SECONDARY_FALLBACK_AGENT: "tertiary",
+    }
+    current_aid = _get_current_agent_id(hass)
     options = entry.options
-    agents = []
+    ent_reg = er.async_get(hass)
+    agents: list[dict[str, str]] = []
+    seen: set[str] = set()
     for key in (CONF_PRIMARY_AGENT, CONF_FALLBACK_AGENT, CONF_SECONDARY_FALLBACK_AGENT):
         aid = str(options.get(key, "") or "").strip()
-        if aid and aid not in agents:
-            agents.append(aid)
+        if not aid or aid in seen:
+            continue
+        seen.add(aid)
+        ent = ent_reg.async_get(aid)
+        name = (ent.name or ent.original_name) if ent else aid.split(".")[-1]
+        is_you = (aid == current_aid)
+        agents.append({"agent_id": aid, "agent_name": name, "role": _ROLE_LABELS.get(key, "peer"), "is_you": is_you})
     return agents
+
+
+_DONE_SIGNALS = (
+    "[DONE]", "[END]", "[RESOLVED]", "[CONCLUDED]",
+    "没有更多问题", "问题已解决", "讨论结束",
+    "no further questions", "issue resolved", "discussion complete",
+)
+
+
+def _extract_reply(result) -> str:
+    if result and result.response and result.response.speech:
+        plain = result.response.speech.get("plain", {})
+        if isinstance(plain, dict):
+            return plain.get("speech", "")
+    return ""
+
+
+def _is_conversation_done(text: str) -> bool:
+    low = text.lower().strip()
+    return any(sig.lower() in low for sig in _DONE_SIGNALS)
 
 
 async def _consult_agent(
@@ -194,19 +234,23 @@ async def _consult_agent(
     agent_id: str,
     question: str,
     context: str = "",
+    max_rounds: int = 1,
+    timeout: int = 30,
 ) -> dict[str, str]:
-    """Synchronously call another conversation agent and return its reply."""
+    """Call another conversation agent for one or more dialogue rounds.
+
+    When max_rounds > 1 the two AIs converse: the peer's reply is sent back
+    as the next user message with a [Peer-AI] prefix, continuing until the
+    peer signals done, gives a short conclusive answer, or max_rounds is hit.
+    """
     from homeassistant.components.conversation import agent_manager
+    from homeassistant.components import conversation
     from homeassistant.helpers import entity_registry as er
     from homeassistant.util import ulid
 
     ent_reg = er.async_get(hass)
     ent = ent_reg.async_get(agent_id)
     agent_name = (ent.name or ent.original_name) if ent else agent_id.split(".")[-1]
-
-    prompt = question
-    if context:
-        prompt = f"[Context from calling AI]\n{context}\n\n[Question]\n{question}"
 
     try:
         agent = agent_manager.async_get_agent(hass, agent_id)
@@ -215,61 +259,102 @@ async def _consult_agent(
     except Exception as exc:
         return {"success": False, "error": f"Cannot get agent {agent_id}: {exc}"}
 
-    from homeassistant.components import conversation
-    user_input = conversation.ConversationInput(
-        text=prompt,
-        conversation_id=ulid.ulid(),
-        language=hass.config.language,
-        context=None,
-        device_id=None,
-        agent_id=agent_id,
-    )
+    conv_id = ulid.ulid()
+    # [PEER-CONSULT] marker tells ai_hub to skip intent processing and use LLM directly
+    prompt = f"[PEER-CONSULT]\n{question}"
+    if context:
+        prompt = f"[PEER-CONSULT]\n[Context from calling AI]\n{context}\n\n[Question]\n{question}"
 
-    try:
-        result = await agent.async_process(user_input)
-    except Exception as exc:
-        _LOGGER.warning("ConsultAgent %s failed: %s", agent_id, exc)
-        return {"success": False, "error": str(exc), "agent_id": agent_id, "agent_name": agent_name}
+    dialogue: list[dict[str, str]] = []
+    max_rounds = max(1, min(max_rounds, 10))
 
-    reply = ""
-    if result and result.response and result.response.speech:
-        plain = result.response.speech.get("plain", {})
-        if isinstance(plain, dict):
-            reply = plain.get("speech", "")
+    for round_num in range(max_rounds):
+        user_input = conversation.ConversationInput(
+            text=prompt,
+            conversation_id=conv_id,
+            language=hass.config.language,
+            context=None,
+            device_id=None,
+            agent_id=agent_id,
+            satellite_id=None,
+        )
+        result = None
+        last_error = None
+        for attempt in range(3):
+            try:
+                import asyncio
+                result = await asyncio.wait_for(agent.async_process(user_input), timeout=timeout)
+                break
+            except asyncio.TimeoutError as exc:
+                last_error = exc
+                _LOGGER.warning("ConsultAgent %s round %d attempt %d timeout", agent_id, round_num, attempt + 1)
+                await asyncio.sleep(0.5 * (2 ** attempt))
+            except Exception as exc:
+                err_str = str(exc).lower()
+                is_transient = any(k in err_str for k in ("cannot connect", "server disconnected", "ssl", "timeout", "connection"))
+                if is_transient and attempt < 2:
+                    _LOGGER.warning("ConsultAgent %s round %d attempt %d transient error: %s", agent_id, round_num, attempt + 1, exc)
+                    await asyncio.sleep(0.5 * (2 ** attempt))
+                    last_error = exc
+                    continue
+                last_error = exc
+                break
+        if result is None:
+            dialogue.append({"round": round_num + 1, "role": "error", "text": str(last_error) if last_error else "unknown error"})
+            break
+
+        reply = _extract_reply(result)
+        dialogue.append({"round": round_num + 1, "role": agent_name, "text": reply or "(no reply)"})
+
+        if not reply or _is_conversation_done(reply) or round_num + 1 >= max_rounds:
+            break
+
+        prompt = f"[PEER-CONSULT]\n[Peer-AI round {round_num + 2}] Based on your previous answer, here is follow-up:\n{reply}\n\nPlease continue or conclude with [DONE] if resolved."
+
+    final_reply = dialogue[-1]["text"] if dialogue else "(no reply)"
     return {
         "success": True,
         "agent_id": agent_id,
         "agent_name": agent_name,
-        "reply": reply or "(no reply)",
+        "rounds": len(dialogue),
+        "reply": final_reply,
+        "dialogue": dialogue,
     }
 
 
 class AgentHandoffTool(llm.Tool):
     name = "AgentHandoff"
-    description = """Consult another configured AI agent. You keep control.
+    description = """Consult another AI agent. You keep control. Supports multi-turn dialogue.
 
-This is a SYNCHRONOUS call: you ask another AI a question, get its reply, then continue your work.
-You do NOT lose control. The other AI's reply comes back as this tool's result.
+DISCOVERY: Call with question="" to see all available peer AI agents (names, IDs, roles).
+
+DIALOGUE:
+- Single round (default): ask a question, get one reply.
+- Multi-round (max_rounds > 1): the two AIs discuss back and forth until the peer signals [DONE] or max_rounds is reached.
+
+You always keep control. The full dialogue + available_agents list is returned.
 
 Use cases:
-- Get a second opinion or analysis from another AI model.
-- Ask another AI to handle a subtask (e.g. coding, translation, review).
-- Cross-check your answer against another AI.
+- Get a second opinion from a different AI model.
+- Collaborate: let two AIs work through a problem together.
+- Delegate a subtask, get the result back.
+- Cross-check / peer-review your answer.
 
 Params:
-- agent_id: target agent entity_id (e.g. "conversation.claude"). Use list_agents to discover available agents.
-- question: what you want to ask the other AI.
-- context: your current analysis / draft / data so the other AI has full context.
+- agent_id: target agent entity_id. Leave empty to auto-select the first peer.
+- question: what you want to discuss. Empty = list available agents only.
+- context: your current work / analysis so the other AI has full context.
 - intent: "consult" (opinion), "request" (action), "review" (check my work).
+- max_rounds: number of dialogue rounds (1-10, default 1). Set > 1 for multi-turn discussion.
 
-The other AI's reply is returned as the tool result. Use it to improve your answer.
-Do NOT call this in a loop — one round-trip per question."""
+The response always includes available_agents so you know who you can talk to."""
     parameters = vol.Schema(
         {
             vol.Optional("agent_id", default=""): str,
             vol.Required("question"): str,
             vol.Optional("context", default=""): str,
             vol.Optional("intent", default="consult"): vol.In(["consult", "request", "review"]),
+            vol.Optional("max_rounds", default=1): vol.All(int, vol.Range(min=1, max=10)),
         }
     )
 
@@ -279,31 +364,44 @@ Do NOT call this in a loop — one round-trip per question."""
         agent_id = str(tool_input.tool_args.get("agent_id", "") or "").strip()
         question = str(tool_input.tool_args.get("question", "") or "").strip()
         context = str(tool_input.tool_args.get("context", "") or "").strip()
+        max_rounds = int(tool_input.tool_args.get("max_rounds", 1) or 1)
+
+        peers = _resolve_peer_agents(hass)
+        others = [p for p in peers if not p.get("is_you")]
 
         if not question:
-            return {"success": False, "error": "question is required"}
+            return {
+                "success": True,
+                "mode": "discovery",
+                "you": next((p for p in peers if p.get("is_you")), None),
+                "available_agents": others,
+                "message": "No question provided. Here are the AI agents you can consult (is_you=true is yourself).",
+            }
 
         if not agent_id:
-            peers = _resolve_peer_agents(hass)
-            if not peers:
-                return {"success": False, "error": "No peer agents configured"}
-            agent_id = peers[0]
+            if not others:
+                return {"success": False, "error": "No other peer agents configured", "available_agents": peers}
+            agent_id = others[0]["agent_id"]
 
-        _LOGGER.info("AgentHandoff: consulting %s, question=%s...", agent_id, question[:80])
-        result = await _consult_agent(hass, agent_id, question, context)
+        _LOGGER.info("AgentHandoff: consulting %s, max_rounds=%d, question=%s...", agent_id, max_rounds, question[:80])
+        result = await _consult_agent(hass, agent_id, question, context, max_rounds)
+        result["you"] = next((p for p in peers if p.get("is_you")), None)
+        result["available_agents"] = others
         return result
 
 
 class NextAgentHandoffTool(llm.Tool):
     name = "NextAgentHandoff"
-    description = """Consult the next configured AI agent (shortcut for AgentHandoff without specifying agent_id).
+    description = """Consult the next configured AI agent. Supports multi-turn dialogue.
 
-Same as AgentHandoff but auto-selects the next available peer agent.
-You keep control — the reply comes back as the tool result."""
+Shortcut for AgentHandoff — auto-selects the first available peer agent.
+You keep control. Set max_rounds > 1 for the two AIs to discuss back and forth.
+The response includes available_agents so you always know who else is available."""
     parameters = vol.Schema(
         {
-            vol.Required("question"): str,
+            vol.Optional("question", default=""): str,
             vol.Optional("context", default=""): str,
+            vol.Optional("max_rounds", default=1): vol.All(int, vol.Range(min=1, max=10)),
         }
     )
 
@@ -312,17 +410,28 @@ You keep control — the reply comes back as the tool result."""
     ) -> JsonObjectType:
         question = str(tool_input.tool_args.get("question", "") or "").strip()
         context = str(tool_input.tool_args.get("context", "") or "").strip()
-
-        if not question:
-            return {"success": False, "error": "question is required"}
+        max_rounds = int(tool_input.tool_args.get("max_rounds", 1) or 1)
 
         peers = _resolve_peer_agents(hass)
-        if not peers:
-            return {"success": False, "error": "No peer agents configured"}
+        others = [p for p in peers if not p.get("is_you")]
+        if not others:
+            return {"success": False, "error": "No other peer agents configured", "available_agents": peers}
 
-        agent_id = peers[0]
-        _LOGGER.info("NextAgentHandoff: consulting %s, question=%s...", agent_id, question[:80])
-        return await _consult_agent(hass, agent_id, question, context)
+        if not question:
+            return {
+                "success": True,
+                "mode": "discovery",
+                "you": next((p for p in peers if p.get("is_you")), None),
+                "available_agents": others,
+                "message": "No question provided. Here are the AI agents you can consult.",
+            }
+
+        agent_id = others[0]["agent_id"]
+        _LOGGER.info("NextAgentHandoff: consulting %s, max_rounds=%d, question=%s...", agent_id, max_rounds, question[:80])
+        result = await _consult_agent(hass, agent_id, question, context, max_rounds)
+        result["you"] = next((p for p in peers if p.get("is_you")), None)
+        result["available_agents"] = others
+        return result
 
 
 class ConfigFileTool(llm.Tool):

@@ -405,8 +405,15 @@ def patch_tool_progress(hass: HomeAssistant) -> None:
                 for tc in tool_calls:
                     if getattr(tc, "external", False):
                         continue
+                    args = dict(tc.tool_args)
+                    if tc.tool_name == "NextAgentHandoff":
+                        from ..tools.ha_core_tools import _resolve_peer_agents
+                        peers = _resolve_peer_agents(hass)
+                        others = [p for p in peers if not p.get("is_you")]
+                        if others:
+                            args["agent_name"] = others[0].get("agent_name", "")
                     line = tool_progress_line(
-                        tc.tool_name, tc.tool_args, lang
+                        tc.tool_name, args, lang
                     )
                     await _emit_typewriter(hass, self, line)
 
@@ -418,11 +425,18 @@ def patch_tool_progress(hass: HomeAssistant) -> None:
             if self.delta_listener and tn in ("AgentHandoff", "NextAgentHandoff"):
                 tr = getattr(result, "tool_result", None) or {}
                 peer = tr.get("agent_name", "")
-                raw_reply = str(tr.get("reply", "")).strip()
-                LOGGER.debug("AgentHandoff result display: peer=%s reply=%s...", peer, raw_reply[:30])
-                if peer and raw_reply:
-                    reply_hint = _esc_progress(raw_reply)[:30]
-                    await _emit_typewriter(hass, self, f"┊ *🤝 {_esc_progress(peer)}: {reply_hint}*\n")
+                dialogue = tr.get("dialogue", [])
+                LOGGER.debug("AgentHandoff result: peer=%s rounds=%d", peer, len(dialogue))
+                if len(dialogue) > 1:
+                    for turn in dialogue:
+                        role = turn.get("role", "?")
+                        text = str(turn.get("text", ""))[:25]
+                        await _emit_typewriter(hass, self, f"┊ *🤝 {role}: {_esc_progress(text)}*\n")
+                elif peer:
+                    raw_reply = str(tr.get("reply", "")).strip()
+                    if raw_reply:
+                        reply_hint = _esc_progress(raw_reply)[:30]
+                        await _emit_typewriter(hass, self, f"┊ *🤝 {_esc_progress(peer)}: {reply_hint}*\n")
 
     chat_log_module.ChatLog.async_add_assistant_content = (
         patched_async_add_assistant_content
@@ -451,3 +465,33 @@ def unpatch_tool_progress() -> None:
     if hasattr(chat_log_module.ChatLog, _TOOL_PROGRESS_PATCHED):
         delattr(chat_log_module.ChatLog, _TOOL_PROGRESS_PATCHED)
     LOGGER.debug("Restored ChatLog.async_add_assistant_content after claw_assistant unload")
+
+
+def patch_pipeline_timeout(hass: HomeAssistant) -> None:
+    """Patch assist_pipeline default timeout to use claw_assistant config."""
+    try:
+        import homeassistant.components.assist_pipeline.const as pipeline_const
+        import homeassistant.components.assist_pipeline.websocket_api as ws_module
+        from ..const import CONF_PIPELINE_TIMEOUT, DEFAULT_PIPELINE_TIMEOUT, DOMAIN
+
+        entries = hass.config_entries.async_entries(DOMAIN)
+        if not entries:
+            return
+        custom_timeout = entries[0].options.get(CONF_PIPELINE_TIMEOUT, DEFAULT_PIPELINE_TIMEOUT)
+        pipeline_const.DEFAULT_PIPELINE_TIMEOUT = custom_timeout
+        ws_module.DEFAULT_PIPELINE_TIMEOUT = custom_timeout
+        LOGGER.debug("Patched pipeline default timeout to %s", custom_timeout)
+    except Exception as exc:
+        LOGGER.debug("Pipeline timeout patch failed: %s", exc)
+
+
+def unpatch_pipeline_timeout() -> None:
+    """Restore assist_pipeline default timeout to HA default (300s)."""
+    try:
+        import homeassistant.components.assist_pipeline.const as pipeline_const
+        import homeassistant.components.assist_pipeline.websocket_api as ws_module
+        pipeline_const.DEFAULT_PIPELINE_TIMEOUT = 300
+        ws_module.DEFAULT_PIPELINE_TIMEOUT = 300
+        LOGGER.debug("Restored pipeline default timeout to 300")
+    except Exception as exc:
+        LOGGER.debug("Pipeline timeout unpatch failed: %s", exc)
