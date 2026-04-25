@@ -243,6 +243,9 @@ def request_agent_handoff(
     direction: str = "next",
     reason: str = "",
     reply_content: str = "",
+    handoff_intent: str = "request",
+    expected_action: str = "reply",
+    task_summary: str = "",
 ) -> None:
 
     status = get_conversation_status(hass)
@@ -251,6 +254,9 @@ def request_agent_handoff(
         "direction": direction,
         "reason": reason,
         "reply_content": reply_content,
+        "intent": handoff_intent,
+        "expected_action": expected_action,
+        "task_summary": task_summary,
     }
 
 
@@ -270,6 +276,9 @@ def consume_agent_handoff(hass: HomeAssistant) -> dict[str, str | bool]:
         "direction": str(payload.get("direction", "next")),
         "reason": str(payload.get("reason", "")),
         "reply_content": str(payload.get("reply_content", "")),
+        "intent": str(payload.get("intent", "request")),
+        "expected_action": str(payload.get("expected_action", "reply")),
+        "task_summary": str(payload.get("task_summary", "")),
     }
 
 

@@ -262,6 +262,10 @@ async def _execute_conversation_turn_inner(
 
     get_conversation_status(hass)["last_conversation_id"] = conversation_id
 
+    effective_agent = agent_id or (fallback_agents[0] if fallback_agents else "")
+    if effective_agent:
+        get_conversation_status(hass)["current_agent_id"] = effective_agent
+
     original_text = text
     is_first_turn = task_loop.get("turn_count", 1) <= 1
 

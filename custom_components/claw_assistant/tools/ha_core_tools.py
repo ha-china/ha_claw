@@ -12,8 +12,6 @@ from homeassistant.helpers import service as service_helper
 from homeassistant.util.json import JsonObjectType
 
 from ..runtime import (
-    request_agent_handoff,
-    request_next_agent_handoff,
     set_conversation_state,
 )
 from ..runtime.config_file_store import (
@@ -174,76 +172,157 @@ Call this tool after finishing a task so the system can manage the conversation 
         }
 
 
+def _resolve_peer_agents(hass: HomeAssistant) -> list[str]:
+    """Get all configured conversation agents except our own."""
+    from ..runtime.state import get_runtime_store
+    runtime_store = get_runtime_store(hass)
+    entry = runtime_store.get("config_entry")
+    if entry is None:
+        return []
+    from ..const import CONF_PRIMARY_AGENT, CONF_FALLBACK_AGENT, CONF_SECONDARY_FALLBACK_AGENT
+    options = entry.options
+    agents = []
+    for key in (CONF_PRIMARY_AGENT, CONF_FALLBACK_AGENT, CONF_SECONDARY_FALLBACK_AGENT):
+        aid = str(options.get(key, "") or "").strip()
+        if aid and aid not in agents:
+            agents.append(aid)
+    return agents
+
+
+async def _consult_agent(
+    hass: HomeAssistant,
+    agent_id: str,
+    question: str,
+    context: str = "",
+) -> dict[str, str]:
+    """Synchronously call another conversation agent and return its reply."""
+    from homeassistant.components.conversation import agent_manager
+    from homeassistant.helpers import entity_registry as er
+    from homeassistant.util import ulid
+
+    ent_reg = er.async_get(hass)
+    ent = ent_reg.async_get(agent_id)
+    agent_name = (ent.name or ent.original_name) if ent else agent_id.split(".")[-1]
+
+    prompt = question
+    if context:
+        prompt = f"[Context from calling AI]\n{context}\n\n[Question]\n{question}"
+
+    try:
+        agent = agent_manager.async_get_agent(hass, agent_id)
+        if agent is None:
+            return {"success": False, "error": f"Agent {agent_id} not found"}
+    except Exception as exc:
+        return {"success": False, "error": f"Cannot get agent {agent_id}: {exc}"}
+
+    from homeassistant.components import conversation
+    user_input = conversation.ConversationInput(
+        text=prompt,
+        conversation_id=ulid.ulid(),
+        language=hass.config.language,
+        context=None,
+        device_id=None,
+        agent_id=agent_id,
+    )
+
+    try:
+        result = await agent.async_process(user_input)
+    except Exception as exc:
+        _LOGGER.warning("ConsultAgent %s failed: %s", agent_id, exc)
+        return {"success": False, "error": str(exc), "agent_id": agent_id, "agent_name": agent_name}
+
+    reply = ""
+    if result and result.response and result.response.speech:
+        plain = result.response.speech.get("plain", {})
+        if isinstance(plain, dict):
+            reply = plain.get("speech", "")
+    return {
+        "success": True,
+        "agent_id": agent_id,
+        "agent_name": agent_name,
+        "reply": reply or "(no reply)",
+    }
+
+
 class AgentHandoffTool(llm.Tool):
     name = "AgentHandoff"
-    description = """Request that another configured AI agent answer this turn.
+    description = """Consult another configured AI agent. You keep control.
 
-Use direction="next" when the next AI should answer.
-Use direction="previous" when the previous AI should continue.
-Optionally include reply_content so the target AI can continue without making
-the user repeat themselves."""
+This is a SYNCHRONOUS call: you ask another AI a question, get its reply, then continue your work.
+You do NOT lose control. The other AI's reply comes back as this tool's result.
+
+Use cases:
+- Get a second opinion or analysis from another AI model.
+- Ask another AI to handle a subtask (e.g. coding, translation, review).
+- Cross-check your answer against another AI.
+
+Params:
+- agent_id: target agent entity_id (e.g. "conversation.claude"). Use list_agents to discover available agents.
+- question: what you want to ask the other AI.
+- context: your current analysis / draft / data so the other AI has full context.
+- intent: "consult" (opinion), "request" (action), "review" (check my work).
+
+The other AI's reply is returned as the tool result. Use it to improve your answer.
+Do NOT call this in a loop — one round-trip per question."""
     parameters = vol.Schema(
         {
-            vol.Optional("direction", default="next"): vol.In(["next", "previous"]),
-            vol.Optional("reason", default=""): str,
-            vol.Optional("reply_content", default=""): str,
+            vol.Optional("agent_id", default=""): str,
+            vol.Required("question"): str,
+            vol.Optional("context", default=""): str,
+            vol.Optional("intent", default="consult"): vol.In(["consult", "request", "review"]),
         }
     )
 
     async def async_call(
         self, hass: HomeAssistant, tool_input: llm.ToolInput, llm_context: llm.LLMContext
     ) -> JsonObjectType:
-        direction = str(tool_input.tool_args.get("direction", "next") or "next").strip()
-        reason = str(tool_input.tool_args.get("reason", "") or "").strip()
-        reply_content = str(tool_input.tool_args.get("reply_content", "") or "").strip()
-        request_agent_handoff(
-            hass,
-            direction=direction,
-            reason=reason,
-            reply_content=reply_content,
-        )
-        _LOGGER.debug(
-            "AgentHandoff requested: direction=%s, reason=%s, reply_chars=%s",
-            direction,
-            reason,
-            len(reply_content),
-        )
-        return {
-            "success": True,
-            "requested": True,
-            "direction": direction,
-            "reason": reason,
-            "message": "Agent handoff requested",
-        }
+        agent_id = str(tool_input.tool_args.get("agent_id", "") or "").strip()
+        question = str(tool_input.tool_args.get("question", "") or "").strip()
+        context = str(tool_input.tool_args.get("context", "") or "").strip()
+
+        if not question:
+            return {"success": False, "error": "question is required"}
+
+        if not agent_id:
+            peers = _resolve_peer_agents(hass)
+            if not peers:
+                return {"success": False, "error": "No peer agents configured"}
+            agent_id = peers[0]
+
+        _LOGGER.info("AgentHandoff: consulting %s, question=%s...", agent_id, question[:80])
+        result = await _consult_agent(hass, agent_id, question, context)
+        return result
 
 
 class NextAgentHandoffTool(llm.Tool):
     name = "NextAgentHandoff"
-    description = """Backward-compatible alias for AgentHandoff(direction='next')."""
+    description = """Consult the next configured AI agent (shortcut for AgentHandoff without specifying agent_id).
+
+Same as AgentHandoff but auto-selects the next available peer agent.
+You keep control — the reply comes back as the tool result."""
     parameters = vol.Schema(
         {
-            vol.Optional("reason", default=""): str,
-            vol.Optional("reply_content", default=""): str,
+            vol.Required("question"): str,
+            vol.Optional("context", default=""): str,
         }
     )
 
     async def async_call(
         self, hass: HomeAssistant, tool_input: llm.ToolInput, llm_context: llm.LLMContext
     ) -> JsonObjectType:
-        reason = str(tool_input.tool_args.get("reason", "") or "").strip()
-        reply_content = str(tool_input.tool_args.get("reply_content", "") or "").strip()
-        request_next_agent_handoff(
-            hass,
-            reason=reason,
-            reply_content=reply_content,
-        )
-        return {
-            "success": True,
-            "requested": True,
-            "direction": "next",
-            "reason": reason,
-            "message": "Next AI handoff requested",
-        }
+        question = str(tool_input.tool_args.get("question", "") or "").strip()
+        context = str(tool_input.tool_args.get("context", "") or "").strip()
+
+        if not question:
+            return {"success": False, "error": "question is required"}
+
+        peers = _resolve_peer_agents(hass)
+        if not peers:
+            return {"success": False, "error": "No peer agents configured"}
+
+        agent_id = peers[0]
+        _LOGGER.info("NextAgentHandoff: consulting %s, question=%s...", agent_id, question[:80])
+        return await _consult_agent(hass, agent_id, question, context)
 
 
 class ConfigFileTool(llm.Tool):

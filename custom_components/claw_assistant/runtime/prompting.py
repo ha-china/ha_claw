@@ -118,6 +118,41 @@ def _build_unified_context(
         return []
 
 
+def _build_peer_agents_section(
+    hass: HomeAssistant,
+    runtime_config: ConversationRuntimeConfig,
+) -> str:
+    from homeassistant.helpers import entity_registry as er
+    from .state import get_runtime_store, get_conversation_status
+
+    runtime_store = get_runtime_store(hass)
+    entry = runtime_store.get("config_entry")
+    if entry is None:
+        return ""
+
+    from ..const import CONF_PRIMARY_AGENT, CONF_FALLBACK_AGENT, CONF_SECONDARY_FALLBACK_AGENT
+    options = entry.options
+    ent_reg = er.async_get(hass)
+    current_aid = str(get_conversation_status(hass).get("current_agent_id", "") or "")
+
+    entries: list[str] = []
+    seen: set[str] = set()
+    for key in (CONF_PRIMARY_AGENT, CONF_FALLBACK_AGENT, CONF_SECONDARY_FALLBACK_AGENT):
+        aid = str(options.get(key, "") or "").strip()
+        if not aid or aid in seen:
+            continue
+        seen.add(aid)
+        ent = ent_reg.async_get(aid)
+        name = (ent.name or ent.original_name) if ent else aid.split(".")[-1]
+        tag = " ← you" if aid == current_aid else ""
+        entries.append(f"- {name}{tag}")
+
+    if len(entries) < 2:
+        return ""
+
+    return "## Peer AI Agents\n" + "\n".join(entries) + "\nUse friendly names only when referring to peers in user-facing replies."
+
+
 def build_base_prompt(
     hass: HomeAssistant,
     *,
@@ -177,6 +212,10 @@ def build_base_prompt(
             "Reuse prior context only when it helps the current turn."
         )
         appended_sections.append(history_prompt.strip())
+
+    peer_section = _build_peer_agents_section(hass, runtime_config)
+    if peer_section:
+        appended_sections.append(peer_section)
 
     config_prompt = build_config_approval_prompt_block(hass)
     if config_prompt:

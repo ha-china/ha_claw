@@ -223,24 +223,45 @@ def _build_next_agent_handoff_prompt(
     previous_agent_name: str,
     previous_response_text: str,
     reason: str = "",
+    handoff_intent: str = "request",
+    expected_action: str = "reply",
+    task_summary: str = "",
 ) -> str:
+    _INTENT_LABELS = {
+        "request": "needs you to take action",
+        "consult": "wants your opinion or analysis",
+        "notify": "is informing you (FYI, no action required unless you see a problem)",
+        "handback": "is returning results from a task you delegated",
+    }
+    _ACTION_LABELS = {
+        "reply": "Answer the user directly based on the context below.",
+        "execute": "Execute the described task using your tools, then report the result.",
+        "review": "Review the previous AI's work, correct if needed, then present to the user.",
+        "continue": "Continue where the previous AI left off.",
+    }
+    intent_desc = _INTENT_LABELS.get(handoff_intent, _INTENT_LABELS["request"])
+    action_desc = _ACTION_LABELS.get(expected_action, _ACTION_LABELS["reply"])
+
     lines = [
-        "## Previous AI Handoff",
-        f"The previous AI was: {previous_agent_name}",
+        "## Agent Handoff",
+        f"From: {previous_agent_name}",
+        f"Intent: {handoff_intent} — {intent_desc}",
+        f"Expected action: {expected_action} — {action_desc}",
     ]
+    if task_summary:
+        lines.append(f"Task: {task_summary}")
     if reason:
-        lines.append(f"Handoff reason: {reason}")
-    lines.extend(
-        [
-            "Previous AI draft reply:",
-            previous_response_text,
-            "",
-            "Answer the same user directly.",
-            "Use the previous AI reply as context to improve, replace, or continue it.",
-            "This handoff has already happened. Do not call AgentHandoff again unless the user asks for another handoff after you answer.",
-            "Do not ask the user to repeat themselves.",
-        ]
-    )
+        lines.append(f"Reason: {reason}")
+    lines.extend([
+        "",
+        "### Context from previous AI:",
+        previous_response_text,
+        "",
+        "### Instructions:",
+        action_desc,
+        "Do not ask the user to repeat themselves — all context is above.",
+        "Do not call AgentHandoff again unless the user explicitly asks for another handoff after you answer.",
+    ])
     return "\n".join(lines)
 
 
@@ -354,6 +375,9 @@ async def run_agent_fallback_chain(
                         handoff_request["reply_content"] or synthesized_response
                     ),
                     reason=handoff_request["reason"] or "explicit_tool_request",
+                    handoff_intent=str(handoff_request.get("intent", "request")),
+                    expected_action=str(handoff_request.get("expected_action", "reply")),
+                    task_summary=str(handoff_request.get("task_summary", "")),
                 )
                 previous_tool_results = _snapshot_tool_results(tool_results)
                 LOGGER.info("HA internal LLM requested handoff to next AI")
@@ -397,6 +421,9 @@ async def run_agent_fallback_chain(
                                 handoff_request["reply_content"] or response_text
                             ),
                             reason=handoff_request["reason"] or "explicit_tool_request",
+                            handoff_intent=str(handoff_request.get("intent", "request")),
+                            expected_action=str(handoff_request.get("expected_action", "reply")),
+                            task_summary=str(handoff_request.get("task_summary", "")),
                         )
                         previous_tool_results = _snapshot_tool_results(tool_results)
                         LOGGER.info("HA internal LLM handed off to next AI")
@@ -750,6 +777,9 @@ async def run_agent_fallback_chain(
                             handoff_request["reply_content"] or response_text
                         ),
                         reason=handoff_request["reason"] or "explicit_tool_request",
+                        handoff_intent=str(handoff_request.get("intent", "request")),
+                        expected_action=str(handoff_request.get("expected_action", "reply")),
+                        task_summary=str(handoff_request.get("task_summary", "")),
                     )
                     previous_tool_results.extend(
                         _snapshot_tool_results(get_tool_results_state(hass))

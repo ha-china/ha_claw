@@ -359,6 +359,12 @@ async def _emit_typewriter(hass: HomeAssistant, chat_log, text: str) -> None:
         await asyncio.sleep(0.01)
 
 
+def _esc_progress(text: str) -> str:
+    for ch in ("*", "_", "`", "[", "]", "(", ")", "#", "~", "|", "\\"):
+        text = text.replace(ch, "")
+    return text
+
+
 def patch_tool_progress(hass: HomeAssistant) -> None:
 
     from homeassistant.components.conversation import chat_log as chat_log_module
@@ -408,6 +414,15 @@ def patch_tool_progress(hass: HomeAssistant) -> None:
             self, content, tool_call_tasks=tool_call_tasks
         ):
             yield result
+            tn = getattr(result, "tool_name", "")
+            if self.delta_listener and tn in ("AgentHandoff", "NextAgentHandoff"):
+                tr = getattr(result, "tool_result", None) or {}
+                peer = tr.get("agent_name", "")
+                raw_reply = str(tr.get("reply", "")).strip()
+                LOGGER.debug("AgentHandoff result display: peer=%s reply=%s...", peer, raw_reply[:30])
+                if peer and raw_reply:
+                    reply_hint = _esc_progress(raw_reply)[:30]
+                    await _emit_typewriter(hass, self, f"┊ *🤝 {_esc_progress(peer)}: {reply_hint}*\n")
 
     chat_log_module.ChatLog.async_add_assistant_content = (
         patched_async_add_assistant_content
