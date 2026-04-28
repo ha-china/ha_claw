@@ -87,7 +87,7 @@ async def _run_shell(hass: HomeAssistant, params: dict) -> JsonObjectType:
         if "\n" in command or "<<" in command:
             import tempfile
             tmp_script = tempfile.NamedTemporaryFile(
-                mode="w", suffix=".sh", dir=cwd, delete=False
+                mode="w", suffix=".sh", dir=cwd, delete=False, encoding="utf-8"
             )
             tmp_script.write(command)
             tmp_script.flush()
@@ -95,11 +95,18 @@ async def _run_shell(hass: HomeAssistant, params: dict) -> JsonObjectType:
             exec_cmd = f"/bin/sh {tmp_script.name}"
         else:
             exec_cmd = command
+        import os as _os
+        shell_env = {**_os.environ}
+        shell_env.setdefault("PYTHONIOENCODING", "utf-8")
+        shell_env.setdefault("PYTHONUTF8", "1")
+        shell_env.setdefault("LC_ALL", "C.UTF-8")
+        shell_env.setdefault("LANG", "C.UTF-8")
         proc = await asyncio.create_subprocess_shell(
             exec_cmd,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
             cwd=cwd,
+            env=shell_env,
         )
     except Exception as err:
         if tmp_script:
@@ -584,6 +591,17 @@ def _coerce_params(raw_params: object) -> dict[str, object]:
     return result
 
 
+def _merged_tool_params(tool_args: dict[str, object]) -> dict[str, object]:
+    params = _coerce_params(tool_args.get("params", {}))
+    for key, value in tool_args.items():
+        if key in {"action", "params"}:
+            continue
+        norm = key.replace("_", "").replace("-", "").lower()
+        canonical = _PARAM_KEY_ALIASES.get(norm, key)
+        params.setdefault(canonical, value)
+    return params
+
+
 class HAControlTool(llm.Tool):
     name = "HAControl"
     description = """Advanced Home Assistant control for system actions, UI-adjacent operations,
@@ -616,20 +634,15 @@ Available actions:
         {
             vol.Required("action"): str,
             vol.Optional("params", default={}): vol.Any(dict, str),
-        }
+        },
+        extra=vol.ALLOW_EXTRA,
     )
 
     async def async_call(
         self, hass: HomeAssistant, tool_input: llm.ToolInput, llm_context: llm.LLMContext
     ) -> JsonObjectType:
         action = tool_input.tool_args.get("action", "")
-        params = tool_input.tool_args.get("params", {})
-
-        if isinstance(params, str):
-            try:
-                params = json.loads(params)
-            except Exception:
-                params = {}
+        params = _merged_tool_params(tool_input.tool_args)
 
         if action == "shell":
             return await _run_shell(hass, params)
@@ -953,7 +966,8 @@ DISCIPLINE: 1) Follow the exact workflow steps above — no exploratory calls. 2
         {
             vol.Required("action"): vol.In(_VALID_ACTIONS),
             vol.Optional("params", default={}): vol.Any(dict, str),
-        }
+        },
+        extra=vol.ALLOW_EXTRA,
     )
 
     @staticmethod
@@ -1000,7 +1014,7 @@ DISCIPLINE: 1) Follow the exact workflow steps above — no exploratory calls. 2
                 if valid.replace("_", "").replace("-", "").replace(" ", "").lower() == norm:
                     action = valid
                     break
-        params = _coerce_params(tool_input.tool_args.get("params", {}))
+        params = _merged_tool_params(tool_input.tool_args)
 
         try:
             if action == "integration/descriptions":

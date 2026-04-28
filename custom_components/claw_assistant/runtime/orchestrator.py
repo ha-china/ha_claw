@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from contextvars import ContextVar
 import logging
 import re
 from pathlib import Path
@@ -14,18 +15,19 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers import intent
 
 from .agent_fallback import (
+    _finalize_completed_response,
     _finalize_synthesized_success,
     _snapshot_tool_results,
-    make_agent_name_getter,
-    make_error_response_checker,
+    get_agent_name,
+    is_error_response,
     run_agent_fallback_chain,
 )
-from .config import DEFAULT_THRESHOLDS
+from .config import DEFAULT_FALLBACK_AGENT_ID, DEFAULT_THRESHOLDS
 from .i18n import t
 from .ha_guide_store import async_refresh_homeassistant_guide_store
+from .internal_llm import _MAX_SYSTEM_PROMPT_CHARS, _fit_head_section_to_required_suffix
 from .loop_controller import (
     record_continuation,
-    record_response,
     record_user_turn,
     reset_continuation_count,
     reset_loop_for_conversation,
@@ -35,7 +37,6 @@ from .options import build_conversation_runtime_config_for_hass
 from .prompting import _fit_base_prompt, build_base_prompt
 from .response_format import is_marshaled_tool_payload, sanitize_response_text
 from .response_policy import analyze_response_state
-from .signal_capture import async_capture_passive_signal
 from .skill_store import async_refresh_prompt_store
 from .state import (
     consume_tool_called,
@@ -55,62 +56,24 @@ from .workspace_store import async_refresh_workspace_store
 LOGGER = logging.getLogger(__name__)
 
 
-def _rewrite_short_followup(text: str, task_loop: dict) -> str:
-
-    normalized = text.strip().lower()
-    if normalized not in {
-        "全部",
-        "所有",
-        "都",
-        "全部的",
-        "都关掉",
-        "都打开",
-        "all",
-    }:
-        return text
-
-    history = task_loop.get("history", [])
-    previous_user = None
-    previous_assistant = None
-
-    for item in reversed(history):
-        if item.get("role") == "assistant" and previous_assistant is None:
-            previous_assistant = item.get("content", "")
-            continue
-        if item.get("role") == "user" and previous_user is None:
-            previous_user = item.get("content", "")
-            if previous_assistant is not None:
-                break
-
-    if not previous_user or not previous_assistant:
-        return text
-
-    if "区域" not in previous_assistant and "请指定" not in previous_assistant:
-        return text
-
-    if any(keyword in previous_user for keyword in ["关闭", "关掉", "turn off"]):
-        if "灯" in previous_user or "灯光" in previous_user:
-            return "关闭全部灯光"
-        return "关闭全部设备"
-
-    if any(keyword in previous_user for keyword in ["打开", "开启", "turn on"]):
-        if "灯" in previous_user or "灯光" in previous_user:
-            return "打开全部灯光"
-        return "打开全部设备"
-
-    return text
-
-
 _ATTACHMENT_RE = re.compile(r"\[ATTACHMENT:([\w/]+):(.+?)\]")
+_PENDING_ATTACHMENTS: ContextVar[list[tuple[str, str]] | None] = ContextVar(
+    "claw_pending_attachments",
+    default=None,
+)
 
 
-def _extract_attachment_tags(text: str) -> tuple[str, list[tuple[str, str]]]:
+def _extract_attachment_tags(
+    text: str,
+    *,
+    language: str | None,
+) -> tuple[str, list[tuple[str, str]]]:
     attachments: list[tuple[str, str]] = []
     for m in _ATTACHMENT_RE.finditer(text):
         attachments.append((m.group(1), m.group(2)))
     clean = _ATTACHMENT_RE.sub("", text).strip()
     if not clean and attachments:
-        clean = "The user sent an image, please describe its content."
+        clean = t("attachment_only_input", language)
     return clean, attachments
 
 
@@ -123,7 +86,7 @@ def _install_attachment_hook(hass: HomeAssistant) -> None:
     _original_add = ChatLog.async_add_user_content
 
     def _hooked_add(self: ChatLog, content: UserContent) -> None:
-        pending = hass.data.pop("claw_pending_attachments", None)
+        pending = _PENDING_ATTACHMENTS.get()
         if pending and not content.attachments:
             att_list = []
             for mime, fpath in pending:
@@ -140,6 +103,7 @@ def _install_attachment_hook(hass: HomeAssistant) -> None:
                     attachments=att_list,
                 )
                 LOGGER.info("Injected %d attachment(s) into ChatLog", len(att_list))
+            _PENDING_ATTACHMENTS.set(None)
         _original_add(self, content)
 
     ChatLog.async_add_user_content = _hooked_add
@@ -153,14 +117,19 @@ def _build_continuation_prompt(
     continuation_index: int,
 ) -> str:
 
-    truncated = previous_thought[:1000]
-    continuation_prompt = (
+    continuation_suffix = (
         f"## Continuation #{continuation_index + 1}\n"
         f"Your previous response was:\n"
-        f"---\n{truncated}\n---\n"
+        f"---\n{{previous_thought}}\n---\n"
         f"This was classified as incomplete. Continue your analysis and provide "
         f"a complete response. If you're done, give your final answer."
     )
+    trimmed_thought = _fit_head_section_to_required_suffix(
+        previous_thought,
+        [continuation_suffix.format(previous_thought="")],
+        max_chars=max(_MAX_SYSTEM_PROMPT_CHARS // 3, 1024),
+    ).strip()
+    continuation_prompt = continuation_suffix.format(previous_thought=trimmed_thought)
     return _fit_base_prompt(base_prompt, [continuation_prompt])
 
 
@@ -237,10 +206,10 @@ async def _execute_conversation_turn_inner(
         )
 
     reset_continuation_count(hass)
-    text = _rewrite_short_followup(text, task_loop)
-    text, pending_attachments = _extract_attachment_tags(text)
+    text, pending_attachments = _extract_attachment_tags(text, language=language)
+    attachment_token = None
     if pending_attachments:
-        hass.data["claw_pending_attachments"] = pending_attachments
+        attachment_token = _PENDING_ATTACHMENTS.set(pending_attachments)
         _install_attachment_hook(hass)
     task_loop = record_user_turn(hass, text=text)
     LOGGER.info("Task loop turn %s: %s...", task_loop["turn_count"], text[:50])
@@ -267,7 +236,7 @@ async def _execute_conversation_turn_inner(
         get_conversation_status(hass)["current_agent_id"] = effective_agent
 
     original_text = text
-    is_first_turn = task_loop.get("turn_count", 1) <= 1
+    is_first_turn = bool(task_loop.get("is_first_turn", False))
 
     if is_first_turn:
         base_prompt = build_base_prompt(
@@ -280,10 +249,9 @@ async def _execute_conversation_turn_inner(
             base_prompt,
             [extra_system_prompt] if extra_system_prompt else [],
         )
-    else:
-        extra_system_prompt = None
-
-    get_agent_name = make_agent_name_getter(hass)
+    # Non-first turns: keep whatever extra_system_prompt the caller passed in.
+    # HA core injects current date/time via DATE_TIME_PROMPT, so no duplicate
+    # "Runtime Context" block is needed here.
 
     if not fallback_agents:
         continuation_index = 0
@@ -336,11 +304,14 @@ async def _execute_conversation_turn_inner(
             )
             if should_synthesize:
                 response.async_set_speech(synthesized_response)
+                if attachment_token is not None:
+                    _PENDING_ATTACHMENTS.reset(attachment_token)
+                    attachment_token = None
                 return await _finalize_synthesized_success(
                     hass,
                     result=direct_result,
-                    agent_id=agent_id or "conversation.home_assistant",
-                    agent_name=get_agent_name(agent_id or "conversation.home_assistant"),
+                    agent_id=agent_id or DEFAULT_FALLBACK_AGENT_ID,
+                    agent_name=get_agent_name(hass, agent_id or DEFAULT_FALLBACK_AGENT_ID),
                     response_text=synthesized_response,
                     conversation_mode=conversation_mode,
                     conversation_id=conversation_id,
@@ -396,32 +367,22 @@ async def _execute_conversation_turn_inner(
             if final_text:
                 plain["speech"] = final_text
                 plain["original_speech"] = final_text
-                task_loop["history"].append({"role": "assistant", "content": final_text})
-                record_response(
+                await _finalize_completed_response(
                     hass,
-                    response_text=final_text,
-                    agent_id=agent_id or "conversation.home_assistant",
+                    response=response,
+                    task_loop=task_loop,
+                    original_text=original_text,
+                    conversation_id=conversation_id,
+                    agent_id=agent_id or DEFAULT_FALLBACK_AGENT_ID,
+                    conv_history=get_conversation_history(),
+                    tool_results=direct_tool_results,
+                    language=language,
+                    original_async_converse=original_async_converse,
                 )
-                tool_calls = list(get_tool_calls_state(hass))
-                get_conversation_history().add_turn(
-                    conversation_id or "default",
-                    original_text,
-                    final_text,
-                    tool_calls=tool_calls,
-                )
-                if response.response_type == intent.IntentResponseType.ACTION_DONE:
-                    await async_capture_passive_signal(
-                        hass,
-                        user_text=original_text,
-                        assistant_text=final_text,
-                        tool_calls=tool_calls,
-                        conversation_id=conversation_id,
-                    )
-                tool_calls_state = get_tool_calls_state(hass)
-                tool_calls_state.clear()
+        if attachment_token is not None:
+            _PENDING_ATTACHMENTS.reset(attachment_token)
+            attachment_token = None
         return direct_result
-
-    is_error_response = make_error_response_checker(hass)
 
     if enable_ai_summary and len(summary_agents) >= 2:
         summary_result = await process_ai_summary(
@@ -436,8 +397,6 @@ async def _execute_conversation_turn_inner(
             extra_system_prompt,
             device_id,
             satellite_id,
-            get_agent_name,
-            is_error_response,
         )
         if summary_result:
             summary_response = getattr(summary_result, "response", None)
@@ -451,53 +410,41 @@ async def _execute_conversation_turn_inner(
                     plain.get("original_speech", plain.get("speech", ""))
                 )
                 if final_text:
+                    plain["speech"] = final_text
                     plain["original_speech"] = final_text
-                    task_loop["history"].append(
-                        {"role": "assistant", "content": final_text}
-                    )
-                    record_response(
+                    await _finalize_completed_response(
                         hass,
-                        response_text=final_text,
-                        agent_id=str(
-                            plain.get("agent_id") or summary_agents[-1]
-                        ),
+                        response=summary_response,
+                        task_loop=task_loop,
+                        original_text=original_text,
+                        conversation_id=conversation_id,
+                        agent_id=str(plain.get("agent_id") or summary_agents[-1]),
+                        conv_history=get_conversation_history(),
+                        tool_results=list(get_tool_results_state(hass)),
+                        language=language,
+                        original_async_converse=original_async_converse,
                     )
-                    tool_calls = list(get_tool_calls_state(hass))
-                    get_conversation_history().add_turn(
-                        conversation_id or "default",
-                        original_text,
-                        final_text,
-                        tool_calls=tool_calls,
-                    )
-                    if (
-                        summary_response.response_type
-                        == intent.IntentResponseType.ACTION_DONE
-                    ):
-                        await async_capture_passive_signal(
-                            hass,
-                            user_text=original_text,
-                            assistant_text=final_text,
-                            tool_calls=tool_calls,
-                            conversation_id=conversation_id,
-                        )
-                    tool_calls_state = get_tool_calls_state(hass)
-                    tool_calls_state.clear()
+            if attachment_token is not None:
+                _PENDING_ATTACHMENTS.reset(attachment_token)
+                attachment_token = None
             return summary_result
 
-    return await run_agent_fallback_chain(
-        hass,
-        text=text,
-        original_text=original_text,
-        conversation_id=conversation_id,
-        context=context,
-        language=language,
-        fallback_agents=fallback_agents,
-        conversation_mode=conversation_mode,
-        original_async_converse=original_async_converse,
-        extra_system_prompt=extra_system_prompt,
-        device_id=device_id,
-        satellite_id=satellite_id,
-        conv_history=get_conversation_history(),
-        is_error_response=is_error_response,
-        get_agent_name=get_agent_name,
-    )
+    try:
+        return await run_agent_fallback_chain(
+            hass,
+            text=text,
+            original_text=original_text,
+            conversation_id=conversation_id,
+            context=context,
+            language=language,
+            fallback_agents=fallback_agents,
+            conversation_mode=conversation_mode,
+            original_async_converse=original_async_converse,
+            extra_system_prompt=extra_system_prompt,
+            device_id=device_id,
+            satellite_id=satellite_id,
+            conv_history=get_conversation_history(),
+        )
+    finally:
+        if attachment_token is not None:
+            _PENDING_ATTACHMENTS.reset(attachment_token)

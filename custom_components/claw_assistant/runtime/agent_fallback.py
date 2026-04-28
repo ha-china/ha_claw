@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable
 import copy
 import logging
 from typing import Any
@@ -19,9 +18,16 @@ from .adaptive_memory import (
     prioritize_agents,
     should_temporarily_skip_agent,
 )
+from .evolution_review import async_schedule_evolution_review
 from .events import fire_ai_response
 from .i18n import t
-from .internal_llm import reset_runtime_tool_mode, set_runtime_tool_mode
+from .internal_llm import (
+    _build_budgeted_prompt,
+    _fit_head_section_to_required_suffix,
+    _MAX_SYSTEM_PROMPT_CHARS,
+    reset_runtime_tool_mode,
+    set_runtime_tool_mode,
+)
 from .loop_controller import record_response
 from .native_chatlog_bridge import async_bridge_native_chatlog_turn
 from .prompting import _fit_base_prompt
@@ -41,6 +47,7 @@ from .state import (
     set_current_thought,
 )
 from .tool_result_summary import NON_USER_FACING_TOOLS, extract_successful_tool_response
+from .tool_result_summary import extract_failed_tool_response
 
 LOGGER = logging.getLogger(__name__)
 
@@ -48,6 +55,15 @@ LOGGER = logging.getLogger(__name__)
 def _snapshot_tool_results(tool_results: list[dict[str, Any]]) -> list[dict[str, Any]]:
 
     return copy.deepcopy(tool_results)
+
+
+def _build_tool_summary(tool_results: list[dict[str, Any]]) -> str:
+
+    return (
+        extract_successful_tool_response(tool_results)
+        or extract_failed_tool_response(tool_results)
+        or ""
+    )
 
 
 def _summarize_tool_failures(tool_results: list[dict[str, Any]]) -> str:
@@ -85,6 +101,65 @@ def _build_synthesized_result(
     )
 
 
+async def _finalize_completed_response(
+    hass: HomeAssistant,
+    *,
+    response: Any,
+    task_loop: dict[str, Any],
+    original_text: str,
+    conversation_id,
+    agent_id: str,
+    conv_history,
+    tool_results: list[dict[str, Any]],
+    language: str | None,
+    original_async_converse,
+) -> str:
+
+    plain = response.speech.get("plain", {}) if isinstance(response.speech, dict) else {}
+    final_text = sanitize_response_text(
+        plain.get("original_speech", plain.get("speech", ""))
+    )
+    if not final_text:
+        return ""
+
+    plain["speech"] = final_text
+    plain["original_speech"] = final_text
+    task_loop["history"].append({"role": "assistant", "content": final_text})
+    record_response(
+        hass,
+        response_text=final_text,
+        agent_id=agent_id,
+    )
+    tool_calls = list(get_tool_calls_state(hass))
+    conv_history.add_turn(
+        conversation_id or "default",
+        original_text,
+        final_text,
+        tool_calls=tool_calls,
+    )
+    if response.response_type == intent.IntentResponseType.ACTION_DONE:
+        await async_capture_passive_signal(
+            hass,
+            user_text=original_text,
+            assistant_text=final_text,
+            tool_calls=tool_calls,
+            conversation_id=conversation_id,
+        )
+    async_schedule_evolution_review(
+        hass,
+        original_text=original_text,
+        assistant_text=final_text,
+        tool_calls=tool_calls,
+        tool_summary=_build_tool_summary(tool_results),
+        conversation_id=conversation_id,
+        language=language,
+        agent_id=agent_id,
+        original_async_converse=original_async_converse,
+    )
+    get_tool_calls_state(hass).clear()
+    return final_text
+
+
 async def _finalize_synthesized_success(
     hass: HomeAssistant,
     *,
@@ -105,31 +180,22 @@ async def _finalize_synthesized_success(
         agent_id=agent_id,
         response_text=response_text,
     )
-    task_loop["history"].append({"role": "assistant", "content": response_text})
-    record_response(
+    tool_results = _snapshot_tool_results(get_tool_results_state(hass))
+    final_text = await _finalize_completed_response(
         hass,
-        response_text=response_text,
-        agent_id=agent_id,
-    )
-    tool_calls = list(get_tool_calls_state(hass))
-    conv_history.add_turn(
-        conversation_id or "default",
-        original_text,
-        response_text,
-        tool_calls=tool_calls,
-    )
-    await async_capture_passive_signal(
-        hass,
-        user_text=original_text,
-        assistant_text=response_text,
-        tool_calls=tool_calls,
+        response=result.response,
+        task_loop=task_loop,
+        original_text=original_text,
         conversation_id=conversation_id,
+        agent_id=agent_id,
+        conv_history=conv_history,
+        tool_results=tool_results,
+        language=None,
+        original_async_converse=None,
     )
-    tool_calls_state = get_tool_calls_state(hass)
-    tool_calls_state.clear()
     fire_ai_response(
         hass,
-        response=response_text,
+        response=final_text or response_text,
         user_request=user_text,
         conversation_id=conversation_id,
         iteration=1,
@@ -141,7 +207,7 @@ async def _finalize_synthesized_success(
         agent_name=agent_name,
         agent_id=agent_id,
         conversation_mode=conversation_mode,
-        response_text=response_text,
+        response_text=final_text or response_text,
     )
     if getattr(result, "response", None) and hasattr(result.response, "response_type"):
         result.response.response_type = intent.IntentResponseType.ACTION_DONE
@@ -151,6 +217,70 @@ async def _finalize_synthesized_success(
         user_text, detect_user_ending_intent
     )
     set_current_thought(hass, None)
+    return result
+
+
+async def _finalize_agent_success(
+    hass: HomeAssistant,
+    *,
+    result: Any,
+    agent_id: str,
+    agent_name: str,
+    response_text: str,
+    conversation_mode: str,
+    conversation_id,
+    original_text: str,
+    user_text: str,
+    conv_history,
+    task_loop: dict[str, Any],
+    language: str | None,
+    original_async_converse,
+    tool_results: list[dict[str, Any]],
+) -> Any:
+
+    if getattr(result, "response", None) and getattr(result.response, "speech", None):
+        plain = result.response.speech.get("plain", {}) if isinstance(result.response.speech, dict) else {}
+        plain["speech"] = response_text
+        plain["original_speech"] = response_text
+
+    await async_bridge_native_chatlog_turn(
+        hass,
+        agent_id=agent_id,
+        response_text=response_text,
+    )
+    final_text = await _finalize_completed_response(
+        hass,
+        response=result.response,
+        task_loop=task_loop,
+        original_text=original_text,
+        conversation_id=conversation_id,
+        agent_id=agent_id,
+        conv_history=conv_history,
+        tool_results=tool_results,
+        language=language,
+        original_async_converse=original_async_converse,
+    )
+    fire_ai_response(
+        hass,
+        response=final_text or response_text,
+        user_request=user_text,
+        conversation_id=conversation_id,
+        iteration=1,
+        agent_id=agent_id,
+    )
+    apply_agent_response_format(
+        result,
+        hass=hass,
+        agent_name=agent_name,
+        agent_id=agent_id,
+        conversation_mode=conversation_mode,
+        response_text=final_text or response_text,
+    )
+    LOGGER.info("AI response: %s...", (final_text or response_text)[:100])
+    set_current_thought(hass, None)
+    result.continue_conversation = not is_user_done_text(
+        user_text, detect_user_ending_intent
+    )
     return result
 
 
@@ -188,8 +318,61 @@ def _extract_response_error_reason(result: Any) -> str:
     return "error_response"
 
 
+def _schedule_transient_retry(
+    agent_queue: list[str],
+    *,
+    current_agent_id: str,
+    primary_agent_id: str | None,
+    transient_retry_counts: dict[str, int],
+    max_retries: int,
+) -> tuple[bool, int]:
+
+    retries = transient_retry_counts.get(current_agent_id, 0)
+    if retries >= max_retries:
+        return False, retries
+
+    retries += 1
+    transient_retry_counts[current_agent_id] = retries
+    if current_agent_id == primary_agent_id and retries == 1:
+        agent_queue.insert(0, current_agent_id)
+        return True, retries
+
+    agent_queue.append(current_agent_id)
+    return True, retries
+
+
 def _append_prompt(base_prompt: str | None, extra_block: str) -> str:
     return _fit_base_prompt(base_prompt or "", [extra_block])
+
+
+def _head_tail_compact_text(value: str, *, head: int, tail: int) -> str:
+    text = " ".join(str(value or "").split())
+    if len(text) <= head + tail + 3:
+        return text
+    return f"{text[:head].rstrip()} ... {text[-tail:].lstrip()}"
+
+
+def _compact_text(value: str, limit: int = 1200) -> str:
+    value = " ".join(str(value or "").split())
+    if len(value) <= limit:
+        return value
+    if limit <= 80:
+        return f"{value[:limit].rstrip()}..."
+    tail = min(max(limit // 4, 40), 240)
+    head = max(limit - tail - 5, 32)
+    return _head_tail_compact_text(value, head=head, tail=tail)
+
+
+def _normalize_for_dedupe(value: str) -> str:
+    return " ".join(str(value or "").lower().split())
+
+
+def _append_unique_line(lines: list[str], seen: set[str], value: str) -> None:
+    normalized = _normalize_for_dedupe(value)
+    if not normalized or normalized in seen:
+        return
+    seen.add(normalized)
+    lines.append(value)
 
 
 def _find_previous_agent_id(
@@ -241,6 +424,9 @@ def _build_next_agent_handoff_prompt(
     }
     intent_desc = _INTENT_LABELS.get(handoff_intent, _INTENT_LABELS["request"])
     action_desc = _ACTION_LABELS.get(expected_action, _ACTION_LABELS["reply"])
+    compact_task_summary = _compact_text(task_summary, 400)
+    compact_reason = _compact_text(reason, 320)
+    compact_previous_response = _compact_text(previous_response_text, 2400)
 
     lines = [
         "## Agent Handoff",
@@ -248,28 +434,22 @@ def _build_next_agent_handoff_prompt(
         f"Intent: {handoff_intent} — {intent_desc}",
         f"Expected action: {expected_action} — {action_desc}",
     ]
-    if task_summary:
-        lines.append(f"Task: {task_summary}")
-    if reason:
-        lines.append(f"Reason: {reason}")
+    if compact_task_summary:
+        lines.append(f"Task: {compact_task_summary}")
+    if compact_reason:
+        lines.append(f"Reason: {compact_reason}")
     lines.extend([
         "",
         "### Context from previous AI:",
-        previous_response_text,
+        compact_previous_response,
         "",
         "### Instructions:",
         action_desc,
         "Do not ask the user to repeat themselves — all context is above.",
         "Do not call AgentHandoff again unless the user explicitly asks for another handoff after you answer.",
+        "If details appear condensed, rely on the preserved task, intent, recent context, and verified tool results rather than inventing missing facts.",
     ])
     return "\n".join(lines)
-
-
-def _compact_text(value: str, limit: int = 1200) -> str:
-    value = " ".join(str(value or "").split())
-    if len(value) <= limit:
-        return value
-    return f"{value[:limit].rstrip()}..."
 
 
 def _build_agent_recovery_prompt(
@@ -280,6 +460,7 @@ def _build_agent_recovery_prompt(
     tool_results: list[dict[str, Any]],
     task_loop: dict[str, Any],
 ) -> str:
+    seen: set[str] = set()
     lines = [
         "## Seamless Agent Recovery",
         f"Previous AI: {failed_agent_name}",
@@ -295,7 +476,7 @@ def _build_agent_recovery_prompt(
             role = str(item.get("role", "assistant"))
             content = _compact_text(str(item.get("content", "")), 500)
             if content:
-                lines.append(f"- {role}: {content}")
+                _append_unique_line(lines, seen, f"- {role}: {content}")
     if tool_results:
         lines.extend(["", "### Tool results already produced"])
         for item in tool_results[-8:]:
@@ -308,58 +489,130 @@ def _build_agent_recovery_prompt(
                 summarized = extract_successful_tool_response([item]).strip()
                 if summarized:
                     line += f" - Result: {_compact_text(summarized, 500)}"
-            lines.append(line)
+            _append_unique_line(lines, seen, line)
     lines.extend([
         "",
         "### Instructions",
         "Continue the same task from here without asking the user to repeat anything.",
         "Do not repeat successful tool calls unless a fresh check is necessary.",
         "If the previous AI failed while streaming, ignore the broken partial answer and produce a clean final answer.",
+        "If prompt budget removes detail, prioritize the preserved task summary, latest progress, and successful tool results.",
     ])
     return "\n".join(lines)
 
 
-def make_agent_name_getter(hass: HomeAssistant) -> Callable[[str], str]:
+def _summarize_tool_result_entry(tool_result: dict[str, Any]) -> str:
+    status = "SUCCESS" if tool_result.get("success", False) else "FAILED"
+    tool_name = str(tool_result.get("tool_name", "unknown"))
+    line = f"- {tool_name}: {status}"
+    if tool_result.get("error"):
+        line += f" - Error: {_compact_text(str(tool_result['error']), 320)}"
+    if tool_result.get("result"):
+        summarized = extract_successful_tool_response([tool_result]).strip()
+        if summarized:
+            line += f" - Result: {_compact_text(summarized, 700)}"
+    return line
+
+
+def _dedupe_tool_results(tool_results: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    deduped: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for item in tool_results:
+        signature = _normalize_for_dedupe(_summarize_tool_result_entry(item))
+        if not signature or signature in seen:
+            continue
+        seen.add(signature)
+        deduped.append(item)
+    return deduped
+
+
+def _build_tool_results_prompt(tool_results: list[dict[str, Any]]) -> str:
+    deduped_results = _dedupe_tool_results(tool_results)
+    if not deduped_results:
+        return ""
+
+    lines = ["## Previous Agent Tool Results"]
+    seen: set[str] = set()
+    for tool_result in deduped_results[-8:]:
+        _append_unique_line(lines, seen, _summarize_tool_result_entry(tool_result))
+    lines.extend([
+        "",
+        "Based on these results, continue from the current state.",
+        "Do not repeat successful tool calls unless a fresh check is truly necessary.",
+    ])
+    return "\n".join(lines)
+
+
+def _build_fallback_extra_prompt(
+    *,
+    base_prompt: str | None,
+    user_text: str,
+    pending_handoff_context: str,
+    previous_tool_results: list[dict[str, Any]],
+) -> str | None:
+    required_prefix_sections = [
+        "## Active User Task\n" + _compact_text(user_text, 2400),
+    ]
+    required_suffix_sections = [pending_handoff_context] if pending_handoff_context else []
+    optional_tail_sections: list[str] = []
+
+    tool_results_prompt = _build_tool_results_prompt(previous_tool_results)
+    if tool_results_prompt:
+        optional_tail_sections.append(tool_results_prompt)
+
+    required_prompt = _build_budgeted_prompt(
+        head_sections=[],
+        required_prefix_sections=required_prefix_sections,
+        required_suffix_sections=required_suffix_sections,
+        optional_tail_sections=optional_tail_sections,
+        max_chars=_MAX_SYSTEM_PROMPT_CHARS,
+    )
+    if not base_prompt:
+        return required_prompt
+    if not required_prompt:
+        return base_prompt
+
+    return _fit_head_section_to_required_suffix(
+        base_prompt,
+        [required_prompt],
+        max_chars=_MAX_SYSTEM_PROMPT_CHARS,
+    )
+
+
+def get_agent_name(hass: HomeAssistant, agent_id: str) -> str:
 
     from homeassistant.helpers import entity_registry as er
 
     ent_reg = er.async_get(hass)
 
-    def get_agent_name(agent_id: str) -> str:
-        ent = ent_reg.async_get(agent_id)
-        if ent and ent.name:
-            return ent.name
-        if ent and ent.original_name:
-            return ent.original_name
-        state = hass.states.get(agent_id)
-        if state:
-            return state.attributes.get("friendly_name", agent_id.split(".")[-1])
-        return agent_id.split(".")[-1].replace("_", " ").title()
-
-    return get_agent_name
+    ent = ent_reg.async_get(agent_id)
+    if ent and ent.name:
+        return ent.name
+    if ent and ent.original_name:
+        return ent.original_name
+    state = hass.states.get(agent_id)
+    if state:
+        return state.attributes.get("friendly_name", agent_id.split(".")[-1])
+    return agent_id.split(".")[-1].replace("_", " ").title()
 
 
-def make_error_response_checker(hass: HomeAssistant) -> Callable[[Any], bool]:
+def is_error_response(hass: HomeAssistant, result: Any) -> bool:
 
+    if not result or not result.response:
+        return True
+    if result.response.response_type == intent.IntentResponseType.ERROR:
+        return True
 
-    def is_error_response(result) -> bool:
-        if not result or not result.response:
+    tool_results = get_tool_results_state(hass)
+    if tool_results:
+        failed_tools = [item for item in tool_results if not item.get("success", True)]
+        if failed_tools:
+            LOGGER.debug(
+                "Detected failed tool calls: %s",
+                [item["tool_name"] for item in failed_tools],
+            )
             return True
-        if result.response.response_type == intent.IntentResponseType.ERROR:
-            return True
-
-        tool_results = get_tool_results_state(hass)
-        if tool_results:
-            failed_tools = [item for item in tool_results if not item.get("success", True)]
-            if failed_tools:
-                LOGGER.debug(
-                    "Detected failed tool calls: %s",
-                    [item["tool_name"] for item in failed_tools],
-                )
-                return True
-        return False
-
-    return is_error_response
+    return False
 
 
 async def run_agent_fallback_chain(
@@ -377,8 +630,6 @@ async def run_agent_fallback_chain(
     device_id,
     satellite_id,
     conv_history,
-    is_error_response: Callable[[Any], bool],
-    get_agent_name: Callable[[str], str],
 ) -> Any:
 
     task_loop = get_task_loop_state(hass)
@@ -461,7 +712,7 @@ async def run_agent_fallback_chain(
                 )
                 return internal_result
 
-        if (not is_error_response(internal_result) and not failed_tools) or (only_think_tools and not failed_tools):
+        if (not is_error_response(hass, internal_result) and not failed_tools) or (only_think_tools and not failed_tools):
             if internal_result.response.speech and "plain" in internal_result.response.speech:
                 response_text = sanitize_response_text(
                     internal_result.response.speech["plain"].get("speech", "").strip()
@@ -485,46 +736,21 @@ async def run_agent_fallback_chain(
                         from .response_format import language_of, reply_labels
 
                         agent_name = "Home Assistant"
-                        await async_bridge_native_chatlog_turn(
+                        internal_result = await _finalize_agent_success(
                             hass,
+                            result=internal_result,
                             agent_id=ha_internal_agent,
+                            agent_name=agent_name,
                             response_text=response_text,
-                        )
-                        task_loop["history"].append(
-                            {"role": "assistant", "content": response_text}
-                        )
-                        record_response(
-                            hass,
-                            response_text=response_text,
-                            agent_id=ha_internal_agent,
-                        )
-                        tool_calls = list(get_tool_calls_state(hass))
-                        conv_history.add_turn(
-                            conversation_id or "default",
-                            original_text,
-                            response_text,
-                            tool_calls=tool_calls,
-                        )
-                        if (
-                            internal_result.response.response_type
-                            == intent.IntentResponseType.ACTION_DONE
-                        ):
-                            await async_capture_passive_signal(
-                                hass,
-                                user_text=original_text,
-                                assistant_text=response_text,
-                                tool_calls=tool_calls,
-                                conversation_id=conversation_id,
-                            )
-                        tool_calls_state = get_tool_calls_state(hass)
-                        tool_calls_state.clear()
-                        fire_ai_response(
-                            hass,
-                            response=response_text,
-                            user_request=text,
+                            conversation_mode=conversation_mode,
                             conversation_id=conversation_id,
-                            iteration=1,
-                            agent_id=ha_internal_agent,
+                            original_text=original_text,
+                            user_text=text,
+                            conv_history=conv_history,
+                            task_loop=task_loop,
+                            language=language,
+                            original_async_converse=original_async_converse,
+                            tool_results=_snapshot_tool_results(tool_results),
                         )
                         reply = reply_labels(language_of(internal_result))["reply"]
                         if conversation_mode in (
@@ -537,10 +763,6 @@ async def run_agent_fallback_chain(
                         internal_result.response.speech["plain"]["original_speech"] = response_text
                         internal_result.response.speech["plain"]["agent_name"] = agent_name
                         internal_result.response.speech["plain"]["agent_id"] = ha_internal_agent
-                        internal_result.continue_conversation = not is_user_done_text(
-                            text, detect_user_ending_intent
-                        )
-                        set_current_thought(hass, None)
                         LOGGER.info(
                             "HA internal LLM handled the request successfully: %s...",
                             response_text[:50],
@@ -614,6 +836,7 @@ async def run_agent_fallback_chain(
                                  "cannot connect", "server disconnected", "ssl", "clientconnector", "serverdisconnected")
     _MAX_TRANSIENT_RETRIES = 3
     transient_retry_counts: dict[str, int] = {}
+    primary_external_agent = ordered_agents[0] if ordered_agents else None
 
     agent_queue = list(ordered_agents)
     while agent_queue:
@@ -624,30 +847,12 @@ async def run_agent_fallback_chain(
         tool_calls_state = get_tool_calls_state(hass)
         tool_calls_state.clear()
 
-        current_extra_prompt = base_extra_prompt
-        if pending_handoff_context:
-            current_extra_prompt = _append_prompt(
-                current_extra_prompt,
-                pending_handoff_context,
-            )
-
-        if previous_tool_results:
-            tool_context = "## Previous Agent Tool Results (DO NOT repeat these calls!):\n"
-            for tool_result in previous_tool_results:
-                status = "SUCCESS" if tool_result.get("success", False) else "FAILED"
-                tool_context += f"- {tool_result.get('tool_name', 'unknown')}: {status}"
-                if tool_result.get("error"):
-                    tool_context += f" - Error: {_compact_text(str(tool_result['error']), 300)}"
-                if tool_result.get("result"):
-                    summarized = extract_successful_tool_response([tool_result]).strip()
-                    if summarized:
-                        tool_context += f" - Result: {_compact_text(summarized, 500)}"
-                tool_context += "\n"
-            tool_context += (
-                "\nBased on these results, provide a response to the user. "
-                "Do NOT call the same tools again!\n"
-            )
-            current_extra_prompt = _append_prompt(current_extra_prompt, tool_context)
+        current_extra_prompt = _build_fallback_extra_prompt(
+            base_prompt=base_extra_prompt,
+            user_text=text,
+            pending_handoff_context=pending_handoff_context,
+            previous_tool_results=previous_tool_results,
+        )
 
         try:
             tool_mode_token = set_runtime_tool_mode("minimal")
@@ -666,7 +871,7 @@ async def run_agent_fallback_chain(
             finally:
                 reset_runtime_tool_mode(tool_mode_token)
 
-            if is_error_response(result):
+            if is_error_response(hass, result):
                 all_tools = get_tool_results_state(hass)
                 failed_tools = [item for item in all_tools if not item.get("success", True)]
                 previous_tool_results.extend(_snapshot_tool_results(all_tools))
@@ -676,8 +881,12 @@ async def run_agent_fallback_chain(
                     kw in agent_response_text.lower()
                     for kw in ("error getting response", "server disconnected", "timed out", "connection reset")
                 )
+                failure_reason = _extract_response_error_reason(result)
+                transient_response_error = any(
+                    kw in failure_reason.lower() for kw in _TRANSIENT_ERROR_KEYWORDS
+                ) or bool(_is_error_text)
                 if agent_response_text and not _is_error_text:
-                    agent_name = get_agent_name(current_agent_id)
+                    agent_name = get_agent_name(hass, current_agent_id)
                     result = await _finalize_synthesized_success(
                         hass,
                         result=result,
@@ -701,8 +910,87 @@ async def run_agent_fallback_chain(
                         conversation_id=conversation_id,
                     )
                     return result
+                if failed_tools:
+                    LOGGER.info(
+                        "Agent %s had a tool-call failure; trying the next agent: %s",
+                        current_agent_id,
+                        [item["tool_name"] for item in failed_tools],
+                    )
+                    failure_reason = _summarize_tool_failures(all_tools)
+                    await async_record_agent_failure(
+                        hass,
+                        current_agent_id,
+                        error=failure_reason,
+                        conversation_id=conversation_id,
+                        stage="tool_failure",
+                    )
+                    agent_errors.append(f"{current_agent_id}: {failure_reason[:160]}")
+                    if agent_queue:
+                        pending_handoff_context = _build_agent_recovery_prompt(
+                            failed_agent_name=get_agent_name(hass, current_agent_id),
+                            original_text=original_text,
+                            error=failure_reason,
+                            tool_results=previous_tool_results,
+                            task_loop=task_loop,
+                        )
+                    if any(kw in failure_reason.lower() for kw in _TRANSIENT_ERROR_KEYWORDS):
+                        retried_now, retries = _schedule_transient_retry(
+                            agent_queue,
+                            current_agent_id=current_agent_id,
+                            primary_agent_id=primary_external_agent,
+                            transient_retry_counts=transient_retry_counts,
+                            max_retries=_MAX_TRANSIENT_RETRIES,
+                        )
+                        if retried_now:
+                            LOGGER.info(
+                                "Agent %s tool failure looks transient; re-queuing retry %d/%d",
+                                current_agent_id, retries, _MAX_TRANSIENT_RETRIES,
+                            )
+                    continue
+                if transient_response_error:
+                    retried_now, retries = _schedule_transient_retry(
+                        agent_queue,
+                        current_agent_id=current_agent_id,
+                        primary_agent_id=primary_external_agent,
+                        transient_retry_counts=transient_retry_counts,
+                        max_retries=_MAX_TRANSIENT_RETRIES,
+                    )
+                    if retried_now and current_agent_id == primary_external_agent and retries == 1:
+                        LOGGER.info(
+                            "Primary agent %s hit a transient upstream response error; retrying once immediately before fallback",
+                            current_agent_id,
+                        )
+                        await async_record_agent_failure(
+                            hass,
+                            current_agent_id,
+                            error=failure_reason,
+                            conversation_id=conversation_id,
+                            stage="response_error_retry",
+                        )
+                        agent_errors.append(f"{current_agent_id}: {failure_reason[:160]}")
+                        continue
+                    LOGGER.info(
+                        "Agent %s hit a transient upstream response error after partial tool success; handing off to the next agent",
+                        current_agent_id,
+                    )
+                    await async_record_agent_failure(
+                        hass,
+                        current_agent_id,
+                        error=failure_reason,
+                        conversation_id=conversation_id,
+                        stage="response_error",
+                    )
+                    agent_errors.append(f"{current_agent_id}: {failure_reason[:160]}")
+                    pending_handoff_context = _build_agent_recovery_prompt(
+                        failed_agent_name=get_agent_name(hass, current_agent_id),
+                        original_text=original_text,
+                        error=failure_reason,
+                        tool_results=previous_tool_results,
+                        task_loop=task_loop,
+                    )
+                    continue
                 if synthesized_response:
-                    agent_name = get_agent_name(current_agent_id)
+                    agent_name = get_agent_name(hass, current_agent_id)
                     result = await _finalize_synthesized_success(
                         hass,
                         result=result,
@@ -726,98 +1014,67 @@ async def run_agent_fallback_chain(
                         conversation_id=conversation_id,
                     )
                     return result
-
-                if failed_tools:
-                    LOGGER.info(
-                        "Agent %s had a tool-call failure; trying the next agent: %s",
-                        current_agent_id,
-                        [item["tool_name"] for item in failed_tools],
+                synthesized_response = extract_successful_tool_response(all_tools)
+                if synthesized_response:
+                    agent_name = get_agent_name(hass, current_agent_id)
+                    result = await _finalize_synthesized_success(
+                        hass,
+                        result=result,
+                        agent_id=current_agent_id,
+                        agent_name=agent_name,
+                        response_text=synthesized_response,
+                        conversation_mode=conversation_mode,
+                        conversation_id=conversation_id,
+                        original_text=original_text,
+                        user_text=text,
+                        conv_history=conv_history,
+                        task_loop=task_loop,
                     )
-                    failure_reason = _summarize_tool_failures(all_tools)
-                    await async_record_agent_failure(
+                    LOGGER.info(
+                        "Agent %s tool execution succeeded; synthesized final response",
+                        current_agent_id,
+                    )
+                    await async_record_agent_success(
                         hass,
                         current_agent_id,
-                        error=failure_reason,
                         conversation_id=conversation_id,
-                        stage="tool_failure",
                     )
-                    agent_errors.append(f"{current_agent_id}: {failure_reason[:160]}")
-                    if agent_queue:
-                        pending_handoff_context = _build_agent_recovery_prompt(
-                            failed_agent_name=get_agent_name(current_agent_id),
-                            original_text=original_text,
-                            error=failure_reason,
-                            tool_results=previous_tool_results,
-                            task_loop=task_loop,
-                        )
-                    if any(kw in failure_reason.lower() for kw in _TRANSIENT_ERROR_KEYWORDS):
-                        retries = transient_retry_counts.get(current_agent_id, 0)
-                        if retries < _MAX_TRANSIENT_RETRIES:
-                            transient_retry_counts[current_agent_id] = retries + 1
-                            agent_queue.append(current_agent_id)
-                            LOGGER.info(
-                                "Agent %s tool failure looks transient; re-queuing retry %d/%d",
-                                current_agent_id, retries + 1, _MAX_TRANSIENT_RETRIES,
-                            )
-                else:
-                    synthesized_response = extract_successful_tool_response(all_tools)
-                    if synthesized_response:
-                        agent_name = get_agent_name(current_agent_id)
-                        result = await _finalize_synthesized_success(
-                            hass,
-                            result=result,
-                            agent_id=current_agent_id,
-                            agent_name=agent_name,
-                            response_text=synthesized_response,
-                            conversation_mode=conversation_mode,
-                            conversation_id=conversation_id,
-                            original_text=original_text,
-                            user_text=text,
-                            conv_history=conv_history,
-                            task_loop=task_loop,
-                        )
+                    return result
+
+                LOGGER.info(
+                    "Agent %s returned an error response; trying the next agent: %s",
+                    current_agent_id,
+                    failure_reason[:160],
+                )
+                await async_record_agent_failure(
+                    hass,
+                    current_agent_id,
+                    error=failure_reason,
+                    conversation_id=conversation_id,
+                    stage="response_error",
+                )
+                agent_errors.append(f"{current_agent_id}: {failure_reason[:160]}")
+                if agent_queue:
+                    pending_handoff_context = _build_agent_recovery_prompt(
+                        failed_agent_name=get_agent_name(hass, current_agent_id),
+                        original_text=original_text,
+                        error=failure_reason,
+                        tool_results=previous_tool_results,
+                        task_loop=task_loop,
+                    )
+                if any(kw in failure_reason.lower() for kw in _TRANSIENT_ERROR_KEYWORDS):
+                    retried_now, retries = _schedule_transient_retry(
+                        agent_queue,
+                        current_agent_id=current_agent_id,
+                        primary_agent_id=primary_external_agent,
+                        transient_retry_counts=transient_retry_counts,
+                        max_retries=_MAX_TRANSIENT_RETRIES,
+                    )
+                    if retried_now:
                         LOGGER.info(
-                            "Agent %s tool execution succeeded; synthesized final response",
-                            current_agent_id,
+                            "Agent %s response error looks transient; re-queuing retry %d/%d",
+                            current_agent_id, retries, _MAX_TRANSIENT_RETRIES,
                         )
-                        await async_record_agent_success(
-                            hass,
-                            current_agent_id,
-                            conversation_id=conversation_id,
-                        )
-                        return result
-
-                    failure_reason = _extract_response_error_reason(result)
-                    LOGGER.info(
-                        "Agent %s returned an error response; trying the next agent: %s",
-                        current_agent_id,
-                        failure_reason[:160],
-                    )
-                    await async_record_agent_failure(
-                        hass,
-                        current_agent_id,
-                        error=failure_reason,
-                        conversation_id=conversation_id,
-                        stage="response_error",
-                    )
-                    agent_errors.append(f"{current_agent_id}: {failure_reason[:160]}")
-                    if agent_queue:
-                        pending_handoff_context = _build_agent_recovery_prompt(
-                            failed_agent_name=get_agent_name(current_agent_id),
-                            original_text=original_text,
-                            error=failure_reason,
-                            tool_results=previous_tool_results,
-                            task_loop=task_loop,
-                        )
-                    if any(kw in failure_reason.lower() for kw in _TRANSIENT_ERROR_KEYWORDS):
-                        retries = transient_retry_counts.get(current_agent_id, 0)
-                        if retries < _MAX_TRANSIENT_RETRIES:
-                            transient_retry_counts[current_agent_id] = retries + 1
-                            agent_queue.append(current_agent_id)
-                            LOGGER.info(
-                                "Agent %s response error looks transient; re-queuing retry %d/%d",
-                                current_agent_id, retries + 1, _MAX_TRANSIENT_RETRIES,
-                            )
                 continue
 
             if result.response.speech and "plain" in result.response.speech:
@@ -832,7 +1089,7 @@ async def run_agent_fallback_chain(
                 if not response_text:
                     continue
 
-                agent_name = get_agent_name(current_agent_id)
+                agent_name = get_agent_name(hass, current_agent_id)
                 handoff_request = consume_next_agent_handoff(hass)
                 target_agent_id = ""
                 if handoff_request["requested"]:
@@ -867,61 +1124,21 @@ async def run_agent_fallback_chain(
                     )
                     continue
 
-                result.response.speech["plain"]["speech"] = response_text
-                result.response.speech["plain"]["original_speech"] = response_text
-                await async_bridge_native_chatlog_turn(
+                result = await _finalize_agent_success(
                     hass,
+                    result=result,
                     agent_id=current_agent_id,
-                    response_text=response_text,
-                )
-                task_loop["history"].append({"role": "assistant", "content": response_text})
-                record_response(
-                    hass,
-                    response_text=response_text,
-                    agent_id=current_agent_id,
-                )
-                tool_calls = list(get_tool_calls_state(hass))
-                conv_history.add_turn(
-                    conversation_id or "default",
-                    original_text,
-                    response_text,
-                    tool_calls=tool_calls,
-                )
-                if result.response.response_type == intent.IntentResponseType.ACTION_DONE:
-                    await async_capture_passive_signal(
-                        hass,
-                        user_text=original_text,
-                        assistant_text=response_text,
-                        tool_calls=tool_calls,
-                        conversation_id=conversation_id,
-                    )
-                tool_calls_state = get_tool_calls_state(hass)
-                tool_calls_state.clear()
-
-                fire_ai_response(
-                    hass,
-                    response=response_text,
-                    user_request=text,
-                    conversation_id=conversation_id,
-                    iteration=1,
-                    agent_id=current_agent_id,
-                )
-
-                LOGGER.info("AI response: %s...", response_text[:100])
-
-                set_current_thought(hass, None)
-                apply_agent_response_format(
-                    result,
-                    hass=hass,
                     agent_name=agent_name,
-                    agent_id=current_agent_id,
-                    conversation_mode=conversation_mode,
                     response_text=response_text,
-                )
-                set_current_thought(hass, None)
-
-                result.continue_conversation = not is_user_done_text(
-                    text, detect_user_ending_intent
+                    conversation_mode=conversation_mode,
+                    conversation_id=conversation_id,
+                    original_text=original_text,
+                    user_text=text,
+                    conv_history=conv_history,
+                    task_loop=task_loop,
+                    language=language,
+                    original_async_converse=original_async_converse,
+                    tool_results=_snapshot_tool_results(get_tool_results_state(hass)),
                 )
                 LOGGER.info("Agent %s succeeded", current_agent_id)
                 await async_record_agent_success(
@@ -969,7 +1186,7 @@ async def run_agent_fallback_chain(
                 previous_tool_results.extend(current_tool_results)
             if agent_queue:
                 pending_handoff_context = _build_agent_recovery_prompt(
-                    failed_agent_name=get_agent_name(current_agent_id),
+                    failed_agent_name=get_agent_name(hass, current_agent_id),
                     original_text=original_text,
                     error=err_msg,
                     tool_results=previous_tool_results,
@@ -981,7 +1198,7 @@ async def run_agent_fallback_chain(
                     conversation_id=conversation_id,
                     response_text=successful_tool_response,
                 )
-                agent_name = get_agent_name(current_agent_id)
+                agent_name = get_agent_name(hass, current_agent_id)
                 result = await _finalize_synthesized_success(
                     hass,
                     result=result,
@@ -1021,13 +1238,17 @@ async def run_agent_fallback_chain(
                 stage="exception",
             )
             if any(kw in err_lower for kw in _TRANSIENT_ERROR_KEYWORDS):
-                retries = transient_retry_counts.get(current_agent_id, 0)
-                if retries < _MAX_TRANSIENT_RETRIES:
-                    transient_retry_counts[current_agent_id] = retries + 1
-                    agent_queue.append(current_agent_id)
+                retried_now, retries = _schedule_transient_retry(
+                    agent_queue,
+                    current_agent_id=current_agent_id,
+                    primary_agent_id=primary_external_agent,
+                    transient_retry_counts=transient_retry_counts,
+                    max_retries=_MAX_TRANSIENT_RETRIES,
+                )
+                if retried_now:
                     LOGGER.info(
                         "Agent %s hit transient error; re-queuing for retry %d/%d",
-                        current_agent_id, retries + 1, _MAX_TRANSIENT_RETRIES,
+                        current_agent_id, retries, _MAX_TRANSIENT_RETRIES,
                     )
             continue
 

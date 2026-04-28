@@ -38,6 +38,7 @@ def reset_loop_for_conversation(
             "active": True,
             "conversation_id": conversation_id,
             "turn_count": 0,
+            "is_first_turn": True,
             "thought_count": 0,
             "step_count": 0,
             "max_iterations": max_iterations,
@@ -63,6 +64,7 @@ def reset_loop_for_conversation(
 def record_user_turn(hass: HomeAssistant, *, text: str) -> dict[str, Any]:
 
     task_loop = get_task_loop_state(hass)
+    task_loop["is_first_turn"] = int(task_loop.get("turn_count", 0)) == 0
     task_loop["turn_count"] = int(task_loop.get("turn_count", 0)) + 1
     task_loop["last_progress_at"] = _now_iso()
     task_loop["phase"] = "active"

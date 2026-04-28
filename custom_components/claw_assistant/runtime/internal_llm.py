@@ -5,7 +5,6 @@ from __future__ import annotations
 from collections.abc import Callable
 from contextvars import ContextVar
 from dataclasses import dataclass
-from datetime import datetime, timedelta, timezone
 import logging
 from typing import Any
 
@@ -30,7 +29,6 @@ from .workspace_store import (
 LOGGER = logging.getLogger(__name__)
 
 CUSTOM_API_ID = "ha_crack_enhanced"
-_TZ = timezone(timedelta(hours=8))
 _PATCH_KEY = "_ha_crack_patched"
 _TOOL_TRACK_KEY = "_ha_crack_tool_tracking"
 _ASSIST_PROMPT_ORIGINAL_KEY = "_ha_crack_original_assist_api_prompt"
@@ -108,17 +106,9 @@ def _compact_result_summary(result: dict[str, Any]) -> dict[str, Any]:
     return compacted
 
 
-def _build_current_datetime() -> str:
-
-    return datetime.now(_TZ).strftime(
-        "Today is %Y-%m-%d %A, current time %H:%M:%S (Beijing Time)"
-    )
-
-
 def _build_runtime_prompt_kwargs(user_text: str = "") -> dict[str, str]:
 
     return {
-        "current_datetime": _build_current_datetime(),
         "user_text": user_text,
     }
 
@@ -350,7 +340,21 @@ def reset_runtime_tool_mode(token: object) -> None:
     _TOOL_MODE.reset(token)
 
 
-def build_internal_llm_prompt(user_text: str = "") -> str:
+_PER_TURN_HINT = (
+    "## Runtime Hints (per-turn)\n"
+    "The full Workspace bundle and HA Runtime Guide were attached at the "
+    "start of this conversation \u2014 do not ask for them again. "
+    "Read individual docs with `GetWorkspaceDoc`, write with `SetWorkspaceDoc`. "
+    "Use `MemoryGraph` (action=recall/remember/link/...) for durable graph memory. "
+    "Trust the `Current time is ...` line injected by HA core; ignore stale "
+    "timestamps elsewhere in the history."
+)
+
+
+def build_internal_llm_prompt(user_text: str = "", *, full: bool = True) -> str:
+
+    if not full:
+        return _PER_TURN_HINT
 
     workspace_block = build_workspace_startup_bundle(user_text=user_text)
     loaded_workspace_docs = set(get_workspace_startup_doc_names(user_text=user_text))
@@ -378,7 +382,10 @@ def build_internal_llm_prompt(user_text: str = "") -> str:
     )
 
 
-def build_native_tool_prompt(user_text: str = "") -> str:
+def build_native_tool_prompt(user_text: str = "", *, full: bool = True) -> str:
+
+    if not full:
+        return _PER_TURN_HINT
 
     workspace_block = build_workspace_startup_bundle(user_text=user_text)
     loaded_workspace_docs = set(get_workspace_startup_doc_names(user_text=user_text))
@@ -481,9 +488,12 @@ class EnhancedAPI(llm.API):
 
     async def async_get_api_instance(self, llm_context: llm.LLMContext) -> llm.APIInstance:
         tools = build_runtime_tool_list()
+        # Per-turn api_prompt: minimal hints only. The full bundle (HA runtime
+        # guide + workspace + governance + master prompt) is injected once at
+        # conversation start via prompting.build_base_prompt -> extra_system_prompt.
         return llm.APIInstance(
             api=self,
-            api_prompt=build_internal_llm_prompt(),
+            api_prompt=build_internal_llm_prompt(full=False),
             llm_context=llm_context,
             tools=tools,
         )

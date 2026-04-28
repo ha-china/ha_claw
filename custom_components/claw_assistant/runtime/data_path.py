@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import re
 import shutil
 from pathlib import Path
 
@@ -17,6 +18,79 @@ _root: Path = BUNDLED_DATA_DIR
 
 def get_data_dir() -> Path:
     return _root
+
+
+# ---------------------------------------------------------------------------
+# Artifact directories exposed to AI-generated Python.
+#
+# Two well-known locations are injected into ``ExecutePython`` (inline) so the
+# AI can drop generated artefacts (PDFs, images, CSVs, etc.) in a predictable
+# place:
+#
+#   * OUTPUT_DIR — persistent, browser-reachable. Maps to
+#     ``<config>/www/claw_assistant/`` which Home Assistant exposes as
+#     ``/local/claw_assistant/<file>`` (no auth on local network unless the
+#     instance is hardened). Use for files the user is meant to download or
+#     share.
+#   * TMP_DIR — ephemeral, auto-cleaned. Maps to
+#     ``<config>/.storage/claw_assistant/tmp/``; entries older than
+#     ``TMP_RETENTION_HOURS`` are pruned hourly by ``tmp_cleanup``.
+# ---------------------------------------------------------------------------
+
+_OUTPUT_SUBDIR = "claw_assistant"
+TMP_RETENTION_HOURS = 24
+
+
+def get_output_dir(hass: HomeAssistant) -> Path:
+    """Return ``<config>/www/claw_assistant/`` (created if missing)."""
+
+    out = Path(hass.config.config_dir) / "www" / _OUTPUT_SUBDIR
+    out.mkdir(parents=True, exist_ok=True)
+    return out
+
+
+def get_tmp_dir(hass: HomeAssistant) -> Path:
+    """Return ``<config>/.storage/claw_assistant/tmp/`` (created if missing)."""
+
+    tmp = Path(hass.config.config_dir) / ".storage" / _STORAGE_SUBDIR / "tmp"
+    tmp.mkdir(parents=True, exist_ok=True)
+    return tmp
+
+
+def output_url_for(filename: str) -> str:
+    """Return the relative ``/local/...`` URL for a file under ``OUTPUT_DIR``.
+
+    This is a pure string helper with no HA dependency; use
+    :func:`absolute_output_url` when a link that can be shared outside the
+    HA frontend (chat apps, emails, etc.) is required.
+    """
+
+    name = str(filename).lstrip("/")
+    return f"/local/{_OUTPUT_SUBDIR}/{name}"
+
+
+def get_ha_base_url(hass: HomeAssistant) -> str | None:
+    try:
+        from homeassistant.helpers.network import get_url
+
+        base = get_url(
+            hass,
+            allow_internal=True,
+            allow_external=True,
+            allow_cloud=True,
+            prefer_external=True,
+        )
+    except Exception:  # noqa: BLE001
+        return None
+    return base.rstrip("/") if base else None
+
+
+def absolute_output_url(hass: HomeAssistant, filename: str) -> str:
+    relative = output_url_for(filename)
+    base = get_ha_base_url(hass)
+    if not base:
+        return relative
+    return base + relative
 
 
 def _copy_if_missing(src: Path, dst: Path) -> None:
@@ -56,18 +130,81 @@ def _migrate_from_kadermanager(config_dir: Path) -> None:
             LOGGER.warning("Failed to migrate adaptive_memory, will retry next restart")
 
 
-_SYSTEM_UPDATE_VERSION = "6.2.0"
+_SYSTEM_UPDATE_VERSION = "6.6.0"
 
 _FORCE_UPDATE_ENTRIES = [
     "prompts/runtime_context.md",
     "prompts/memory_routing.md",
     "prompts/native_mode.md",
     "prompts/skill_mode.md",
-    "skills/homeassistant_runtime_guide.md",
+    # NOTE: skills/homeassistant_runtime_guide.md is intentionally excluded
+    # here — it has its own per-file version marker (see
+    # _VERSIONED_BUNDLED_DOCS below) so it can evolve independently of the
+    # global _SYSTEM_UPDATE_VERSION.
     "workspace/AGENTS.md",
     "workspace/BOOTSTRAP.md",
     "homeassistant_guide",
 ]
+
+# Markdown documents that carry their own ``<!-- version: N -->`` marker on
+# the first line. On startup we compare bundle vs user copy and force-copy
+# bundle whenever its version is strictly newer. Bumping the marker in
+# ``data/<entry>`` is enough to push an update to every installation.
+_VERSIONED_BUNDLED_DOCS: tuple[str, ...] = (
+    "skills/homeassistant_runtime_guide.md",
+)
+
+_VERSION_MARKER_RE = re.compile(
+    r"<!--\s*version\s*:\s*([0-9]+(?:\.[0-9]+)*)\s*-->", re.IGNORECASE
+)
+
+
+def _read_md_version(path: Path) -> str:
+    if not path.exists() or not path.is_file():
+        return ""
+    try:
+        head = path.read_text(encoding="utf-8", errors="ignore")[:512]
+    except OSError:
+        return ""
+    match = _VERSION_MARKER_RE.search(head)
+    return match.group(1) if match else ""
+
+
+def _version_tuple(value: str) -> tuple[int, ...]:
+    if not value:
+        return (0,)
+    parts: list[int] = []
+    for piece in value.split("."):
+        try:
+            parts.append(int(piece))
+        except ValueError:
+            return (0,)
+    return tuple(parts) or (0,)
+
+
+def _sync_versioned_docs(root: Path) -> None:
+    """Force-copy bundled markdown whose version marker is newer than user's."""
+
+    for entry in _VERSIONED_BUNDLED_DOCS:
+        src = BUNDLED_DATA_DIR / entry
+        if not src.exists() or not src.is_file():
+            continue
+        dst = root / entry
+        bundle_version = _read_md_version(src)
+        if not bundle_version:
+            # Bundle file lacks a marker — nothing to compare; skip.
+            LOGGER.debug("Skipping versioned sync for %s: no marker in bundle", entry)
+            continue
+        local_version = _read_md_version(dst)
+        if _version_tuple(bundle_version) > _version_tuple(local_version):
+            dst.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(src, dst)
+            LOGGER.info(
+                "Versioned doc updated: %s (%s -> %s)",
+                entry,
+                local_version or "none",
+                bundle_version,
+            )
 
 
 def _apply_system_update(root: Path) -> None:
@@ -116,6 +253,7 @@ def init_storage(hass: HomeAssistant) -> Path:
         (root / subdir).mkdir(parents=True, exist_ok=True)
 
     _apply_system_update(root)
+    _sync_versioned_docs(root)
 
     _root = root
     LOGGER.info("Data storage initialized at %s", root)

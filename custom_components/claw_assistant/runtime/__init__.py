@@ -26,8 +26,8 @@ from .state import (
 from .agent_catalog import convert_agent_info_to_dict, get_default_agent
 from .agent_execution import build_error_result, process_agent_turn
 from .agent_fallback import (
-    make_agent_name_getter,
-    make_error_response_checker,
+    get_agent_name,
+    is_error_response,
     run_agent_fallback_chain,
 )
 from .config import DEFAULT_THRESHOLDS, RuntimeThresholds
@@ -85,8 +85,8 @@ __all__ = [
     "process_ai_summary",
     "install_conversation_hook",
     "is_user_done_text",
-    "make_agent_name_getter",
-    "make_error_response_checker",
+    "get_agent_name",
+    "is_error_response",
     "run_agent_fallback_chain",
     "async_refresh_prompt_store",
     "async_setup_prompt_store",

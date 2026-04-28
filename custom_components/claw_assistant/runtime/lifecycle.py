@@ -10,6 +10,7 @@ from homeassistant.core import HomeAssistant
 from .adaptive_memory import async_setup_adaptive_memory
 from .coordinator import setup_ai_coordinator
 from .data_path import init_storage
+from .graph_service import async_setup_graph_store, async_unload_graph_store
 from .ha_guide_store import async_setup_homeassistant_guide_store
 from .hook import uninstall_conversation_hook
 from .internal_llm import async_setup_internal_llm, async_unload_internal_llm
@@ -30,6 +31,7 @@ from .patches import (
     unpatch_tool_progress,
 )
 from .skill_store import async_setup_prompt_store
+from .tmp_cleanup import async_setup_tmp_cleanup, async_unload_tmp_cleanup
 from .workspace_store import async_setup_workspace_store
 
 LOGGER = logging.getLogger(__name__)
@@ -41,10 +43,12 @@ async def async_setup_runtime(hass: HomeAssistant, entry: ConfigEntry) -> None:
 
     await hass.async_add_executor_job(init_storage, hass)
     await async_setup_workspace_store(hass)
+    await async_setup_graph_store(hass)
     await async_setup_adaptive_memory(hass)
     await async_setup_homeassistant_guide_store(hass)
     await async_setup_prompt_store(hass)
     await async_setup_internal_llm(hass)
+    await async_setup_tmp_cleanup(hass)
     patch_local_intents(hass)
     patch_chat_log_result_extraction(hass)
     patch_hide_tool_calls_from_pipeline(hass)
@@ -86,6 +90,8 @@ async def async_unload_runtime(hass: HomeAssistant) -> None:
     from ..index_manager import async_cleanup_index_manager
 
     await async_cleanup_index_manager(hass)
+    await async_unload_graph_store(hass)
+    await async_unload_tmp_cleanup(hass)
     uninstall_conversation_hook(hass)
     uninstall_official_websocket_process_hook(hass)
     unpatch_tool_progress()

@@ -9,6 +9,7 @@ import voluptuous as vol
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers import llm
 from homeassistant.util.json import JsonObjectType
+from homeassistant.util.yaml import dump as yaml_dump, parse_yaml
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -191,13 +192,13 @@ class DashboardCardTool(llm.Tool):
     name = "DashboardCard"
     description = (
         "Create and manage Lovelace dashboard views and cards powered by html-card-pro (custom:html-pro-card). "
-        "Actions: check_dependency, list_dashboards, get_dashboard, add_view, add_card, update_card, remove_card, remove_view. "
+        "Actions: check_dependency, list_dashboards, get_dashboard, get_card, add_view, add_card, update_card, remove_card, remove_view. "
         "PREREQUISITE: check_dependency first; if not installed, auto-install via HACS tool. "
         "Workflow: check_dependency → list_dashboards → get_dashboard (inspect view types) → add_view or add_card. "
         "Params: action, dashboard_url (url_path, default 'lovelace'), view_index (0-based), card_index (0-based), "
         "section_index (-1=auto, for 'sections' type views that use sections[].cards instead of view.cards), "
         "title (for view), icon (mdi:xxx for view), content (HTML/CSS/JS string), "
-        "card_config (dict: do_not_parse, update_interval, ignore_line_breaks, scripts). "
+        "card_config (dict for partial card config), card_yaml (full YAML card config for get/add/replace). "
         "VIEW TYPES: masonry/default → cards in view.cards. sections → cards in view.sections[n].cards (use section_index). "
         "Each action returns mandatory instructions in _action_required — YOU MUST follow them."
     )
@@ -208,6 +209,7 @@ class DashboardCardTool(llm.Tool):
                 "check_dependency",
                 "list_dashboards",
                 "get_dashboard",
+                "get_card",
                 "add_view",
                 "add_card",
                 "update_card",
@@ -222,6 +224,7 @@ class DashboardCardTool(llm.Tool):
             vol.Optional("icon", default=""): str,
             vol.Optional("content", default=""): str,
             vol.Optional("card_config", default={}): dict,
+            vol.Optional("card_yaml", default=""): str,
         }
     )
 
@@ -237,6 +240,7 @@ class DashboardCardTool(llm.Tool):
         icon = tool_input.tool_args.get("icon", "").strip() or None
         content = tool_input.tool_args.get("content", "")
         card_config = tool_input.tool_args.get("card_config", {})
+        card_yaml = tool_input.tool_args.get("card_yaml", "")
 
         try:
             if action == "check_dependency":
@@ -245,12 +249,14 @@ class DashboardCardTool(llm.Tool):
                 return await self._list_dashboards(hass)
             if action == "get_dashboard":
                 return await self._get_dashboard(hass, dashboard_url)
+            if action == "get_card":
+                return await self._get_card(hass, dashboard_url, view_index, section_index, card_index)
             if action == "add_view":
                 return await self._add_view(hass, dashboard_url, title, icon)
             if action == "add_card":
-                return await self._add_card(hass, dashboard_url, view_index, section_index, content, card_config)
+                return await self._add_card(hass, dashboard_url, view_index, section_index, content, card_config, card_yaml)
             if action == "update_card":
-                return await self._update_card(hass, dashboard_url, view_index, section_index, card_index, content, card_config)
+                return await self._update_card(hass, dashboard_url, view_index, section_index, card_index, content, card_config, card_yaml)
             if action == "remove_card":
                 return await self._remove_card(hass, dashboard_url, view_index, section_index, card_index)
             if action == "remove_view":
@@ -363,6 +369,17 @@ class DashboardCardTool(llm.Tool):
         cards = view.setdefault("cards", [])
         return cards, ""
 
+    @staticmethod
+    def _parse_card_yaml(card_yaml: str) -> tuple[dict[str, Any] | None, str]:
+        if not card_yaml.strip():
+            return None, ""
+        parsed = parse_yaml(card_yaml)
+        if not isinstance(parsed, dict):
+            return None, "card_yaml must parse to a single Lovelace card mapping"
+        if not parsed.get("type"):
+            return None, "card_yaml must include card type"
+        return parsed, ""
+
     async def _save_config(self, config_obj, ll_config: dict) -> None:
         await config_obj.async_save(ll_config)
 
@@ -452,6 +469,44 @@ class DashboardCardTool(llm.Tool):
             ),
         }
 
+    async def _get_card(
+        self,
+        hass: HomeAssistant,
+        dashboard_url: str | None,
+        view_index: int,
+        section_index: int,
+        card_index: int,
+    ) -> JsonObjectType:
+        config_obj, ll_config = await self._get_lovelace_config(hass, dashboard_url)
+        if config_obj is None:
+            return {"success": False, "error": ll_config}
+
+        views = ll_config.get("views", [])
+        if view_index < 0 or view_index >= len(views):
+            return {"success": False, "error": f"view_index {view_index} out of range"}
+
+        cards, err = self._resolve_cards(views[view_index], section_index)
+        if cards is None:
+            return {"success": False, "error": err}
+        if card_index < 0 or card_index >= len(cards):
+            return {"success": False, "error": f"card_index {card_index} out of range (0..{len(cards) - 1})"}
+
+        card = cards[card_index]
+        return {
+            "success": True,
+            "dashboard_url": dashboard_url or "lovelace",
+            "view_index": view_index,
+            "section_index": section_index,
+            "card_index": card_index,
+            "card_type": card.get("type", ""),
+            "card_config": card,
+            "card_yaml": yaml_dump(card),
+            "_instructions": (
+                "To modify this card, call DashboardCard action=update_card with the same indexes "
+                "and either card_config for partial updates or card_yaml to replace the full card."
+            ),
+        }
+
     async def _add_view(
         self, hass: HomeAssistant, dashboard_url: str | None, title: str, icon: str | None
     ) -> JsonObjectType:
@@ -509,13 +564,19 @@ class DashboardCardTool(llm.Tool):
         section_index: int,
         content: str,
         card_config: dict,
+        card_yaml: str,
     ) -> JsonObjectType:
-        if not content and not card_config:
-            return {"success": False, "error": "content or card_config is required"}
+        parsed_card, yaml_error = self._parse_card_yaml(card_yaml)
+        if yaml_error:
+            return {"success": False, "error": yaml_error}
+        if not content and not card_config and parsed_card is None:
+            return {"success": False, "error": "content, card_config, or card_yaml is required"}
 
-        dep = await self._check_dependency(hass)
-        if not dep.get("installed"):
-            return dep
+        requested_type = (parsed_card or card_config).get("type", CARD_TYPE)
+        if requested_type == CARD_TYPE:
+            dep = await self._check_dependency(hass)
+            if not dep.get("installed"):
+                return dep
 
         config_obj, ll_config = await self._get_lovelace_config(hass, dashboard_url)
         if config_obj is None:
@@ -532,10 +593,13 @@ class DashboardCardTool(llm.Tool):
         if cards is None:
             return {"success": False, "error": err}
 
-        card: dict[str, Any] = {"type": CARD_TYPE}
-        if content:
-            card["content"] = content
-        card.update(card_config)
+        if parsed_card is not None:
+            card = parsed_card
+        else:
+            card: dict[str, Any] = {"type": requested_type}
+            if content:
+                card["content"] = content
+            card.update(card_config)
 
         cards.append(card)
         await self._save_config(config_obj, ll_config)
@@ -546,12 +610,15 @@ class DashboardCardTool(llm.Tool):
             "view_index": view_index,
             "card_index": len(cards) - 1,
             "dashboard_url": dashboard_url or "lovelace",
-            "_card_config": API_CARD_CONFIG,
-            "_data_binding": API_DATA_BINDING,
-            "_pitfalls": API_PITFALLS,
-            "_efficiency": STEP4_EFFICIENCY,
+            "card_type": card.get("type", ""),
+            "card_yaml": yaml_dump(card),
             "_action_required": STEP_VERIFY,
         }
+        if card.get("type") == CARD_TYPE:
+            result["_card_config"] = API_CARD_CONFIG
+            result["_data_binding"] = API_DATA_BINDING
+            result["_pitfalls"] = API_PITFALLS
+            result["_efficiency"] = STEP4_EFFICIENCY
         if views[view_index].get("type") == "sections":
             result["section_index"] = section_index if section_index >= 0 else len(views[view_index].get("sections", [])) - 1
         return result
@@ -565,9 +632,13 @@ class DashboardCardTool(llm.Tool):
         card_index: int,
         content: str,
         card_config: dict,
+        card_yaml: str,
     ) -> JsonObjectType:
-        if not content and not card_config:
-            return {"success": False, "error": "content or card_config is required"}
+        parsed_card, yaml_error = self._parse_card_yaml(card_yaml)
+        if yaml_error:
+            return {"success": False, "error": yaml_error}
+        if not content and not card_config and parsed_card is None:
+            return {"success": False, "error": "content, card_config, or card_yaml is required"}
 
         config_obj, ll_config = await self._get_lovelace_config(hass, dashboard_url)
         if config_obj is None:
@@ -583,9 +654,11 @@ class DashboardCardTool(llm.Tool):
         if card_index < 0 or card_index >= len(cards):
             return {"success": False, "error": f"card_index {card_index} out of range (0..{len(cards) - 1})"}
 
-        if content:
+        if parsed_card is not None:
+            cards[card_index] = parsed_card
+        elif content:
             cards[card_index]["content"] = content
-        if card_config:
+        if parsed_card is None and card_config:
             cards[card_index].update(card_config)
 
         await self._save_config(config_obj, ll_config)
@@ -594,8 +667,7 @@ class DashboardCardTool(llm.Tool):
             "success": True,
             "message": f"Card updated at view {view_index}, card {card_index}",
             "current_card": cards[card_index],
-            "_js_reference": API_JS_REFERENCE,
-            "_pitfalls": API_PITFALLS,
+            "card_yaml": yaml_dump(cards[card_index]),
             "_action_required": STEP_VERIFY,
         }
 

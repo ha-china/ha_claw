@@ -61,6 +61,65 @@ def _next_id(items: list[dict]) -> str:
     return uuid.uuid4().hex[:8]
 
 
+def _coerce_bool(value: Any, default: bool = False) -> bool:
+    if isinstance(value, bool):
+        return value
+    if value is None:
+        return default
+    if isinstance(value, (int, float)):
+        return bool(value)
+    normalized = str(value).strip().lower()
+    if not normalized:
+        return default
+    if normalized in {"1", "true", "yes", "on", "enabled"}:
+        return True
+    if normalized in {"0", "false", "no", "off", "disabled"}:
+        return False
+    return default
+
+
+def _coerce_csv_list(value: Any) -> list[str]:
+    if isinstance(value, list):
+        return [str(item).strip() for item in value if str(item).strip()]
+    if value is None:
+        return []
+    return [item.strip() for item in str(value).split(",") if item.strip()]
+
+
+def _helper_runtime_status(hass: HomeAssistant, domain: str, name: str) -> dict[str, Any]:
+    expected_entity_id = f"{domain}.{_slugify(name)}"
+    registry = er.async_get(hass)
+    registry_entry = next(
+        (
+            entry
+            for entry in registry.entities.values()
+            if entry.entity_id.startswith(f"{domain}.")
+            and entry.original_name == name
+        ),
+        None,
+    )
+    entity_id = registry_entry.entity_id if registry_entry else expected_entity_id
+    state = hass.states.get(entity_id)
+    return {
+        "expected_entity_id": entity_id,
+        "registry_present": registry_entry is not None,
+        "state_present": state is not None,
+        "sync_status": "ready" if state is not None else "storage_only",
+    }
+
+
+def _helper_delete_status(hass: HomeAssistant, domain: str, name: str) -> dict[str, Any]:
+    runtime_status = _helper_runtime_status(hass, domain, name)
+    return {
+        **runtime_status,
+        "sync_status": (
+            "delete_pending"
+            if runtime_status["registry_present"] or runtime_status["state_present"]
+            else "removed"
+        ),
+    }
+
+
 class HelperManagerTool(llm.Tool):
     name = "HelperManager"
     description = """Create, list, or delete HA native helper entities (visible in Settings > Helpers).
@@ -164,7 +223,10 @@ Examples:
             data = await hass.async_add_executor_job(_read_storage, path)
             items = data.get("data", {}).get("items", [])
             if items:
-                result[domain] = items
+                result[domain] = [
+                    item | _helper_runtime_status(hass, domain, item.get("name", ""))
+                    for item in items
+                ]
 
         template_entries = []
         for entry in hass.config_entries.async_entries("template"):
@@ -195,7 +257,7 @@ Examples:
 
         if domain == "input_boolean":
             if "initial" in config:
-                item["initial"] = bool(config["initial"])
+                item["initial"] = _coerce_bool(config["initial"])
             if "icon" in config:
                 item["icon"] = config["icon"]
 
@@ -223,15 +285,15 @@ Examples:
                 item["icon"] = config["icon"]
 
         elif domain == "input_select":
-            item["options"] = list(config.get("options", []))
+            item["options"] = _coerce_csv_list(config.get("options", []))
             if "initial" in config:
                 item["initial"] = config["initial"]
             if "icon" in config:
                 item["icon"] = config["icon"]
 
         elif domain == "input_datetime":
-            item["has_date"] = bool(config.get("has_date", True))
-            item["has_time"] = bool(config.get("has_time", True))
+            item["has_date"] = _coerce_bool(config.get("has_date", True), default=True)
+            item["has_time"] = _coerce_bool(config.get("has_time", True), default=True)
             if "icon" in config:
                 item["icon"] = config["icon"]
 
@@ -241,7 +303,7 @@ Examples:
 
         elif domain == "timer":
             item["duration"] = config.get("duration", "0:00:00")
-            item["restore"] = bool(config.get("restore", False))
+            item["restore"] = _coerce_bool(config.get("restore", False))
             if "icon" in config:
                 item["icon"] = config["icon"]
 
@@ -253,7 +315,7 @@ Examples:
             if "maximum" in config:
                 item["maximum"] = int(config["maximum"])
             if "restore" in config:
-                item["restore"] = bool(config["restore"])
+                item["restore"] = _coerce_bool(config["restore"])
             if "icon" in config:
                 item["icon"] = config["icon"]
 
@@ -272,11 +334,11 @@ Examples:
         except Exception:
             _LOGGER.warning("Failed to reload %s after creating helper", domain)
 
-        expected_entity_id = f"{domain}.{_slugify(name)}"
+        runtime_status = _helper_runtime_status(hass, domain, name)
         return {
             "success": True,
             "message": f"Created {domain} helper: {name}",
-            "expected_entity_id": expected_entity_id,
+            **runtime_status,
             "item": item,
         }
 
@@ -371,6 +433,11 @@ Examples:
             if registry.async_get(target_eid):
                 registry.async_remove(target_eid)
 
-            return {"success": True, "message": f"Deleted {domain} helper: {removed.get('name', '')}"}
+            runtime_status = _helper_delete_status(hass, domain, removed.get("name", ""))
+            return {
+                "success": True,
+                "message": f"Deleted {domain} helper: {removed.get('name', '')}",
+                **runtime_status,
+            }
 
         return {"success": False, "error": f"Unsupported domain: {domain}"}

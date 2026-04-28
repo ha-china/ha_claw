@@ -16,6 +16,8 @@ from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.util import ulid
 
+from .chat_commands import ChatCommandOutcome, async_handle_chat_command
+from .chat_commands import consume_stop_request, register_running_task, unregister_running_task
 from .const import DOMAIN
 from .runtime import (
     get_default_agent,
@@ -144,46 +146,78 @@ class FallbackConversationAgent(
                 extra_system_prompt=getattr(user_input, "extra_system_prompt", None),
             )
 
-        original_async_converse = get_runtime_store(self.hass).get(
-            "original_async_converse"
-        )
-        if not callable(original_async_converse):
-            intent_response = intent.IntentResponse(language=user_input.language)
-            intent_response.async_set_error(
-                intent.IntentResponseErrorCode.UNKNOWN,
-                t("hook_not_ready", user_input.language),
-            )
-            return self._finalize_result(
-                conversation.ConversationResult(
+        command_outcome = await async_handle_chat_command(self.hass, user_input)
+        if command_outcome is not None:
+            if command_outcome.result is not None:
+                return self._finalize_result(command_outcome.result)
+            if command_outcome.rewritten_text is not None:
+                user_input = conversation.ConversationInput(
+                    text=command_outcome.rewritten_text,
                     conversation_id=user_input.conversation_id,
-                    response=intent_response,
+                    language=user_input.language,
+                    context=getattr(user_input, "context", None),
+                    device_id=getattr(user_input, "device_id", None),
+                    agent_id=getattr(user_input, "agent_id", None),
+                    satellite_id=getattr(user_input, "satellite_id", None),
+                    extra_system_prompt=getattr(user_input, "extra_system_prompt", None),
                 )
+
+        current_task = asyncio.current_task()
+        register_running_task(self.hass, user_input.conversation_id, current_task)
+        try:
+            original_async_converse = get_runtime_store(self.hass).get(
+                "original_async_converse"
             )
+            if not callable(original_async_converse):
+                intent_response = intent.IntentResponse(language=user_input.language)
+                intent_response.async_set_error(
+                    intent.IntentResponseErrorCode.UNKNOWN,
+                    t("hook_not_ready", user_input.language),
+                )
+                return self._finalize_result(
+                    conversation.ConversationResult(
+                        conversation_id=user_input.conversation_id,
+                        response=intent_response,
+                    )
+                )
 
-        native_result = await self._maybe_handle_native_intent(user_input)
-        if native_result is not None:
-            return self._finalize_result(native_result)
+            native_result = await self._maybe_handle_native_intent(user_input)
+            if native_result is not None:
+                return self._finalize_result(native_result)
 
-        extra_system_prompt = getattr(user_input, "extra_system_prompt", None)
+            extra_system_prompt = getattr(user_input, "extra_system_prompt", None)
 
-        delegated_agent_id = getattr(user_input, "agent_id", None)
-        if delegated_agent_id == self.entry.entry_id:
-            delegated_agent_id = HOME_ASSISTANT_AGENT
+            delegated_agent_id = getattr(user_input, "agent_id", None)
+            if delegated_agent_id == self.entry.entry_id:
+                delegated_agent_id = HOME_ASSISTANT_AGENT
 
-        result = await execute_conversation_turn(
-            self.hass,
-            self.entry,
-            original_async_converse,
-            text=user_input.text,
-            conversation_id=user_input.conversation_id,
-            context=getattr(user_input, "context", None),
-            language=user_input.language,
-            agent_id=delegated_agent_id,
-            device_id=getattr(user_input, "device_id", None),
-            satellite_id=getattr(user_input, "satellite_id", None),
-            extra_system_prompt=extra_system_prompt,
-        )
-        return self._finalize_result(result)
+            result = await execute_conversation_turn(
+                self.hass,
+                self.entry,
+                original_async_converse,
+                text=user_input.text,
+                conversation_id=user_input.conversation_id,
+                context=getattr(user_input, "context", None),
+                language=user_input.language,
+                agent_id=delegated_agent_id,
+                device_id=getattr(user_input, "device_id", None),
+                satellite_id=getattr(user_input, "satellite_id", None),
+                extra_system_prompt=extra_system_prompt,
+            )
+            return self._finalize_result(result)
+        except asyncio.CancelledError:
+            if consume_stop_request(self.hass, user_input.conversation_id):
+                response = intent.IntentResponse(language=user_input.language)
+                response.async_set_speech("Stopped the current run.")
+                return self._finalize_result(
+                    conversation.ConversationResult(
+                        conversation_id=user_input.conversation_id,
+                        response=response,
+                    )
+                )
+            raise
+        finally:
+            unregister_running_task(self.hass, user_input.conversation_id, current_task)
 
     async def _maybe_handle_native_intent(
         self, user_input: conversation.ConversationInput

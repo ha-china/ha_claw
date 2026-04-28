@@ -5,6 +5,7 @@ import asyncio
 import json
 import logging
 import os
+import re
 import shutil
 import sys
 import tempfile
@@ -40,6 +41,22 @@ def _installed_marker_path(hass: HomeAssistant) -> Path:
     return _sandbox_root(hass) / _INSTALLED_MARKER
 
 
+_REQ_NAME_RE = re.compile(r"([A-Za-z0-9][A-Za-z0-9._\-]*)")
+
+
+def _normalize_requirement(req: str) -> str:
+    text = req.strip()
+    if not text:
+        return ""
+    lowered = text.lower()
+    if lowered.startswith(("git+", "http://", "https://", "file://", "-e ", "--")):
+        return lowered
+    match = _REQ_NAME_RE.match(text)
+    if not match:
+        return lowered
+    return match.group(1).lower().replace("_", "-")
+
+
 def _load_installed(hass: HomeAssistant) -> set[str]:
     marker = _installed_marker_path(hass)
     if not marker.exists():
@@ -64,7 +81,10 @@ def _ensure_venv_sync(hass: HomeAssistant) -> Path:
 
     venv_dir = _venv_path(hass)
     venv_dir.parent.mkdir(parents=True, exist_ok=True)
-    LOGGER.info("Creating sandbox venv at %s", venv_dir)
+    LOGGER.info(
+        "Creating sandbox venv at %s (first-time setup, may take ~30s)",
+        venv_dir,
+    )
     builder = venv.EnvBuilder(
         system_site_packages=False,
         with_pip=True,
@@ -84,10 +104,12 @@ async def _run_subprocess(
     cwd: str | None = None,
     stdin: str | None = None,
 ) -> tuple[int, str, str]:
-    proc_env: dict[str, str] | None = None
-    if env is not None:
-        # Merge over the current environment so PATH/HOME/etc. stay usable.
-        proc_env = {**os.environ, **env}
+    base_env = {**os.environ, **(env or {})}
+    base_env.setdefault("PYTHONIOENCODING", "utf-8")
+    base_env.setdefault("PYTHONUTF8", "1")
+    base_env.setdefault("LC_ALL", "C.UTF-8")
+    base_env.setdefault("LANG", "C.UTF-8")
+    proc_env = base_env
 
     proc = await asyncio.create_subprocess_exec(
         *args,
@@ -123,12 +145,18 @@ async def ensure_sandbox_ready(
 
     python_bin = await hass.async_add_executor_job(_ensure_venv_sync, hass)
 
-    requirements = [req.strip() for req in (requirements or []) if req.strip()]
-    if not requirements:
+    cleaned = [req.strip() for req in (requirements or []) if req.strip()]
+    if not cleaned:
         return python_bin
 
     installed = await hass.async_add_executor_job(_load_installed, hass)
-    todo = [req for req in requirements if req not in installed]
+    todo: list[str] = []
+    todo_keys: list[str] = []
+    for req in cleaned:
+        key = _normalize_requirement(req)
+        if key and key not in installed:
+            todo.append(req)
+            todo_keys.append(key)
     if not todo:
         return python_bin
 
@@ -146,23 +174,46 @@ async def ensure_sandbox_ready(
             f"pip install failed (rc={rc}): {stderr.strip() or stdout.strip()}"
         )
 
-    installed.update(todo)
+    installed.update(todo_keys)
     await hass.async_add_executor_job(_save_installed, hass, installed)
     return python_bin
 
 
 _RUNNER_PROLOGUE = """\
-import json, sys, traceback
+import ast as __ast
+import json as __json
+import sys as __sys
+import traceback as __traceback
+
 def __emit(payload):
-    sys.stdout.write('\\x00KADERMGR_RESULT\\x00' + json.dumps(payload, default=str))
+    __sys.stdout.write('\\x00KADERMGR_RESULT\\x00' + __json.dumps(payload, default=str))
+    __sys.stdout.flush()
+
+__code = __USER_CODE__
+__auto_key = '__auto_result__'
+__local = {}
 try:
-    __local = {}
-    __code = __USER_CODE__
-    exec(__code, __local, __local)
-    __result = __local.get('result')
+    __tree = __ast.parse(__code, mode='exec')
+    if __tree.body and isinstance(__tree.body[-1], __ast.Expr):
+        __last = __tree.body[-1]
+        __assign = __ast.Assign(
+            targets=[__ast.Name(id=__auto_key, ctx=__ast.Store())],
+            value=__last.value,
+        )
+        __ast.copy_location(__assign, __last)
+        __tree.body[-1] = __assign
+        __ast.fix_missing_locations(__tree)
+    __compiled = compile(__tree, '<sandbox>', 'exec')
+    exec(__compiled, __local, __local)
+    if 'result' in __local:
+        __result = __local['result']
+    elif __auto_key in __local:
+        __result = __local[__auto_key]
+    else:
+        __result = None
     __emit({'ok': True, 'result': __result})
 except Exception as __err:
-    __emit({'ok': False, 'error': repr(__err), 'traceback': traceback.format_exc()})
+    __emit({'ok': False, 'error': repr(__err), 'traceback': __traceback.format_exc()})
 """
 
 

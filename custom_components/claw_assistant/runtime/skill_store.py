@@ -6,6 +6,7 @@ from copy import deepcopy
 from dataclasses import dataclass
 from difflib import SequenceMatcher
 from functools import partial
+import os
 from pathlib import Path
 import re
 from typing import Any
@@ -114,6 +115,15 @@ class SkillDocument:
     content: str
     description: str = ""
     keywords: tuple[str, ...] = ()
+    category: str = ""
+    tags: tuple[str, ...] = ()
+    platforms: tuple[str, ...] = ()
+    requires_toolsets: tuple[str, ...] = ()
+    fallback_for_toolsets: tuple[str, ...] = ()
+    requires_tools: tuple[str, ...] = ()
+    fallback_for_tools: tuple[str, ...] = ()
+    required_environment_variables: tuple[str, ...] = ()
+    config_keys: tuple[str, ...] = ()
 
 
 @dataclass(slots=True, frozen=True)
@@ -256,6 +266,97 @@ def _extract_keywords(
     return tuple(keywords)
 
 
+def _normalize_string_tuple(raw: Any) -> tuple[str, ...]:
+    values = _iter_frontmatter_values(raw)
+    return tuple(
+        dict.fromkeys(value.strip() for value in values if value and value.strip())
+    )
+
+
+def _frontmatter_metadata(frontmatter: dict[str, Any]) -> dict[str, Any]:
+    metadata = frontmatter.get("metadata")
+    if not isinstance(metadata, dict):
+        return {}
+    claw = metadata.get("claw")
+    if isinstance(claw, dict):
+        return claw
+    hermes = metadata.get("hermes")
+    if isinstance(hermes, dict):
+        return hermes
+    return {}
+
+
+def _extract_category(frontmatter: dict[str, Any]) -> str:
+    metadata = _frontmatter_metadata(frontmatter)
+    category = str(metadata.get("category", "")).strip()
+    if category:
+        return category
+    return str(frontmatter.get("category", "")).strip()
+
+
+def _extract_tags(frontmatter: dict[str, Any]) -> tuple[str, ...]:
+    metadata = _frontmatter_metadata(frontmatter)
+    tags = _normalize_string_tuple(metadata.get("tags"))
+    if tags:
+        return tags
+    return _normalize_string_tuple(frontmatter.get("tags"))
+
+
+def _extract_platforms(frontmatter: dict[str, Any]) -> tuple[str, ...]:
+    return _normalize_string_tuple(frontmatter.get("platforms"))
+
+
+def _extract_tool_visibility(
+    frontmatter: dict[str, Any]
+) -> tuple[tuple[str, ...], tuple[str, ...], tuple[str, ...], tuple[str, ...]]:
+    metadata = _frontmatter_metadata(frontmatter)
+    requires_toolsets = _normalize_string_tuple(metadata.get("requires_toolsets"))
+    fallback_for_toolsets = _normalize_string_tuple(metadata.get("fallback_for_toolsets"))
+    requires_tools = _normalize_string_tuple(metadata.get("requires_tools"))
+    fallback_for_tools = _normalize_string_tuple(metadata.get("fallback_for_tools"))
+    return (
+        requires_toolsets,
+        fallback_for_toolsets,
+        requires_tools,
+        fallback_for_tools,
+    )
+
+
+def _extract_required_environment_variables(frontmatter: dict[str, Any]) -> tuple[str, ...]:
+    raw = frontmatter.get("required_environment_variables")
+    if isinstance(raw, dict):
+        raw = [raw]
+    if not isinstance(raw, list):
+        return ()
+    envs: list[str] = []
+    for entry in raw:
+        if isinstance(entry, str):
+            envs.append(entry.strip())
+            continue
+        if isinstance(entry, dict):
+            name = str(entry.get("name") or entry.get("env_var") or "").strip()
+            if name:
+                envs.append(name)
+    return tuple(dict.fromkeys(env for env in envs if env))
+
+
+def _extract_config_keys(frontmatter: dict[str, Any]) -> tuple[str, ...]:
+    metadata = _frontmatter_metadata(frontmatter)
+    raw = metadata.get("config")
+    if isinstance(raw, dict):
+        raw = [raw]
+    if not isinstance(raw, list):
+        return ()
+    keys: list[str] = []
+    for entry in raw:
+        if not isinstance(entry, dict):
+            continue
+        key = str(entry.get("key", "")).strip()
+        if key:
+            keys.append(key)
+    return tuple(dict.fromkeys(keys))
+
+
 def infer_skill_name(default_name: str, content: str) -> str:
 
     frontmatter = _parse_frontmatter(content)
@@ -288,6 +389,12 @@ def _skill_document_from_path(path: Path, content: str) -> SkillDocument:
     frontmatter = _parse_frontmatter(content)
     title = _title_from_content(path.stem, content)
     description = _extract_description(title, content, frontmatter)
+    (
+        requires_toolsets,
+        fallback_for_toolsets,
+        requires_tools,
+        fallback_for_tools,
+    ) = _extract_tool_visibility(frontmatter)
     return SkillDocument(
         slug=path.stem,
         file_name=path.name,
@@ -302,6 +409,15 @@ def _skill_document_from_path(path: Path, content: str) -> SkillDocument:
             content=content,
             frontmatter=frontmatter,
         ),
+        category=_extract_category(frontmatter),
+        tags=_extract_tags(frontmatter),
+        platforms=_extract_platforms(frontmatter),
+        requires_toolsets=requires_toolsets,
+        fallback_for_toolsets=fallback_for_toolsets,
+        requires_tools=requires_tools,
+        fallback_for_tools=fallback_for_tools,
+        required_environment_variables=_extract_required_environment_variables(frontmatter),
+        config_keys=_extract_config_keys(frontmatter),
     )
 
 
@@ -334,6 +450,19 @@ def _prompt_store_signature() -> tuple[str, ...]:
     return tuple(signature)
 
 
+# Internal sync metadata embedded as HTML comments at the very top of a
+# bundled markdown file (e.g. `<!-- version: 2 -->`) used by data_path's
+# per-file version sync. Strip them on load so they never leak into prompts
+# or tool responses.
+_META_MARKER_RE = re.compile(
+    r"\A(?:\s*<!--\s*[A-Za-z][\w-]*\s*:[^>]*-->\s*)+",
+)
+
+
+def _strip_meta_markers(content: str) -> str:
+    return _META_MARKER_RE.sub("", content, count=1).lstrip()
+
+
 def _read_prompt_store_from_disk() -> PromptStoreSnapshot:
 
     ensure_skill_store()
@@ -341,18 +470,24 @@ def _read_prompt_store_from_disk() -> PromptStoreSnapshot:
     master_prompt = ""
     mpp = _master_prompt_path()
     if mpp.exists():
-        master_prompt = mpp.read_text(encoding="utf-8").strip()
+        master_prompt = _strip_meta_markers(
+            mpp.read_text(encoding="utf-8")
+        ).strip()
 
     skills: list[SkillDocument] = []
     for path in sorted(_skills_dir().glob("*.md")):
-        content = path.read_text(encoding="utf-8").strip()
+        content = _strip_meta_markers(
+            path.read_text(encoding="utf-8")
+        ).strip()
         if not content:
             continue
         skills.append(_skill_document_from_path(path, content))
 
     runtime_prompt_docs: list[PromptDocument] = []
     for path in sorted(_prompts_dir().glob("*.md")):
-        content = path.read_text(encoding="utf-8").strip()
+        content = _strip_meta_markers(
+            path.read_text(encoding="utf-8")
+        ).strip()
         if not content:
             continue
         runtime_prompt_docs.append(_prompt_document_from_path(path, content))
@@ -578,6 +713,16 @@ def _build_installed_skill_match_fields(
     fields = [skill.slug.lower(), skill.file_name.lower(), skill.title.lower()]
     if skill.description:
         fields.append(skill.description.lower())
+    if skill.category:
+        fields.append(skill.category.lower())
+    fields.extend(tag.lower() for tag in skill.tags)
+    fields.extend(platform.lower() for platform in skill.platforms)
+    fields.extend(toolset.lower() for toolset in skill.requires_toolsets)
+    fields.extend(toolset.lower() for toolset in skill.fallback_for_toolsets)
+    fields.extend(tool.lower() for tool in skill.requires_tools)
+    fields.extend(tool.lower() for tool in skill.fallback_for_tools)
+    fields.extend(env.lower() for env in skill.required_environment_variables)
+    fields.extend(key.lower() for key in skill.config_keys)
     fields.extend(keyword.lower() for keyword in keywords)
     return list(dict.fromkeys(field for field in fields if field))
 
@@ -595,7 +740,16 @@ def _build_installed_skill_metadata(skill: SkillDocument) -> dict[str, str | lis
         "file": skill.file_name,
         "chars": str(len(skill.content)),
         "description": skill.description,
+        "category": skill.category,
+        "tags": list(skill.tags),
+        "platforms": list(skill.platforms),
+        "requires_toolsets": list(skill.requires_toolsets),
+        "fallback_for_toolsets": list(skill.fallback_for_toolsets),
         "keywords": keywords,
+        "requires_tools": list(skill.requires_tools),
+        "fallback_for_tools": list(skill.fallback_for_tools),
+        "required_environment_variables": list(skill.required_environment_variables),
+        "config_keys": list(skill.config_keys),
         "use_for": use_for,
         "avoid_for": avoid_for,
         "route_to": route_to,
@@ -649,6 +803,96 @@ def filter_installed_skills(keyword: str) -> list[dict[str, str | list[str] | di
     return [item for item in skills if _installed_skill_matches_keyword(item, normalized_keyword)]
 
 
+def skill_matches_visibility(
+    skill: dict[str, Any],
+    *,
+    channel_type: str = "ha",
+    tool_names: set[str] | None = None,
+    toolsets: set[str] | None = None,
+) -> bool:
+    visible_platforms = {
+        str(item).strip().lower()
+        for item in skill.get("platforms", [])
+        if str(item).strip()
+    }
+    if visible_platforms:
+        normalized_channel = channel_type.strip().lower() or "ha"
+        accepted = {"all", normalized_channel}
+        if normalized_channel == "ha":
+            accepted.add("homeassistant")
+        else:
+            accepted.add("im")
+        if visible_platforms.isdisjoint(accepted):
+            return False
+
+    available_tools = {name.strip() for name in (tool_names or set()) if name.strip()}
+    available_toolsets = {
+        name.strip().lower() for name in (toolsets or set()) if name and name.strip()
+    }
+    required_toolsets = {
+        str(item).strip().lower()
+        for item in skill.get("requires_toolsets", [])
+        if str(item).strip()
+    }
+    if required_toolsets and not required_toolsets.issubset(available_toolsets):
+        return False
+
+    fallback_for_toolsets = {
+        str(item).strip().lower()
+        for item in skill.get("fallback_for_toolsets", [])
+        if str(item).strip()
+    }
+    if fallback_for_toolsets and fallback_for_toolsets.intersection(available_toolsets):
+        return False
+
+    required_tools = {
+        str(item).strip()
+        for item in skill.get("requires_tools", [])
+        if str(item).strip()
+    }
+    if required_tools and not required_tools.issubset(available_tools):
+        return False
+
+    fallback_for_tools = {
+        str(item).strip()
+        for item in skill.get("fallback_for_tools", [])
+        if str(item).strip()
+    }
+    if fallback_for_tools and fallback_for_tools.intersection(available_tools):
+        return False
+
+    return True
+
+
+def filter_visible_installed_skills(
+    *,
+    keyword: str = "",
+    channel_type: str = "ha",
+    tool_names: set[str] | None = None,
+    toolsets: set[str] | None = None,
+) -> list[dict[str, str | list[str] | dict[str, object]]]:
+    skills = filter_installed_skills(keyword)
+    return [
+        skill
+        for skill in skills
+        if skill_matches_visibility(
+            skill,
+            channel_type=channel_type,
+            tool_names=tool_names,
+            toolsets=toolsets,
+        )
+    ]
+
+
+def get_missing_required_environment_variables(skill: dict[str, Any]) -> list[str]:
+    missing: list[str] = []
+    for env_name in skill.get("required_environment_variables", []):
+        normalized = str(env_name).strip()
+        if normalized and not os.environ.get(normalized):
+            missing.append(normalized)
+    return missing
+
+
 def _is_homeassistant_priority_skill(skill: SkillDocument) -> bool:
     lookup_values = (
         skill.slug.lower(),
@@ -680,13 +924,21 @@ def _score_skill_match(skill: SkillDocument, query: str, query_tokens: tuple[str
     title = skill.title.lower()
     slug = skill.slug.lower()
     description = skill.description.lower()
+    category = skill.category.lower()
+    tags = " ".join(tag.lower() for tag in skill.tags)
     keywords = " ".join(skill.keywords)
     content = skill.content.lower()
 
     if normalized_query in title:
         score += 16
+    if normalized_query in slug:
+        score += 14
     if normalized_query in description:
         score += 12
+    if category and normalized_query in category:
+        score += 12
+    if tags and normalized_query in tags:
+        score += 11
     if normalized_query in keywords:
         score += 10
     if normalized_query in content:
@@ -695,6 +947,10 @@ def _score_skill_match(skill: SkillDocument, query: str, query_tokens: tuple[str
     for token in query_tokens:
         if token in title or token in slug:
             score += 8
+        if category and token in category:
+            score += 6
+        if tags and token in tags:
+            score += 6
         if token in description:
             score += 5
         if token in keywords:
@@ -710,7 +966,15 @@ def _score_skill_match(skill: SkillDocument, query: str, query_tokens: tuple[str
         desc_ratio = SequenceMatcher(None, normalized_query, description).ratio()
         if desc_ratio >= 0.5:
             score += int(desc_ratio * 8)
+        if category:
+            category_ratio = SequenceMatcher(None, normalized_query, category).ratio()
+            if category_ratio >= 0.6:
+                score += int(category_ratio * 8)
         for token in query_tokens:
+            for tag in skill.tags:
+                tag_ratio = SequenceMatcher(None, token, tag.lower()).ratio()
+                if tag_ratio >= 0.75:
+                    score += int(tag_ratio * 5)
             for kw in skill.keywords:
                 kw_ratio = SequenceMatcher(None, token, kw.lower()).ratio()
                 if kw_ratio >= 0.7:
@@ -857,6 +1121,13 @@ def get_installed_skill(identifier: str) -> dict[str, str]:
                 "file": skill.file_name,
                 "markdown": skill.content,
                 "description": skill.description,
+                "category": skill.category,
+                "tags": list(skill.tags),
+                "platforms": list(skill.platforms),
+                "requires_tools": list(skill.requires_tools),
+                "fallback_for_tools": list(skill.fallback_for_tools),
+                "required_environment_variables": list(skill.required_environment_variables),
+                "config_keys": list(skill.config_keys),
             }
 
     for skill in _ensure_prompt_store_fresh().skills:
@@ -868,6 +1139,13 @@ def get_installed_skill(identifier: str) -> dict[str, str]:
                 "file": skill.file_name,
                 "markdown": skill.content,
                 "description": skill.description,
+                "category": skill.category,
+                "tags": list(skill.tags),
+                "platforms": list(skill.platforms),
+                "requires_tools": list(skill.requires_tools),
+                "fallback_for_tools": list(skill.fallback_for_tools),
+                "required_environment_variables": list(skill.required_environment_variables),
+                "config_keys": list(skill.config_keys),
             }
 
     raise ValueError(f"Skill not found: {identifier}")

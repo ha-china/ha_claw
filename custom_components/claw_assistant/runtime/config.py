@@ -21,3 +21,5 @@ class RuntimeThresholds:
 
 
 DEFAULT_THRESHOLDS = RuntimeThresholds()
+
+DEFAULT_FALLBACK_AGENT_ID = "conversation.home_assistant"

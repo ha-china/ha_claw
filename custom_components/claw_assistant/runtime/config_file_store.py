@@ -15,8 +15,9 @@ from .state import get_config_approval_state, get_task_loop_state
 
 _PREVIEW_LIMIT = 1200
 _READ_LIMIT = 20000
-_CONFIRM_WORDS = frozenset({"确认", "同意", "可以", "执行", "apply", "confirm", "yes", "y", "ok"})
-_CANCEL_WORDS = frozenset({"取消", "不用", "停止", "cancel", "no", "n"})
+# Actions that are reversible enough to skip user-consent gating entirely.
+# Only `delete` is destructive and requires explicit AI-asserted consent.
+_ACTIONS_REQUIRING_CONFIRMATION: frozenset[str] = frozenset({"delete"})
 
 
 def _now_iso() -> str:
@@ -184,41 +185,37 @@ def list_pending_operations(hass: HomeAssistant) -> list[dict[str, Any]]:
     return list(state.get("pending", {}).values())
 
 
-def _last_user_text(hass: HomeAssistant) -> str:
-    history = get_task_loop_state(hass).get("history", [])
-    for item in reversed(history):
-        if item.get("role") == "user":
-            return str(item.get("content", "")).strip().lower()
-    return ""
+def apply_staged_operation_sync(
+    hass: HomeAssistant,
+    approval_id: str,
+    *,
+    user_consent: bool = False,
+    consent_quote: str = "",
+) -> dict[str, Any]:
+    """Apply a staged operation.
 
+    Consent model (no token dictionaries, no history scanning):
+      * write / append / mkdir are reversible and apply unconditionally.
+      * delete requires ``user_consent=True``. The AI is responsible for
+        having actually asked the user in chat and judging the reply.
+        ``consent_quote`` is optional audit metadata (the user's own
+        words); it is only stored, never matched against a dictionary.
+    """
 
-def _has_user_confirmation(hass: HomeAssistant, approval_id: str) -> bool:
-    last_choice = get_task_loop_state(hass).get("last_choice") or {}
-    if last_choice.get("id") == f"config_apply:{approval_id}":
-        return True
-    last_text = _last_user_text(hass)
-    return last_text in _CONFIRM_WORDS
-
-
-def _has_user_cancellation(hass: HomeAssistant, approval_id: str) -> bool:
-    last_choice = get_task_loop_state(hass).get("last_choice") or {}
-    if last_choice.get("id") == f"config_cancel:{approval_id}":
-        return True
-    last_text = _last_user_text(hass)
-    return last_text in _CANCEL_WORDS
-
-
-def apply_staged_operation_sync(hass: HomeAssistant, approval_id: str) -> dict[str, Any]:
     state = get_config_approval_state(hass)
     operation = state.get("pending", {}).get(approval_id)
     if not operation:
         raise ValueError(f"Pending approval not found: {approval_id}")
-    if _has_user_cancellation(hass, approval_id):
-        state["pending"].pop(approval_id, None)
-        state["last_resolution"] = {"approval_id": approval_id, "status": "cancelled"}
-        return {"approval_id": approval_id, "status": "cancelled"}
-    if not _has_user_confirmation(hass, approval_id):
-        raise PermissionError("User confirmation is required before applying config changes")
+    if (
+        operation["action"] in _ACTIONS_REQUIRING_CONFIRMATION
+        and not user_consent
+    ):
+        raise PermissionError(
+            "This is a destructive delete. Ask the user in chat what should be "
+            "deleted and why, decide whether their reply is an agreement, then "
+            "retry apply with user_consent=true (and consent_quote=\"<their words>\" "
+            "for audit)."
+        )
 
     target = _resolve_config_path(hass, operation["path"])
     _apply_operation(
@@ -228,18 +225,16 @@ def apply_staged_operation_sync(hass: HomeAssistant, approval_id: str) -> dict[s
         create_dirs=bool(operation.get("create_dirs", False)),
     )
     state["pending"].pop(approval_id, None)
-    state["last_resolution"] = {
+    resolution: dict[str, Any] = {
         "approval_id": approval_id,
         "status": "applied",
         "path": operation["path"],
         "action": operation["action"],
     }
-    return {
-        "approval_id": approval_id,
-        "status": "applied",
-        "path": operation["path"],
-        "action": operation["action"],
-    }
+    if operation["action"] in _ACTIONS_REQUIRING_CONFIRMATION:
+        resolution["consent_quote"] = consent_quote.strip()
+    state["last_resolution"] = resolution
+    return dict(resolution)
 
 
 def cancel_staged_operation(hass: HomeAssistant, approval_id: str) -> dict[str, Any]:
@@ -283,6 +278,10 @@ def build_config_approval_prompt_block(hass: HomeAssistant) -> str:
             f"Last resolution: approval_id={last.get('approval_id')} status={last.get('status')}"
         )
     lines.append(
-        "Rule: do not apply staged config changes until the user explicitly confirms."
+        "Rules: write/append/mkdir auto-apply on `apply` (reversible). "
+        "delete is destructive — first describe in chat what will be deleted "
+        "and why, judge the user's reply yourself, and only then call `apply` "
+        "with user_consent=true (and consent_quote=<their words> for audit). "
+        "If they decline, call `cancel`."
     )
     return "\n".join(lines)

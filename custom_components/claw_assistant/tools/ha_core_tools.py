@@ -126,6 +126,7 @@ class GetSystemIndexTool(llm.Tool):
 - people: people entities and states
 - automations: automation list
 - scripts: script list
+- base_url: resolved public URL of this Home Assistant instance (empty string when not configured)
 
 The index is cached for 5 minutes and refreshes automatically when state changes."""
     parameters = vol.Schema({vol.Optional("force_refresh", default=False): bool})
@@ -134,13 +135,19 @@ The index is cached for 5 minutes and refreshes automatically when state changes
         self, hass: HomeAssistant, tool_input: llm.ToolInput, llm_context: llm.LLMContext
     ) -> JsonObjectType:
         from ..index_manager import get_index_manager
+        from ..runtime.data_path import get_ha_base_url
 
         force_refresh = tool_input.tool_args.get("force_refresh", False)
         manager = await get_index_manager(hass, llm_context.assistant)
         if force_refresh:
             await manager._async_refresh_index()
         index = await manager.get_index()
-        return {"success": True, "cached": not force_refresh, **index}
+        return {
+            "success": True,
+            "cached": not force_refresh,
+            "base_url": get_ha_base_url(hass) or "",
+            **index,
+        }
 
 
 class SetConversationStateTool(llm.Tool):
@@ -448,21 +455,29 @@ class ConfigFileTool(llm.Tool):
 Available actions:
 - action=list: list a directory
 - action=read: read a file
-- action=stage_write: stage a write and wait for confirmation
-- action=stage_append: stage an append and wait for confirmation
-- action=stage_mkdir: stage directory creation and wait for confirmation
-- action=stage_delete: stage file or directory deletion and wait for confirmation
-- action=apply: apply a staged operation after user confirmation
+- action=stage_write / stage_append / stage_mkdir: stage a non-destructive change
+- action=stage_delete: stage a file or directory deletion (destructive)
+- action=apply: apply a staged operation
 - action=cancel: cancel a staged operation
 - action=list_pending: list pending operations
 
-Rules:
-- Only paths inside the Home Assistant config directory are allowed
-- Any write must be staged first, then applied after user confirmation
+Policy (text-driven, NO UI buttons exist; YOU judge the user's intent):
+- write/append/mkdir auto-apply on `apply` (reversible; no consent needed).
+  You may still stage first if you want to show the user the diff.
+- delete is destructive. The pipeline is:
+    1. stage_delete the path → get an approval_id.
+    2. In your chat reply, describe exactly what will be deleted and why.
+    3. Wait for the user's next message and JUDGE IT YOURSELF — there is no
+       hardcoded keyword list. If you understand them as agreeing, call
+       `apply` with user_consent=true and consent_quote="<their literal words>".
+       If you understand them as declining or unsure, call `cancel` (or ask
+       a clarifying question first).
+    4. Without user_consent=true, `apply` will refuse the delete.
+- Only paths inside the Home Assistant config directory are allowed.
 
 IMPORTANT: For core config files (automations.yaml / configuration.yaml / sensors.yaml),
-politely explain to the user what you want to change and why, then wait for explicit confirmation
-before staging any write. Prefer the Automation tool for automation edits. Reading these files is fine."""
+still politely explain the change to the user and prefer the Automation tool for
+automation edits. Reading these files is always fine."""
     parameters = vol.Schema(
         {
             vol.Required("action"): vol.In(
@@ -483,6 +498,8 @@ before staging any write. Prefer the Automation tool for automation edits. Readi
             vol.Optional("approval_id", default=""): str,
             vol.Optional("create_dirs", default=False): bool,
             vol.Optional("include_hidden", default=False): bool,
+            vol.Optional("user_consent", default=False): bool,
+            vol.Optional("consent_quote", default=""): str,
         }
     )
 
@@ -495,6 +512,8 @@ before staging any write. Prefer the Automation tool for automation edits. Readi
         approval_id = tool_input.tool_args.get("approval_id", "")
         create_dirs = bool(tool_input.tool_args.get("create_dirs", False))
         include_hidden = bool(tool_input.tool_args.get("include_hidden", False))
+        user_consent = bool(tool_input.tool_args.get("user_consent", False))
+        consent_quote = str(tool_input.tool_args.get("consent_quote", ""))
 
         try:
             if action == "list":
@@ -525,16 +544,35 @@ before staging any write. Prefer the Automation tool for automation edits. Readi
                     content=content,
                     create_dirs=create_dirs,
                 )
+                if stage_action == "delete":
+                    message = (
+                        "Staged a destructive delete. Tell the user IN CHAT what "
+                        "will be deleted and why, wait for their reply, JUDGE "
+                        "yourself whether they agreed, then call action='apply' "
+                        "with user_consent=true and consent_quote=\"<their words>\". "
+                        "If you decide they declined, call action='cancel'."
+                    )
+                else:
+                    message = (
+                        "Staged. Call action='apply' with this approval_id to "
+                        "execute (no confirmation required for non-delete)."
+                    )
                 return {
                     "success": True,
-                    "message": "Created a staged operation and waiting for user confirmation",
+                    "message": message,
                     **operation,
                 }
 
             if action == "apply":
-                result = await hass.async_add_executor_job(
-                    apply_staged_operation_sync, hass, approval_id
-                )
+                def _apply():
+                    return apply_staged_operation_sync(
+                        hass,
+                        approval_id,
+                        user_consent=user_consent,
+                        consent_quote=consent_quote,
+                    )
+
+                result = await hass.async_add_executor_job(_apply)
                 return {"success": True, **result}
 
             if action == "cancel":
@@ -944,6 +982,7 @@ class RegistryTool(llm.Tool):
         "Actions: list, get, create, update, delete, remove, rename, expose. "
         "Top-level fields: registry, action, area_id, floor_id, label_id, category_id, entity_id, scope, params. "
         "label get/update/delete accept label_id or name. label create is idempotent by name. "
+        "For label rename, use action=update with params={name: new_name}; label action=rename is treated as update. "
         "entity params support labels (replace), labels_add (append), labels_remove. "
         "Each label item may be an id, a name, or an object with name/icon/color/description; "
         "unknown names are auto-created, existing labels have missing fields filled in only. "
@@ -970,6 +1009,8 @@ class RegistryTool(llm.Tool):
         registry_type = tool_input.tool_args.get("registry", "")
         action = tool_input.tool_args.get("action", "")
         params = tool_input.tool_args.get("params") or {}
+        if registry_type == "label" and action == "rename":
+            action = "update"
 
         try:
             if registry_type == "area":

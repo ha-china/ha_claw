@@ -2,15 +2,14 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable
 import logging
 import re
-from typing import Any
 
 from custom_components.claw_assistant.const import (
     CONVERSATION_MODE_ADD_NAME,
     CONVERSATION_MODE_DETAILED,
 )
+from .agent_fallback import get_agent_name, is_error_response
 
 from .internal_llm import (
     _MAX_SYSTEM_PROMPT_CHARS,
@@ -119,13 +118,11 @@ async def process_ai_summary(
     extra_system_prompt,
     device_id,
     satellite_id,
-    get_agent_name: Callable[[str], str],
-    is_error_response: Callable[[Any], bool],
 ):
     has_summary_agent = len(fallback_agents) >= 3
     processing_agents = fallback_agents[:-1] if has_summary_agent else fallback_agents
     summary_agent = fallback_agents[-1] if has_summary_agent else ""
-    summary_agent_name = get_agent_name(summary_agent) if summary_agent else ""
+    summary_agent_name = get_agent_name(hass, summary_agent) if summary_agent else ""
 
     primary_responses = []
     base_result = None
@@ -153,12 +150,12 @@ async def process_ai_summary(
                 resp_text = sanitize_response_text(
                     proc_result.response.speech["plain"].get("speech", "").strip()
                 )
-                if resp_text and not is_error_response(proc_result):
+                if resp_text and not is_error_response(hass, proc_result):
                     if base_result is None:
                         base_result = proc_result
                     primary_responses.append(
                         {
-                            "agent_name": get_agent_name(proc_agent),
+                            "agent_name": get_agent_name(hass, proc_agent),
                             "response": resp_text,
                         }
                     )
@@ -215,7 +212,7 @@ async def process_ai_summary(
         ):
             raw_text = summary_result.response.speech["plain"].get("speech", "").strip()
             raw_text = sanitize_response_text(raw_text)
-            if raw_text and not is_error_response(summary_result):
+            if raw_text and not is_error_response(hass, summary_result):
                 analysis_part = ""
                 summary_part = raw_text
                 analysis_match = re.search(

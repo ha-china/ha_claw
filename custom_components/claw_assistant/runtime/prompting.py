@@ -135,6 +135,9 @@ def _build_peer_agents_section(
     ent_reg = er.async_get(hass)
     current_aid = str(get_conversation_status(hass).get("current_agent_id", "") or "")
 
+    # Only list peers — never reveal the model's own identity to itself.
+    # Knowing who "you" are leaks implementation details and encourages
+    # brand-specific behavior we don't want.
     entries: list[str] = []
     seen: set[str] = set()
     for key in (CONF_PRIMARY_AGENT, CONF_FALLBACK_AGENT, CONF_SECONDARY_FALLBACK_AGENT):
@@ -142,17 +145,23 @@ def _build_peer_agents_section(
         if not aid or aid in seen:
             continue
         seen.add(aid)
+        if aid == current_aid:
+            continue  # skip self
         ent = ent_reg.async_get(aid)
         name = (ent.name or ent.original_name) if ent else aid.split(".")[-1]
-        tag = " ← you" if aid == current_aid else ""
-        entries.append(f"- {name}{tag}")
+        entries.append(f"- {name}")
 
-    if len(entries) < 2:
+    if not entries:
         return ""
 
-    you_name = next((e.name or e.original_name for aid in [current_aid] for e in [ent_reg.async_get(aid)] if e), current_aid.split(".")[-1] if current_aid else "")
-    header = f"You are: **{you_name}**\n" if you_name else ""
-    return "## Peer AI Agents\n" + header + "\n".join(entries) + "\nUse friendly names only when referring to peers in user-facing replies."
+    return (
+        "## Peer AI Agents\n"
+        "You have peer AIs available for consultation via the `AgentHandoff` tool. "
+        "Use them when you want a second opinion, hit a blocker outside your strengths, "
+        "or the user explicitly asks for another agent.\n"
+        + "\n".join(entries)
+        + "\nUse friendly names only when referring to peers in user-facing replies."
+    )
 
 
 def build_base_prompt(

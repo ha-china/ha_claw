@@ -72,7 +72,6 @@ def build_conversation_runtime_config(
 def build_conversation_runtime_config_for_hass(
     entry: ConfigEntry, hass
 ) -> ConversationRuntimeConfig:
-
     return build_conversation_runtime_config(
         entry,
         get_global_state(hass),

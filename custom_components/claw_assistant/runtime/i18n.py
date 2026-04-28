@@ -14,8 +14,12 @@ _MESSAGES: dict[str, dict[str, str]] = {
         "en": "Iteration budget exhausted. Please start a new conversation.",
     },
     "hook_not_ready": {
-        "zh": "运行时钩子未初始化",
+        "zh": "运行时钩子未初始化，请重新启动系统生效",
         "en": "claw_assistant runtime hook is not initialized",
+    },
+    "attachment_only_input": {
+        "zh": "用户发送了一张图片，请描述其内容。",
+        "en": "The user sent an image, please describe its content.",
     },
 }
 

@@ -62,6 +62,16 @@ _HEARTBEAT_KEYWORDS = (
 )
 _MAX_MEMORY_LINES = 20
 _MAX_MEMORY_CHARS = 2000
+_DOC_PURPOSES = {
+    "SOUL": "communication style and tone",
+    "IDENTITY": "confirmed assistant identity facts (name, persona, vibe, emoji)",
+    "USER": "confirmed objective user facts (name, timezone, pronouns, household context)",
+    "MEMORY": "long-term user preferences and durable constraints (address preference, reply style, operational habits)",
+    "TOOLS": "environment notes, entity/service identifiers, credentials when explicitly provided by user",
+    "HEARTBEAT": "follow-up tasks, managed through HeartbeatManager",
+    "BOOTSTRAP": "first-run collection flow",
+    "AGENTS": "workspace governance rules",
+}
 
 
 @dataclass(slots=True, frozen=True)
@@ -126,6 +136,23 @@ def _normalize_doc_name(name: str) -> str:
 def _doc_path(name: str) -> Path:
     normalized = _normalize_doc_name(name)
     return _workspace_dir() / f"{normalized}.md"
+
+
+def _workspace_governance_block() -> str:
+    lines = [
+        "### Workspace Governance",
+        "Each workspace markdown is a strict typed store with a single purpose.",
+        "Before writing, always read the target document first and apply the smallest confirmed change.",
+        "Never invent values to fill empty templates. Never move facts between files unless explicitly asked.",
+        "Same-category facts must use a single canonical key; do not create duplicate keys for one concept.",
+        "All workspace markdown is automatically indexed into a graph memory "
+        "(SQLite + FTS5, BM25 ranked, time decay, typed edges). "
+        "Use the **MemoryGraph** tool to recall durable facts, link causes/effects, "
+        "or remember decisions and bug fixes that do not belong in any single markdown.",
+        "Allowed scope per document:",
+    ]
+    lines.extend(f"- **{name}.md** — {purpose}." for name, purpose in _DOC_PURPOSES.items())
+    return "\n".join(lines)
 
 
 def _read_workspace_state() -> dict[str, bool]:
@@ -312,6 +339,13 @@ async def async_save_workspace_doc(
     path = _doc_path(name)
     saved_path = await hass.async_add_executor_job(_write_doc, path, markdown)
     await async_refresh_workspace_store(hass)
+    # Lazy import: graph_service depends on workspace_store at bootstrap.
+    try:
+        from .graph_service import async_reindex_doc  # noqa: PLC0415
+
+        await async_reindex_doc(hass, _normalize_doc_name(name), markdown)
+    except Exception:  # noqa: BLE001 - never block save on indexer
+        LOGGER.exception("Graph reindex after save of %s failed", name)
     return saved_path
 
 
@@ -388,6 +422,23 @@ def _tokenize_memory_query(text: str) -> tuple[str, ...]:
 def _build_memory_prompt_block(memory_markdown: str, user_text: str) -> str:
     if not memory_markdown.strip():
         return ""
+
+    # Prefer graph-backed recall: ranked, deduped, decay-aware, edge-expanded.
+    # Falls back to the legacy keyword scan when the store is not ready or
+    # the query is too short to produce hits.
+    graph_lines: list[str] = []
+    try:
+        from .graph_service import recall_memory_lines_sync  # noqa: PLC0415
+
+        graph_lines = recall_memory_lines_sync(user_text)
+    except Exception:  # noqa: BLE001
+        LOGGER.debug("graph recall unavailable, using keyword fallback", exc_info=True)
+
+    if graph_lines:
+        joined = "\n".join(graph_lines[:_MAX_MEMORY_LINES])
+        if len(joined) > _MAX_MEMORY_CHARS:
+            joined = joined[:_MAX_MEMORY_CHARS].rstrip()
+        return joined
 
     lines = memory_markdown.splitlines()
     bullet_lines = [line.strip() for line in lines if line.strip().startswith("- ")]
@@ -541,18 +592,42 @@ def get_workspace_startup_doc_names(*, user_text: str = "") -> tuple[str, ...]:
     return tuple(name for name, _ in loaded_docs)
 
 
+_SKIP_REASON_GUIDANCE = {
+    "empty": "File is empty. When the user mentions a relevant fact, call SetWorkspaceDoc to record it.",
+    "incomplete": "Template fields are still placeholders. When you confidently learn a value during the conversation, propose it to the user and persist via SetWorkspaceDoc.",
+    "template_only": "Only the boilerplate template is present. Replace it with real environment notes the user shares (entity ids, notify targets, credentials when explicitly provided).",
+    "not_relevant_this_turn": "Not relevant to this turn; full content is retrievable via GetWorkspaceDoc when the user asks about follow-up tasks.",
+    "bootstrap_complete": "Bootstrap already finished; reuse only if the user asks to restart onboarding.",
+    "empty_after_filter": "No memory bullet matched current request; full memory is still retrievable via GetWorkspaceDoc.",
+    "duplicate_in_order": "Already emitted above; safe to ignore.",
+}
+
+
 def build_workspace_startup_bundle(*, user_text: str = "") -> str:
 
     loaded_docs, skipped_docs = _build_workspace_startup_docs(user_text=user_text)
     sections: list[str] = []
 
     sections.append("## Workspace")
+    sections.append(_workspace_governance_block())
     for name, content in loaded_docs:
         header = f"### {name}.md" if not name.startswith("memory/") else f"### {name}"
+        # Per-doc purpose is intentionally NOT repeated here — the Governance
+        # block above already lists every doc's allowed scope. Repeating it
+        # per loaded doc only bloats the prompt without adding signal.
         sections.append(f"{header}\n{content}")
     if skipped_docs:
-        sections.append("### Skipped")
-        sections.extend(f"- {name}: {reason}" for name, reason in skipped_docs)
+        status_lines = [
+            "### Workspace Document Status",
+            "Not inlined this turn. Use GetWorkspaceDoc to read, SetWorkspaceDoc to write.",
+        ]
+        for name, reason in skipped_docs:
+            guidance = _SKIP_REASON_GUIDANCE.get(reason, "")
+            line = f"- **{name}.md** [{reason}]"
+            if guidance:
+                line += f" {guidance}"
+            status_lines.append(line)
+        sections.append("\n".join(status_lines))
 
     LOGGER.debug(
         "Workspace startup loaded docs=%s skipped=%s",

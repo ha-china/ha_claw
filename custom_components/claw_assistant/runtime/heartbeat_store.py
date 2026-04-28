@@ -81,9 +81,9 @@ def _read_state() -> dict[str, Any]:
 def _write_state(data: dict[str, Any]) -> Path:
     hsp = _heartbeat_state_path()
     hsp.parent.mkdir(parents=True, exist_ok=True)
-    hsp.write_text(
+    write_utf8_file(
+        str(hsp),
         json.dumps(data, ensure_ascii=False, indent=2) + "\n",
-        encoding="utf-8",
     )
     return hsp
 
@@ -322,14 +322,18 @@ async def async_record_heartbeat_result(
     if _is_completion_status(status_text):
         task_state["last_completed_at"] = _now_iso()
 
-    state_path = await hass.async_add_executor_job(_write_state, state)
     task_deleted = False
     heartbeat_path = _heartbeat_path()
     task = tasks.get(normalized_slug)
     if task and task.delete_after_success and _is_completion_status(status_text):
-        heartbeat_path = await async_delete_heartbeat_task(hass, normalized_slug)
+        state["tasks"].pop(normalized_slug, None)
+        updated_markdown = delete_heartbeat_task_markdown(markdown, normalized_slug)
+        heartbeat_path = await hass.async_add_executor_job(
+            _write_text, _heartbeat_path(), updated_markdown
+        )
         task_deleted = True
 
+    state_path = await hass.async_add_executor_job(_write_state, state)
     return {
         "state_path": str(state_path),
         "heartbeat_path": str(heartbeat_path),
@@ -345,7 +349,12 @@ async def async_clear_heartbeat_result(hass: HomeAssistant, slug: str = "") -> P
         state.setdefault("tasks", {}).pop(_slugify(slug), None)
     else:
         state = {"tasks": {}}
-    return await hass.async_add_executor_job(_write_state, state)
+    path = await hass.async_add_executor_job(_write_state, state)
+    verify = await hass.async_add_executor_job(_read_state)
+    target = _slugify(slug) if slug.strip() else None
+    if target and target in verify.get("tasks", {}):
+        LOGGER.error("Heartbeat clear_state failed: %s still present after write", target)
+    return path
 
 
 _INTERVAL_RE = re.compile(r"^(?:every\s+)?(\d+)\s*([smhd])(?:ec|in|our|ay)?s?$", re.IGNORECASE)

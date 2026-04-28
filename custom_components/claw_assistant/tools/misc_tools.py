@@ -4,6 +4,8 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import sys
+from pathlib import Path
 from urllib.parse import urlparse
 
 import aiohttp
@@ -55,6 +57,24 @@ from ..runtime.workspace_store import (
 )
 
 _LOGGER = logging.getLogger(__name__)
+
+_OUTPUT_MODE_ALIASES = {
+    "": "",
+    "normal": "",
+    "default": "",
+    "auto": "",
+    "brief": "brief",
+    "concise": "brief",
+    "short": "brief",
+    "detailed": "detailed",
+    "detail": "detailed",
+    "verbose": "detailed",
+    "list": "list",
+    "bullets": "list",
+    "bullet": "list",
+    "code": "code",
+}
+_OUTPUT_MODE_VALUES = sorted(_OUTPUT_MODE_ALIASES)
 
 
 def _normalize_github_raw_url(url: str) -> str:
@@ -199,19 +219,106 @@ def _cap_py_payload(payload: JsonObjectType) -> JsonObjectType:
     return payload
 
 
+async def _inline_install_requirements(
+    hass: HomeAssistant,
+    requirements: list[str],
+    *,
+    pip_index_url: str | None = None,
+) -> dict[str, Any]:
+    """Install pip ``requirements`` into the HA venv.
+
+    Returns a structured report so the caller (and ultimately the AI) can tell
+    *what happened at each phase*: which packages were already present, which
+    were freshly installed, which failed and why. This is fed back through the
+    tool result under the ``install`` key.
+    """
+
+    from homeassistant.requirements import pip_kwargs as _ha_pip_kwargs
+    from homeassistant.util import package as _ha_pkg_util
+
+    cleaned = [r.strip() for r in requirements if r and r.strip()]
+    report: dict[str, Any] = {
+        "requested": cleaned,
+        "already_present": [],
+        "installed": [],
+        "failed": [],
+        "ok": True,
+    }
+    if not cleaned:
+        return report
+
+    def _check_installed() -> tuple[list[str], list[str]]:
+        already: list[str] = []
+        missing: list[str] = []
+        for req in cleaned:
+            try:
+                if _ha_pkg_util.is_installed(req):
+                    already.append(req)
+                    continue
+            except Exception:
+                pass
+            missing.append(req)
+        return already, missing
+
+    already, missing = await hass.async_add_executor_job(_check_installed)
+    report["already_present"] = already
+    if not missing:
+        return report
+
+    kwargs = _ha_pip_kwargs(hass.config.config_dir)
+    if pip_index_url:
+        kwargs = dict(kwargs)
+        kwargs["index_url"] = pip_index_url
+
+    def _install_all() -> tuple[list[str], list[dict[str, str]]]:
+        installed: list[str] = []
+        failures: list[dict[str, str]] = []
+        for req in missing:
+            try:
+                ok = _ha_pkg_util.install_package(req, **kwargs)
+            except Exception as err:
+                failures.append({"requirement": req, "error": str(err)})
+                continue
+            if ok:
+                installed.append(req)
+            else:
+                failures.append(
+                    {"requirement": req, "error": "pip returned non-zero exit code"}
+                )
+        return installed, failures
+
+    installed, failures = await hass.async_add_executor_job(_install_all)
+    report["installed"] = installed
+    report["failed"] = failures
+
+    if installed:
+        import importlib
+        importlib.invalidate_caches()
+
+        config_deps = Path(hass.config.config_dir) / "deps"
+        if config_deps.is_dir():
+            deps_str = str(config_deps)
+            if deps_str not in sys.path:
+                sys.path.insert(0, deps_str)
+
+    if failures:
+        report["ok"] = False
+    return report
+
+
 class ExecutePythonTool(llm.Tool):
     name = "ExecutePython"
     description = (
-        "Execute Python code. Two modes. "
-        "inline (default): runs inside the HA process with full builtins and a "
-        "`hass` object; supports top-level `await`; stdout/stderr/traceback are "
-        "captured and returned. If the last statement is an expression its value "
-        "is returned as result (Jupyter-like). "
-        "sandbox (sandbox=true or non-empty requirements): runs in an isolated "
-        "child venv subprocess with optional env/cwd/stdin/pip_index_url. "
-        "No `hass` there. "
-        "Destructive operations (deleting files, rmtree, dropping tables, shell "
-        "`rm -rf`, etc.) must be confirmed with the user before running."
+        "Execute Python code. inline (default): runs in HA process with "
+        "`hass`, supports top-level `await` and `requirements=[...]` "
+        "installed into the HA venv. sandbox (`sandbox=true`): isolated "
+        "child venv subprocess, no `hass`. Returns `{success, phase, "
+        "result, stdout, stderr, install?, artefacts?}`. Destructive ops "
+        "(file deletion, rmtree, etc.) require user consent. "
+        "See skill `homeassistant_runtime_guide` section ExecutePython for "
+        "the full IO contract: injected globals (OUTPUT_DIR, TMP_DIR, "
+        "output_url, list_outputs, list_tmp), tmp redirect policy, and "
+        "artefact reporting."
     )
     parameters = vol.Schema(
         {
@@ -245,7 +352,7 @@ class ExecutePythonTool(llm.Tool):
         stdin_text = str(tool_input.tool_args.get("stdin", "") or "")
         pip_index_url = str(tool_input.tool_args.get("pip_index_url", "") or "")
 
-        if sandbox_flag or requirements:
+        if sandbox_flag:
             from ..runtime.sandbox import run_in_sandbox
 
             try:
@@ -267,7 +374,38 @@ class ExecutePythonTool(llm.Tool):
             except Exception as err:
                 return {"success": False, "error": str(err)}
 
-        return await self._run_inline(hass, code, timeout=timeout, dry_run=dry_run)
+        install_report: dict[str, Any] | None = None
+        if requirements:
+            try:
+                install_report = await _inline_install_requirements(
+                    hass, requirements, pip_index_url=pip_index_url or None
+                )
+            except Exception as err:
+                return {
+                    "success": False,
+                    "phase": "install",
+                    "error": (
+                        f"Inline pip install crashed before any package could "
+                        f"be evaluated: {err}"
+                    ),
+                    "requirements": requirements,
+                }
+
+            if not install_report.get("ok", True):
+                return {
+                    "success": False,
+                    "phase": "install",
+                    "error": (
+                        "Inline pip install failed for one or more packages; "
+                        "execution aborted before running user code."
+                    ),
+                    "install": install_report,
+                }
+
+        result = await self._run_inline(hass, code, timeout=timeout, dry_run=dry_run)
+        if isinstance(result, dict) and install_report is not None:
+            result.setdefault("install", install_report)
+        return result
 
     async def _run_inline(
         self, hass: HomeAssistant, code: str, *, timeout: int, dry_run: bool
@@ -322,13 +460,210 @@ class ExecutePythonTool(llm.Tool):
         if dry_run:
             return {"success": True, "dry_run": True, "message": "Compile OK; not executed"}
 
-        # Full builtins, plus a few convenience handles. We intentionally do
-        # NOT filter builtins — the AI is running as the HA admin here.
+        # Artifact directories injected for AI use:
+        #   OUTPUT_DIR (Path) — persistent, served as /local/claw_assistant/...
+        #   TMP_DIR    (Path) — ephemeral, auto-pruned after 24h
+        #   output_url(name) -> "/local/claw_assistant/<name>" helper
+        import os as _os
+        import tempfile as _tempfile
+
+        from ..runtime.data_path import (
+            absolute_output_url as _absolute_output_url,
+            get_output_dir as _get_output_dir,
+            get_tmp_dir as _get_tmp_dir,
+        )
+
+        output_dir = _get_output_dir(hass)
+        tmp_dir = _get_tmp_dir(hass)
+
+        def _output_url_for(name: str) -> str:
+            """Public URL helper injected as ``output_url`` in AI globals.
+
+            Returns an absolute URL when HA has an internal/external URL
+            configured so the AI can hand the link directly to chat apps,
+            emails, etc.; falls back to the relative ``/local/...`` path
+            otherwise.
+            """
+
+            return _absolute_output_url(hass, name)
+
+        # System scratch dirs we quietly redirect writes away from. The goal
+        # is not to police the AI — writes elsewhere (config/www, HA data,
+        # user paths the admin owns) pass through unchanged. We only steer
+        # the common "open('/tmp/foo.pdf', 'wb')" habit toward our managed
+        # TMP_DIR so the file is not silently lost to the AI, the user, and
+        # the 24h cleanup policy. Resolved lazily (some paths may not exist).
+        _system_tmp_candidates = [
+            "/tmp", "/var/tmp", "/private/tmp", "/private/var/tmp",
+            _tempfile.gettempdir(),
+        ]
+        _system_tmp_roots: list[Path] = []
+        _resolved_tmp = tmp_dir.resolve()
+        _resolved_output = output_dir.resolve()
+        for _raw in _system_tmp_candidates:
+            try:
+                resolved_root = Path(_raw).resolve(strict=False)
+            except OSError:
+                continue
+            # Skip any candidate that would engulf our own managed dirs
+            # (happens e.g. on macOS where $TMPDIR='/var/folders/.../T' can
+            # contain a config dir placed under it). A root that contains
+            # TMP_DIR/OUTPUT_DIR is too broad — it would flag legitimate
+            # writes to those dirs and create redirect loops.
+            too_broad = False
+            for managed in (_resolved_tmp, _resolved_output):
+                try:
+                    managed.relative_to(resolved_root)
+                    too_broad = True
+                    break
+                except ValueError:
+                    continue
+            if too_broad:
+                continue
+            if resolved_root not in _system_tmp_roots:
+                _system_tmp_roots.append(resolved_root)
+
+        redirects: list[dict[str, str]] = []
+
+        def _redirect_if_system_tmp(candidate: Path) -> Path:
+            """Return either ``candidate`` or a TMP_DIR equivalent.
+
+            If the write target falls under a recognised system temp root we
+            rewrite it to ``TMP_DIR/<leaf>`` (flattened — we do not mirror
+            deep system paths). Every redirect is recorded for the AI.
+            """
+
+            try:
+                resolved_cand = candidate.resolve(strict=False)
+            except OSError:
+                return candidate
+            for root in _system_tmp_roots:
+                try:
+                    rel = resolved_cand.relative_to(root)
+                except ValueError:
+                    continue
+                # Flatten: /tmp/a/b/c.pdf -> TMP_DIR/c.pdf (with disambig if
+                # the name already exists via the parent-dir hint).
+                rel_posix = rel.as_posix()
+                target = tmp_dir / Path(rel_posix).name
+                if target.exists():
+                    # keep 1 level of parent to reduce collisions
+                    parent_hint = Path(rel_posix).parent.name
+                    if parent_hint:
+                        target = tmp_dir / f"{parent_hint}__{target.name}"
+                try:
+                    target.parent.mkdir(parents=True, exist_ok=True)
+                except OSError:
+                    return candidate
+                redirects.append({
+                    "from": str(candidate),
+                    "to": str(target),
+                    "reason": (
+                        "system temp dir write redirected to TMP_DIR "
+                        "(inline mode manages its own tmp so files are "
+                        "visible to the user and auto-cleaned after 24h)"
+                    ),
+                })
+                return target
+            return candidate
+
+        # Guarded open(): the ONLY thing it enforces is steering writes away
+        # from system scratch dirs (/tmp, /var/tmp, $TMPDIR) into TMP_DIR.
+        # All other paths — including /config/www/**, /config/**, the user's
+        # home — pass through. Reads are never touched, fd writes are never
+        # touched. Determined bypasses (`import builtins`, Path.write_text
+        # through the C _io layer, `os.open`, subprocess) are accepted;
+        # inline mode is not a sandbox, use sandbox=true for real isolation.
+        _real_open = _builtins.open
+        _write_mode_chars = frozenset("waxWAX+")
+        _resolved_output_dir = output_dir.resolve()
+
+        def _safe_open(file, mode="r", *args, **kwargs):  # type: ignore[no-untyped-def]
+            mode_str = mode if isinstance(mode, str) else "r"
+            is_write = any(ch in _write_mode_chars for ch in mode_str)
+            if not is_write or isinstance(file, int):
+                return _real_open(file, mode, *args, **kwargs)
+            try:
+                decoded = _os.fsdecode(file)
+            except (TypeError, ValueError):
+                return _real_open(file, mode, *args, **kwargs)
+            candidate = Path(decoded)
+            if not candidate.is_absolute():
+                candidate = Path.cwd() / candidate
+            effective = _redirect_if_system_tmp(candidate)
+            if "b" not in mode_str and "encoding" not in kwargs:
+                try:
+                    effective.resolve(strict=False).relative_to(_resolved_output_dir)
+                    kwargs["encoding"] = "utf-8-sig"
+                except ValueError:
+                    pass
+            return _real_open(effective, mode, *args, **kwargs)
+
+        def _list_dir_snapshot(path: Path) -> set[str]:
+            try:
+                return {
+                    p.relative_to(path).as_posix()
+                    for p in path.rglob("*")
+                    if p.is_file()
+                }
+            except OSError:
+                return set()
+
+        def _describe_file(root: Path, path: Path, *, include_url: bool) -> dict[str, Any]:
+            rel = path.relative_to(root).as_posix()
+            try:
+                stat = path.stat()
+                size = stat.st_size
+                mtime = int(stat.st_mtime)
+            except OSError:
+                size = 0
+                mtime = 0
+            entry: dict[str, Any] = {
+                "name": rel,
+                "path": str(path),
+                "size": size,
+                "mtime": mtime,
+            }
+            if include_url:
+                entry["url"] = _output_url_for(rel)
+            return entry
+
+        def _list_outputs() -> list[dict[str, Any]]:
+            return [
+                _describe_file(output_dir, p, include_url=True)
+                for p in sorted(output_dir.rglob("*"))
+                if p.is_file()
+            ]
+
+        def _list_tmp() -> list[dict[str, Any]]:
+            return [
+                _describe_file(tmp_dir, p, include_url=False)
+                for p in sorted(tmp_dir.rglob("*"))
+                if p.is_file()
+            ]
+
+        before_output, before_tmp = await asyncio.gather(
+            hass.async_add_executor_job(_list_dir_snapshot, output_dir),
+            hass.async_add_executor_job(_list_dir_snapshot, tmp_dir),
+        )
+
+        # Shadow builtins with a dict whose `open` is the guarded version.
+        # Using a dict for __builtins__ is explicitly supported by CPython;
+        # the interpreter resolves name lookups against this dict for code
+        # executed under `globals_`.
+        safe_builtins = dict(vars(_builtins))
+        safe_builtins["open"] = _safe_open
+
         globals_: dict[str, Any] = {
-            "__builtins__": _builtins,
+            "__builtins__": safe_builtins,
             "hass": hass,
             "asyncio": asyncio,
             "json": json,
+            "OUTPUT_DIR": output_dir,
+            "TMP_DIR": tmp_dir,
+            "output_url": _output_url_for,
+            "list_outputs": _list_outputs,
+            "list_tmp": _list_tmp,
         }
 
         stdout_buf = io.StringIO()
@@ -374,34 +709,69 @@ class ExecutePythonTool(llm.Tool):
         stdout_text = _trim_stream(stdout_buf.getvalue())
         stderr_text = _trim_stream(stderr_buf.getvalue())
 
+        # Diff artefact directories so the AI can see exactly what was
+        # written. rglob/scandir is blocking → run in executor, parallel.
+        after_output, after_tmp = await asyncio.gather(
+            hass.async_add_executor_job(_list_dir_snapshot, output_dir),
+            hass.async_add_executor_job(_list_dir_snapshot, tmp_dir),
+        )
+        new_output = sorted(after_output - before_output)
+        new_tmp = sorted(after_tmp - before_tmp)
+
+        artefacts: dict[str, Any] = {}
+        if new_output:
+            artefacts["output"] = [
+                {
+                    "name": name,
+                    "path": str(output_dir / name),
+                    "url": _output_url_for(name),
+                }
+                for name in new_output
+            ]
+        if new_tmp:
+            artefacts["tmp"] = [
+                {"name": name, "path": str(tmp_dir / name)}
+                for name in new_tmp
+            ]
+        if redirects:
+            artefacts["redirects"] = list(redirects)
+
         if err_info is not None:
-            return _cap_py_payload({
+            payload: dict[str, Any] = {
                 "success": False,
+                "phase": "exec",
                 **err_info,
                 "stdout": stdout_text,
                 "stderr": stderr_text,
                 "duration_ms": duration_ms,
-            })
+            }
+            if artefacts:
+                payload["artefacts"] = artefacts
+            return _cap_py_payload(payload)
 
         # Prefer explicit `result`, otherwise the trailing expression value.
         result = globals_.get("result")
         if result is None:
             result = globals_.get(auto_key)
-        return _cap_py_payload({
+        payload = {
             "success": True,
+            "phase": "exec",
             "result": result,
             "stdout": stdout_text,
             "stderr": stderr_text,
             "duration_ms": duration_ms,
-        })
+        }
+        if artefacts:
+            payload["artefacts"] = artefacts
+        return _cap_py_payload(payload)
 
 
 class SystemControlTool(llm.Tool):
     name = "SystemControl"
-    description = "System control tool. Use it to set global injection, output mode, and inspect runtime status."
+    description = "System control tool. Use it to set global injection, output mode, and inspect runtime status. For action=set_output_mode, value must be one of normal/default/auto/brief/detailed/list/code. normal/default/auto reset to normal output."
     parameters = vol.Schema({
         vol.Required("action"): vol.In(["set_global_inject", "set_output_mode", "get_status"]),
-        vol.Optional("value", default=""): str,
+        vol.Optional("value", default=""): vol.Any(vol.In(_OUTPUT_MODE_VALUES), str),
     })
 
     async def async_call(self, hass: HomeAssistant, tool_input: llm.ToolInput, llm_context: llm.LLMContext) -> JsonObjectType:
@@ -411,10 +781,14 @@ class SystemControlTool(llm.Tool):
             get_global_state(hass)["inject"] = value
             return {"success": True, "message": f"Global inject set: {value[:50]}..."}
         if action == "set_output_mode":
-            if value in ["brief", "detailed", "list", "code", ""]:
-                get_output_state(hass)["mode"] = value
-                return {"success": True, "message": f"Output mode set: {value or 'normal'}"}
-            return {"success": False, "error": "Invalid mode"}
+            normalized = _OUTPUT_MODE_ALIASES.get(str(value).strip().lower())
+            if normalized is not None:
+                get_output_state(hass)["mode"] = normalized
+                return {"success": True, "message": f"Output mode set: {normalized or 'normal'}"}
+            return {
+                "success": False,
+                "error": "Invalid output mode. Use one of: normal, brief, detailed, list, code.",
+            }
         if action == "get_status":
             return {
                 "success": True,
@@ -697,7 +1071,13 @@ class GetWorkspaceDocTool(llm.Tool):
             name = tool_input.tool_args.get("name", "")
             if str(name).strip().upper() == "TODAY_MEMORY":
                 return {"success": True, **get_today_memory_doc()}
-            return {"success": True, **get_workspace_doc(tool_input.tool_args.get("name", ""))}
+            doc = get_workspace_doc(tool_input.tool_args.get("name", ""))
+            from ..runtime.workspace_store import _DOC_PURPOSES
+            purpose = _DOC_PURPOSES.get(doc.get("name", ""), "")
+            result: JsonObjectType = {"success": True, **doc}
+            if purpose:
+                result["doc_purpose"] = purpose
+            return result
         except ValueError as err:
             return {"success": False, "error": str(err)}
 
@@ -745,8 +1125,8 @@ class HeartbeatManagerTool(llm.Tool):
                 "success": True,
                 "count": len(tasks),
                 "tasks": tasks,
-                **build_route_envelope("follow_up_task_index", "HeartbeatManager", "record" if tasks else "upsert"),
-                "route_hint": build_route_hint("follow_up_task_index", "HeartbeatManager", "record" if tasks else "upsert"),
+                **build_route_envelope("follow_up_task_index"),
+                "route_hint": build_route_hint("follow_up_task_index"),
             }
 
         if action == "upsert":
@@ -776,18 +1156,8 @@ class HeartbeatManagerTool(llm.Tool):
                 "success": True,
                 "path": str(path),
                 "message": f"Heartbeat follow-up saved: {title}",
-                **build_route_envelope(
-                    "follow_up_task_saved",
-                    "HeartbeatManager",
-                    "record",
-                    args={"slug": slug, "status": "success", "note": ""},
-                ),
-                "route_hint": build_route_hint(
-                    "follow_up_task_saved",
-                    "HeartbeatManager",
-                    "record",
-                    args={"slug": slug, "status": "success", "note": ""},
-                ),
+                **build_route_envelope("follow_up_task_saved"),
+                "route_hint": build_route_hint("follow_up_task_saved"),
             }
 
         if action == "delete":
@@ -827,22 +1197,12 @@ class HeartbeatManagerTool(llm.Tool):
                 **(
                     build_route_envelope("follow_up_task_completed", "HeartbeatManager", "list")
                     if record_result["task_deleted"]
-                    else build_route_envelope(
-                        "follow_up_task_updated",
-                        "HeartbeatManager",
-                        "record",
-                        args={"slug": slug, "status": "success", "note": ""},
-                    )
+                    else build_route_envelope("follow_up_task_updated")
                 ),
                 "route_hint": (
                     build_route_hint("follow_up_task_completed", "HeartbeatManager", "list")
                     if record_result["task_deleted"]
-                    else build_route_hint(
-                        "follow_up_task_updated",
-                        "HeartbeatManager",
-                        "record",
-                        args={"slug": slug, "status": "success", "note": ""},
-                    )
+                    else build_route_hint("follow_up_task_updated")
                 ),
             }
 
@@ -861,7 +1221,15 @@ class HeartbeatManagerTool(llm.Tool):
 
 class SetWorkspaceDocTool(llm.Tool):
     name = "SetWorkspaceDoc"
-    description = "Write one workspace markdown document. Params: name, markdown"
+    description = (
+        "Write one workspace markdown document. Params: name, markdown. "
+        "Each document is a strict typed store: "
+        "SOUL=style/tone, IDENTITY=assistant identity, USER=user facts, "
+        "MEMORY=user preferences/constraints, TOOLS=environment/credentials, "
+        "HEARTBEAT=tasks. "
+        "Always read the target doc first, apply the smallest confirmed change, "
+        "never invent values to fill empty templates, and never duplicate facts across files."
+    )
     parameters = vol.Schema(
         {
             vol.Required("name"): str,
@@ -878,9 +1246,200 @@ class SetWorkspaceDocTool(llm.Tool):
                 tool_input.tool_args.get("name", ""),
                 tool_input.tool_args.get("markdown", ""),
             )
-            return {"success": True, "path": str(path)}
+            from ..runtime.workspace_store import _DOC_PURPOSES, _normalize_doc_name
+            normalized = _normalize_doc_name(tool_input.tool_args.get("name", ""))
+            purpose = _DOC_PURPOSES.get(normalized, "")
+            result: JsonObjectType = {"success": True, "path": str(path)}
+            if purpose:
+                result["doc_purpose"] = purpose
+            return result
         except ValueError as err:
             return {"success": False, "error": str(err)}
+
+
+class MemoryGraphTool(llm.Tool):
+    name = "MemoryGraph"
+    description = (
+        "Long-term memory backed by a SQLite graph (nodes + typed edges, "
+        "BM25 ranking, time decay, dedup via content checksum). "
+        "Use this for durable facts, decisions, bug fixes, and their causal "
+        "links — not for the active turn's scratch state. Workspace markdown "
+        "files remain the human-readable source of truth and are auto-indexed "
+        "into this graph; this tool also lets you write nodes/edges directly. "
+        "Params: action (recall/remember/link/pin/forget/get/stats), "
+        "and action-specific fields. "
+        "recall: query(required), kinds(list, optional), limit(int, default 8), expand(bool, default true). "
+        "remember: kind(required, e.g. fact/preference/decision/bug_fix/event), "
+        "title(required), body(required), source_doc(optional), "
+        "confidence(0..1, default 1.0), pinned(bool, default false). "
+        "link: src_id(int), dst_id(int), relation(required, e.g. related_to/caused_by/"
+        "supersedes/refutes/resolved_by/blocked_by), weight(float, default 1.0). "
+        "pin: id(int), pinned(bool, default true). "
+        "forget: id(int). "
+        "get: id(int). "
+        "stats: no params."
+    )
+    parameters = vol.Schema(
+        {
+            vol.Required("action"): str,
+            vol.Optional("query"): str,
+            vol.Optional("kinds"): list,
+            vol.Optional("limit"): int,
+            vol.Optional("expand"): bool,
+            vol.Optional("kind"): str,
+            vol.Optional("title"): str,
+            vol.Optional("body"): str,
+            vol.Optional("source_doc"): str,
+            vol.Optional("confidence"): vol.Coerce(float),
+            vol.Optional("pinned"): bool,
+            vol.Optional("src_id"): vol.Coerce(int),
+            vol.Optional("dst_id"): vol.Coerce(int),
+            vol.Optional("relation"): str,
+            vol.Optional("weight"): vol.Coerce(float),
+            vol.Optional("id"): vol.Coerce(int),
+        }
+    )
+
+    async def async_call(
+        self, hass: HomeAssistant, tool_input: llm.ToolInput, llm_context: llm.LLMContext
+    ) -> JsonObjectType:
+        from ..runtime.graph_service import (  # noqa: PLC0415
+            async_get_node,
+            async_link,
+            async_recall,
+            async_remember,
+            get_graph_store,
+        )
+
+        args = tool_input.tool_args
+        action = str(args.get("action", "")).strip().lower()
+        store = get_graph_store(hass)
+        if store is None:
+            return {"success": False, "error": "graph store not initialised"}
+
+        if action == "recall":
+            query = str(args.get("query", "")).strip()
+            if not query:
+                return {"success": False, "error": "query is required"}
+            kinds = args.get("kinds") or None
+            if kinds is not None and not isinstance(kinds, list):
+                return {"success": False, "error": "kinds must be a list"}
+            limit = int(args.get("limit", 8))
+            expand = bool(args.get("expand", True))
+            hits = await async_recall(
+                hass, query, kinds=kinds, limit=limit, expand=expand
+            )
+            return {
+                "success": True,
+                "count": len(hits),
+                "hits": [
+                    {
+                        "id": h.node.id,
+                        "kind": h.node.kind,
+                        "title": h.node.title,
+                        "body": h.node.body,
+                        "source_doc": h.node.source_doc,
+                        "confidence": h.node.confidence,
+                        "pinned": h.node.pinned,
+                        "access_count": h.node.access_count,
+                        "score": round(h.score, 6),
+                        "via": h.via,
+                        "edges": [
+                            {"to": dst, "relation": rel}
+                            for dst, rel in h.related_edges
+                        ],
+                    }
+                    for h in hits
+                ],
+            }
+
+        if action == "remember":
+            kind = str(args.get("kind", "")).strip()
+            title = str(args.get("title", "")).strip()
+            body = str(args.get("body", "")).strip()
+            if not kind or not (title or body):
+                return {
+                    "success": False,
+                    "error": "kind and (title or body) are required",
+                }
+            result = await async_remember(
+                hass,
+                kind=kind,
+                title=title,
+                body=body,
+                source_doc=(str(args["source_doc"]) if args.get("source_doc") else None),
+                confidence=float(args.get("confidence", 1.0)),
+                pinned=bool(args.get("pinned", False)),
+            )
+            if result is None:
+                return {"success": False, "error": "graph store unavailable"}
+            node_id, was_new = result
+            return {"success": True, "id": node_id, "created": was_new}
+
+        if action == "link":
+            try:
+                src_id = int(args["src_id"])
+                dst_id = int(args["dst_id"])
+            except (KeyError, TypeError, ValueError):
+                return {"success": False, "error": "src_id and dst_id are required"}
+            relation = str(args.get("relation", "")).strip()
+            if not relation:
+                return {"success": False, "error": "relation is required"}
+            ok = await async_link(
+                hass,
+                src_id,
+                dst_id,
+                relation,
+                weight=float(args.get("weight", 1.0)),
+            )
+            return {"success": ok}
+
+        if action == "pin":
+            try:
+                node_id = int(args["id"])
+            except (KeyError, TypeError, ValueError):
+                return {"success": False, "error": "id is required"}
+            pinned = bool(args.get("pinned", True))
+            await hass.async_add_executor_job(store.pin, node_id, pinned)
+            return {"success": True, "id": node_id, "pinned": pinned}
+
+        if action == "forget":
+            try:
+                node_id = int(args["id"])
+            except (KeyError, TypeError, ValueError):
+                return {"success": False, "error": "id is required"}
+            await hass.async_add_executor_job(store.forget, node_id)
+            return {"success": True, "id": node_id, "forgotten": True}
+
+        if action == "get":
+            try:
+                node_id = int(args["id"])
+            except (KeyError, TypeError, ValueError):
+                return {"success": False, "error": "id is required"}
+            node = await async_get_node(hass, node_id)
+            if node is None:
+                return {"success": False, "error": f"node {node_id} not found"}
+            return {
+                "success": True,
+                "node": {
+                    "id": node.id,
+                    "kind": node.kind,
+                    "title": node.title,
+                    "body": node.body,
+                    "source_doc": node.source_doc,
+                    "confidence": node.confidence,
+                    "pinned": node.pinned,
+                    "access_count": node.access_count,
+                    "created_at": node.created_at,
+                    "last_accessed_at": node.last_accessed_at,
+                },
+            }
+
+        if action == "stats":
+            stats = await hass.async_add_executor_job(store.stats)
+            return {"success": True, **stats}
+
+        return {"success": False, "error": f"unknown action: {action}"}
 
 
 class ThinkContinueTool(llm.Tool):
@@ -954,7 +1513,7 @@ Parameters:
 
 class ParallelToolCallTool(llm.Tool):
     name = "ParallelToolCall"
-    description = "Call multiple independent tools in parallel. Best for querying multiple entities or information sources at once. Params: tools=[{name,args}]. Prefer using it with EntityQuery, HistoryQuery, ListServices, SmartDiscovery, and WebSearch. Do not replace name/args with natural language."
+    description = "Call multiple independent tools in parallel. Best for querying multiple entities or information sources at once. Params: tools=[{name,args}]. Tool name must be the registered tool name, for example {\"name\":\"SystemControl\",\"args\":{\"action\":\"set_output_mode\",\"value\":\"brief\"}}, not SystemControl.set_output_mode. Prefer using it with EntityQuery, HistoryQuery, ListServices, SmartDiscovery, and WebSearch. Do not replace name/args with natural language."
     parameters = vol.Schema({
         vol.Required("tools"): list,
     })
@@ -976,6 +1535,15 @@ class ParallelToolCallTool(llm.Tool):
             tool_args = raw_spec.get("args", {})
             if not isinstance(tool_args, dict):
                 tool_args = {}
+            if tool_name == "SystemControl.set_output_mode":
+                tool_name = "SystemControl"
+                tool_args = {"action": "set_output_mode", **tool_args}
+            if tool_name == "SystemControl.set_global_inject":
+                tool_name = "SystemControl"
+                tool_args = {"action": "set_global_inject", **tool_args}
+            if tool_name == "SystemControl.get_status":
+                tool_name = "SystemControl"
+                tool_args = {"action": "get_status", **tool_args}
             dedupe_key = json.dumps(
                 {"name": tool_name, "args": tool_args},
                 ensure_ascii=False,

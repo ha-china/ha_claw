@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import re
 from typing import Any
 
 from ..const import (
@@ -10,6 +11,36 @@ from ..const import (
     CONVERSATION_MODE_DETAILED,
     CONVERSATION_MODE_NO_NAME,
 )
+
+_URL_CJK_BOUNDARY_RE = re.compile(
+    r"(https?://[^\s<>\[\]()\"']+?)(?=[^\x00-\x7F])"
+)
+
+_LINK_REWRITE_RE = re.compile(
+    r"(<a\s[^>]*>.*?</a>)"
+    r"|\[([^\]\n]+)\]\((https?://[^\s)]+)\)"
+    r"|(?<![\"'>=<])(https?://[^\s<>\[\]()\"']+)",
+    re.DOTALL | re.IGNORECASE,
+)
+
+
+def _rewrite_external_links(match: "re.Match[str]") -> str:
+    if match.group(1):
+        return match.group(1)
+    if match.group(3):
+        return (
+            f'<a href="{match.group(3)}" target="_blank" '
+            f'rel="noopener noreferrer">{match.group(2)}</a>'
+        )
+    url = match.group(4)
+    return f'<a href="{url}" target="_blank" rel="noopener noreferrer">{url}</a>'
+
+
+def _normalize_response_links(text: str) -> str:
+    if "://" not in text:
+        return text
+    spaced = _URL_CJK_BOUNDARY_RE.sub(r"\1 ", text)
+    return _LINK_REWRITE_RE.sub(_rewrite_external_links, spaced)
 
 
 def reply_labels(language: str | None) -> dict[str, str]:
@@ -80,16 +111,16 @@ def sanitize_response_text(text: str) -> str:
 
     payload = _extract_json_payload(stripped)
     if not payload:
-        return stripped
+        return _normalize_response_links(stripped)
 
     mode = str(payload.get("mode", "")).lower()
     if mode in {"tool_calls", "toolcalls"}:
         return ""
 
     if mode == "answer" and isinstance(payload.get("content"), str):
-        return payload["content"].strip()
+        return _normalize_response_links(payload["content"].strip())
 
-    return stripped
+    return _normalize_response_links(stripped)
 
 
 def get_response_text(result: Any) -> str:

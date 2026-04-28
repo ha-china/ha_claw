@@ -143,7 +143,9 @@ async def execute_kernel_turn(
     extra_system_prompt: str | None,
 ) -> Any | None:
 
-    agent_id = agent_id or "conversation.home_assistant"
+    from .config import DEFAULT_FALLBACK_AGENT_ID
+
+    agent_id = agent_id or DEFAULT_FALLBACK_AGENT_ID
     tool_calls_state = get_tool_calls_state(hass)
     tool_results_state = get_tool_results_state(hass)
     tool_calls_state.clear()
