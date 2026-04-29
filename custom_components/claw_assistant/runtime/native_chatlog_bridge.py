@@ -258,11 +258,6 @@ def append_step_message(
     if chat_log is None:
         return False
 
-    if chat_log.delta_listener:
-        title = content.splitlines()[0] if content else ""
-        chat_log.delta_listener(chat_log, {"role": "assistant"})
-        chat_log.delta_listener(chat_log, {"content": f"⚡️ {title}"})
-
     chat_log.async_add_assistant_content_without_tools(
         AssistantContent(
             agent_id=build_step_agent_id(agent_id, step_index=step_index, phase=phase),

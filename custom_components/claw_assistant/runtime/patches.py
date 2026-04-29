@@ -344,30 +344,10 @@ def _is_streaming_enabled(hass: HomeAssistant) -> bool:
     return entries[0].options.get(CONF_ENABLE_STREAMING_EFFECT, True)
 
 
-async def _emit_typewriter(hass: HomeAssistant, chat_log, text: str) -> None:
-    listener = chat_log.delta_listener
-    if not listener or not text:
-        return
-    if not _is_streaming_enabled(hass):
-        listener(chat_log, {"role": "assistant"})
-        listener(chat_log, {"content": text})
-        return
-    listener(chat_log, {"role": "assistant"})
-    await asyncio.sleep(0)
-    for ch in text:
-        listener(chat_log, {"content": ch})
-        await asyncio.sleep(0.01)
-
-
-def _esc_progress(text: str) -> str:
-    for ch in ("*", "_", "`", "[", "]", "(", ")", "#", "~", "|", "\\"):
-        text = text.replace(ch, "")
-    return text
-
-
 def patch_tool_progress(hass: HomeAssistant) -> None:
 
     from homeassistant.components.conversation import chat_log as chat_log_module
+    from .events import fire_live_progress
     from .tool_progress import tool_progress_line
 
     if getattr(chat_log_module.ChatLog, _TOOL_PROGRESS_PATCHED, False):
@@ -392,51 +372,46 @@ def patch_tool_progress(hass: HomeAssistant) -> None:
         native_thinking = getattr(content, "thinking_content", None)
         if native_thinking and native_thinking.strip():
             thinking_text = native_thinking.strip()
-        if thinking_text and self.delta_listener:
-            truncated = thinking_text[:20] + ("..." if len(thinking_text) > 20 else "")
-            await _emit_typewriter(hass, self, f"┊ \U0001f4ad {truncated}")
-            self.delta_listener(self, {"content": "\n"})
+        if thinking_text:
+            truncated = thinking_text[:120]
+            from .state import get_conversation_status
+            lang = get_conversation_status(hass).get("user_language") or hass.config.language or "en"
+            fire_live_progress(
+                hass,
+                conversation_id=getattr(self, "conversation_id", None),
+                phase="thinking",
+                text=truncated,
+                display_text=tool_progress_line("GetLiveContext", {}, lang).strip(),
+            )
 
-        if self.delta_listener:
-            tool_calls = getattr(content, "tool_calls", None)
-            if tool_calls:
-                from .state import get_conversation_status
-                lang = get_conversation_status(hass).get("user_language") or hass.config.language or "en"
-                for tc in tool_calls:
-                    if getattr(tc, "external", False):
-                        continue
-                    args = dict(tc.tool_args)
-                    if tc.tool_name == "NextAgentHandoff":
-                        from ..tools.ha_core_tools import _resolve_peer_agents
-                        peers = _resolve_peer_agents(hass)
-                        others = [p for p in peers if not p.get("is_you")]
-                        if others:
-                            args["agent_name"] = others[0].get("agent_name", "")
-                    line = tool_progress_line(
-                        tc.tool_name, args, lang
-                    )
-                    await _emit_typewriter(hass, self, line)
+        tool_calls = getattr(content, "tool_calls", None)
+        if tool_calls:
+            from .state import get_conversation_status
+            lang = get_conversation_status(hass).get("user_language") or hass.config.language or "en"
+            for tc in tool_calls:
+                if getattr(tc, "external", False):
+                    continue
+                args = dict(tc.tool_args)
+                if tc.tool_name == "NextAgentHandoff":
+                    from ..tools.ha_core_tools import _resolve_peer_agents
+                    peers = _resolve_peer_agents(hass)
+                    others = [p for p in peers if not p.get("is_you")]
+                    if others:
+                        args["agent_name"] = others[0].get("agent_name", "")
+                line = tool_progress_line(tc.tool_name, args, lang)
+                fire_live_progress(
+                    hass,
+                    conversation_id=getattr(self, "conversation_id", None),
+                    phase="tool_call",
+                    text="",
+                    tool_name=tc.tool_name,
+                    display_text=line.strip(),
+                )
 
         async for result in original_async_add_assistant_content(
             self, content, tool_call_tasks=tool_call_tasks
         ):
             yield result
-            tn = getattr(result, "tool_name", "")
-            if self.delta_listener and tn in ("AgentHandoff", "NextAgentHandoff"):
-                tr = getattr(result, "tool_result", None) or {}
-                peer = tr.get("agent_name", "")
-                dialogue = tr.get("dialogue", [])
-                LOGGER.debug("AgentHandoff result: peer=%s rounds=%d", peer, len(dialogue))
-                if len(dialogue) > 1:
-                    for turn in dialogue:
-                        role = turn.get("role", "?")
-                        text = str(turn.get("text", ""))[:25]
-                        await _emit_typewriter(hass, self, f"┊ *🤝 {role}: {_esc_progress(text)}*\n")
-                elif peer:
-                    raw_reply = str(tr.get("reply", "")).strip()
-                    if raw_reply:
-                        reply_hint = _esc_progress(raw_reply)[:30]
-                        await _emit_typewriter(hass, self, f"┊ *🤝 {_esc_progress(peer)}: {reply_hint}*\n")
 
     chat_log_module.ChatLog.async_add_assistant_content = (
         patched_async_add_assistant_content

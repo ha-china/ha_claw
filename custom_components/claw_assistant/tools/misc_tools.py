@@ -37,7 +37,7 @@ from ..runtime.memory_store import (
     async_list_memory_entries,
     async_save_memory_entry_result,
 )
-from ..runtime.native_chatlog_bridge import emit_live_thinking_delta
+from ..runtime.events import fire_live_progress
 from ..runtime.route_hints import build_next_action, build_route_envelope, build_route_hint
 from ..runtime.skill_store import (
     async_install_skill,
@@ -48,6 +48,7 @@ from ..runtime.skill_store import (
     list_installed_skills,
     load_master_prompt,
 )
+from ..runtime.tool_progress import tool_progress_line
 from ..sensor import async_sync_heartbeat_sensor
 from ..runtime.workspace_store import (
     async_save_workspace_doc,
@@ -1087,7 +1088,7 @@ class HeartbeatManagerTool(llm.Tool):
     description = (
         "Manage heartbeat follow-up tasks. "
         "schedule: cron ('*/30 * * * *', '0 9 * * *') or interval ('30m', '2h', 'every 1d'). "
-        "notify_channel: where to push results, e.g. 'wechat:account_id:user_id' (from conversation_id). "
+        "notify_channel: where to push results, e.g. 'wechat:account_id:user_id' or 'qq:user:openid' (from conversation_id). "
         "Params: action(list/upsert/delete/record/clear_state), slug/title/schedule/objective/steps/notes/status/note/enabled/delete_after_success/notify_channel."
     )
     parameters = vol.Schema(
@@ -1470,10 +1471,13 @@ Parameters:
 
         set_current_thought(hass, thought)
         hass.bus.async_fire("ha_crack_thought", {"thought": thought})
-        await emit_live_thinking_delta(
+        from ..runtime.state import _active_conversation_id
+        fire_live_progress(
             hass,
-            agent_id=llm_context.platform or "conversation.aiwai_gua_2",
-            thought=thought,
+            conversation_id=_active_conversation_id.get(),
+            phase="thinking",
+            text=thought,
+            display_text=tool_progress_line("ThinkContinue", {}, hass.config.language or "en").strip(),
         )
 
         task_loop = record_thought(

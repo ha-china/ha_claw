@@ -9,6 +9,7 @@ from homeassistant.core import HomeAssistant
 from ..conversation_utils import get_conversation_history
 from .config_file_store import build_config_approval_prompt_block
 from .ha_guide_store import build_homeassistant_topic_hint
+from .im_approval_bridge import build_im_approval_prompt_block
 from .internal_llm import (
     _MAX_SYSTEM_PROMPT_CHARS,
     _PROMPT_SECTION_SEPARATOR,
@@ -171,7 +172,6 @@ def build_base_prompt(
     conversation_id: str | None,
     runtime_config: ConversationRuntimeConfig,
 ) -> str:
-
     from .state import get_channel_type, is_im_channel
 
     base_prompt = build_internal_llm_prompt(text)
@@ -180,12 +180,7 @@ def build_base_prompt(
     ch_type = get_channel_type(conversation_id)
     if is_im_channel(conversation_id):
         appended_sections.append(
-            f"## Channel\nType: {ch_type} (IM)\n"
-            "Display format:\n"
-            "- Show image/camera: `[IMAGE:camera.entity_id]` or `[IMAGE:https://url]` (own line). Gateway delivers media.\n"
-            "- Discover cameras: call `CameraAnalyze(camera_entity=\"list\")`.\n"
-            "- Analyze camera content: call `CameraAnalyze(mode=\"analyze\")`, describe result, optionally append `[IMAGE:camera.entity_id]`.\n"
-            "- Do NOT call CameraAnalyze just to show a snapshot — use `[IMAGE:...]` directly."
+            f"## Channel\nType: {ch_type} (IM)"
         )
     else:
         appended_sections.append(
@@ -231,5 +226,9 @@ def build_base_prompt(
     config_prompt = build_config_approval_prompt_block(hass)
     if config_prompt:
         appended_sections.append(config_prompt)
+
+    im_approval_prompt = build_im_approval_prompt_block(hass)
+    if im_approval_prompt:
+        appended_sections.append(im_approval_prompt)
 
     return _fit_base_prompt(base_prompt, appended_sections)
