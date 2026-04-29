@@ -15,10 +15,14 @@ from ..const import (
 _URL_CJK_BOUNDARY_RE = re.compile(
     r"(https?://[^\s<>\[\]()\"']+?)(?=[^\x00-\x7F])"
 )
+_IMAGE_MARKDOWN_RE = re.compile(
+    r"!\[[^\]\n]*\]\((https?://[^\s)]+)\)",
+    re.IGNORECASE,
+)
 
 _LINK_REWRITE_RE = re.compile(
     r"(<a\s[^>]*>.*?</a>)"
-    r"|\[([^\]\n]+)\]\((https?://[^\s)]+)\)"
+    r"|(?<!\!)\[([^\]\n]+)\]\((https?://[^\s)]+)\)"
     r"|(?<![\"'>=<])(https?://[^\s<>\[\]()\"']+)",
     re.DOTALL | re.IGNORECASE,
 )
@@ -39,8 +43,18 @@ def _rewrite_external_links(match: "re.Match[str]") -> str:
 def _normalize_response_links(text: str) -> str:
     if "://" not in text:
         return text
-    spaced = _URL_CJK_BOUNDARY_RE.sub(r"\1 ", text)
-    return _LINK_REWRITE_RE.sub(_rewrite_external_links, spaced)
+    image_tokens: list[str] = []
+
+    def _stash_image(match: "re.Match[str]") -> str:
+        image_tokens.append(match.group(0))
+        return f"__CLAW_IMAGE_{len(image_tokens) - 1}__"
+
+    protected = _IMAGE_MARKDOWN_RE.sub(_stash_image, text)
+    spaced = _URL_CJK_BOUNDARY_RE.sub(r"\1 ", protected)
+    rewritten = _LINK_REWRITE_RE.sub(_rewrite_external_links, spaced)
+    for index, image_markdown in enumerate(image_tokens):
+        rewritten = rewritten.replace(f"__CLAW_IMAGE_{index}__", image_markdown)
+    return rewritten
 
 
 def reply_labels(language: str | None) -> dict[str, str]:
