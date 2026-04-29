@@ -180,16 +180,16 @@ def build_base_prompt(
     ch_type = get_channel_type(conversation_id)
     if is_im_channel(conversation_id):
         appended_sections.append(
-            f"## Channel\nType: {ch_type} (IM)"
+            f"## Channel\nType: {ch_type}"
         )
     else:
         appended_sections.append(
             "## Channel\nType: ha (Home Assistant frontend)\n"
             "Display format:\n"
+            "- For HA frontend replies, use `markdown_hint` for inline image preview, and use normal markdown links or plain URLs for download links and standalone preview addresses.\n"
             "- Show image/camera: call `CameraAnalyze(mode=\"snapshot\")`, include `markdown_hint` from response in your reply.\n"
             "- Discover cameras: call `CameraAnalyze(camera_entity=\"list\")`.\n"
-            "- Analyze camera content: call `CameraAnalyze(mode=\"analyze\")`, describe result, include `markdown_hint`.\n"
-            "- `[IMAGE:...]` tags are NOT supported on this platform."
+            "- Analyze camera content: call `CameraAnalyze(mode=\"analyze\")`, describe result, include `markdown_hint`."
         )
 
     topic_hint = build_homeassistant_topic_hint(text)

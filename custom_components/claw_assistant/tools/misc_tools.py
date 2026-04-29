@@ -1618,8 +1618,8 @@ class CameraAnalyzeTool(llm.Tool):
         "camera_entity='list' → list all available cameras (works even if not exposed). "
         "mode=snapshot → returns snapshot_url + markdown_hint (for HA frontend display only). "
         "mode=analyze → returns base64 JPEG for vision analysis (describe what you see). "
-        "IMPORTANT: On IM channels, do NOT call this tool to display a snapshot — use [IMAGE:camera.entity_id] directly. "
-        "Only call this tool on IM when you need to analyze image content or discover available cameras. "
+        "IMPORTANT: Use markdown_hint only on the HA frontend. "
+        "On non-HA chat channels, call this tool only when you need image analysis or camera discovery. "
         "Params: camera_entity (entity_id / friendly name / 'list'), mode (snapshot|analyze, default snapshot), "
         "max_dim (default 640), target_kb (default 40)."
     )
