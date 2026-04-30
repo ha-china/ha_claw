@@ -136,9 +136,6 @@ def _build_peer_agents_section(
     ent_reg = er.async_get(hass)
     current_aid = str(get_conversation_status(hass).get("current_agent_id", "") or "")
 
-    # Only list peers — never reveal the model's own identity to itself.
-    # Knowing who "you" are leaks implementation details and encourages
-    # brand-specific behavior we don't want.
     entries: list[str] = []
     seen: set[str] = set()
     for key in (CONF_PRIMARY_AGENT, CONF_FALLBACK_AGENT, CONF_SECONDARY_FALLBACK_AGENT):
@@ -147,7 +144,7 @@ def _build_peer_agents_section(
             continue
         seen.add(aid)
         if aid == current_aid:
-            continue  # skip self
+            continue
         ent = ent_reg.async_get(aid)
         name = (ent.name or ent.original_name) if ent else aid.split(".")[-1]
         entries.append(f"- {name}")
@@ -186,10 +183,29 @@ def build_base_prompt(
         appended_sections.append(
             "## Channel\nType: ha (Home Assistant frontend)\n"
             "Display format:\n"
-            "- For HA frontend replies, use `markdown_hint` for inline image preview, and use normal markdown links or plain URLs for download links and standalone preview addresses.\n"
-            "- Show image/camera: call `CameraAnalyze(mode=\"snapshot\")`, include `markdown_hint` from response in your reply.\n"
+            "- Frontend-previewable assets must be written under `OUTPUT_DIR` "
+            "(= `/config/www/claw_assistant/`). Use `output_url(filename)` to "
+            "obtain the public URL string `/local/claw_assistant/<name>`.\n"
+            "- To embed saved media in your reply, ANY of the following forms "
+            "are auto-rendered into `<video>` / `![img]` / `[file](...)` based "
+            "on the file extension — pick whichever is most natural:\n"
+            "  - the string returned by `output_url(name)`, e.g. "
+            "`/local/claw_assistant/foo.mp4`\n"
+            "  - the absolute URL returned by `absolute_output_url(hass, name)`, "
+            "e.g. `http://<host>:8123/local/claw_assistant/foo.mp4`\n"
+            "  - the explicit tag form `[VIDEO:/local/claw_assistant/foo.mp4]` "
+            "(also `[IMAGE:...]`, `[GIF:...]`, `[FILE:...]`)\n"
+            "- Show image/camera directly: call `CameraAnalyze(mode=\"snapshot\")`, "
+            "include `markdown_hint` from response in your reply.\n"
             "- Discover cameras: call `CameraAnalyze(camera_entity=\"list\")`.\n"
-            "- Analyze camera content: call `CameraAnalyze(mode=\"analyze\")`, describe result, include `markdown_hint`."
+            "- Analyze camera content: call `CameraAnalyze(mode=\"analyze\")`, "
+            "describe result, and include `markdown_hint` only when the image "
+            "itself should also be shown.\n"
+            "- Record video: call `ServiceCall(domain=\"camera\", service=\"record\", "
+            "data={\"entity_id\": ..., \"filename\": ..., \"duration\": <seconds>})`. "
+            "`duration` MUST be derived from the user's request (parse whatever "
+            "time expression they used, in any language, into seconds). Do not "
+            "use a silent default. If the user gave no duration, ask first."
         )
 
     topic_hint = build_homeassistant_topic_hint(text)
