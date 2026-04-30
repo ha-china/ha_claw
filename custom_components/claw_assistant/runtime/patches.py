@@ -344,6 +344,29 @@ def _is_streaming_enabled(hass: HomeAssistant) -> bool:
     return entries[0].options.get(CONF_ENABLE_STREAMING_EFFECT, True)
 
 
+async def _emit_frontend_progress(hass: HomeAssistant, chat_log, text: str) -> None:
+    listener = getattr(chat_log, "delta_listener", None)
+    if not listener or not text:
+        return
+
+    from .state import get_channel_type
+
+    if get_channel_type(getattr(chat_log, "conversation_id", None)) != "ha":
+        return
+
+    listener(chat_log, {"role": "assistant"})
+    if not _is_streaming_enabled(hass):
+        listener(chat_log, {"content": text})
+        listener(chat_log, {"content": "\n"})
+        return
+
+    await asyncio.sleep(0)
+    for ch in text:
+        listener(chat_log, {"content": ch})
+        await asyncio.sleep(0.01)
+    listener(chat_log, {"content": "\n"})
+
+
 def patch_tool_progress(hass: HomeAssistant) -> None:
 
     from homeassistant.components.conversation import chat_log as chat_log_module
@@ -376,6 +399,7 @@ def patch_tool_progress(hass: HomeAssistant) -> None:
             truncated = thinking_text[:120]
             from .state import get_conversation_status
             lang = get_conversation_status(hass).get("user_language") or hass.config.language or "en"
+            await _emit_frontend_progress(hass, self, f"┊ {truncated}")
             fire_live_progress(
                 hass,
                 conversation_id=getattr(self, "conversation_id", None),
@@ -399,6 +423,7 @@ def patch_tool_progress(hass: HomeAssistant) -> None:
                     if others:
                         args["agent_name"] = others[0].get("agent_name", "")
                 line = tool_progress_line(tc.tool_name, args, lang)
+                await _emit_frontend_progress(hass, self, line.strip())
                 fire_live_progress(
                     hass,
                     conversation_id=getattr(self, "conversation_id", None),
