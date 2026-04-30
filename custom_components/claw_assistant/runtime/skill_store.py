@@ -15,7 +15,7 @@ from urllib.parse import urlparse
 from homeassistant.core import HomeAssistant
 from homeassistant.util.file import write_utf8_file
 
-from .data_path import get_data_dir
+from .data_path import get_data_dir, sync_legacy_skill_sources
 from .route_hints import build_route_envelope, build_route_hint
 
 try:
@@ -450,10 +450,6 @@ def _prompt_store_signature() -> tuple[str, ...]:
     return tuple(signature)
 
 
-# Internal sync metadata embedded as HTML comments at the very top of a
-# bundled markdown file (e.g. `<!-- version: 2 -->`) used by data_path's
-# per-file version sync. Strip them on load so they never leak into prompts
-# or tool responses.
 _META_MARKER_RE = re.compile(
     r"\A(?:\s*<!--\s*[A-Za-z][\w-]*\s*:[^>]*-->\s*)+",
 )
@@ -566,6 +562,11 @@ async def async_setup_prompt_store(hass: HomeAssistant) -> None:
 
 async def async_refresh_prompt_store(hass: HomeAssistant) -> None:
 
+    await hass.async_add_executor_job(
+        sync_legacy_skill_sources,
+        Path(hass.config.config_dir),
+        get_data_dir(),
+    )
     snapshot = await hass.async_add_executor_job(_read_prompt_store_from_disk)
     _set_prompt_store(snapshot)
     await async_reload_concept_aliases(hass)

@@ -20,25 +20,26 @@ def get_data_dir() -> Path:
     return _root
 
 
-# ---------------------------------------------------------------------------
-# Artifact directories exposed to AI-generated Python.
-#
-# Two well-known locations are injected into ``ExecutePython`` (inline) so the
-# AI can drop generated artefacts (PDFs, images, CSVs, etc.) in a predictable
-# place:
-#
-#   * OUTPUT_DIR — persistent, browser-reachable. Maps to
-#     ``<config>/www/claw_assistant/`` which Home Assistant exposes as
-#     ``/local/claw_assistant/<file>`` (no auth on local network unless the
-#     instance is hardened). Use for files the user is meant to download or
-#     share.
-#   * TMP_DIR — ephemeral, auto-cleaned. Maps to
-#     ``<config>/.storage/claw_assistant/tmp/``; entries older than
-#     ``TMP_RETENTION_HOURS`` are pruned hourly by ``tmp_cleanup``.
-# ---------------------------------------------------------------------------
 
 _OUTPUT_SUBDIR = "claw_assistant"
 TMP_RETENTION_HOURS = 24
+OUTPUT_MEDIA_RETENTION_HOURS = 2
+_OUTPUT_MEDIA_EXTENSIONS = frozenset(
+    {
+        ".jpg",
+        ".jpeg",
+        ".png",
+        ".gif",
+        ".webp",
+        ".bmp",
+        ".mp4",
+        ".mov",
+        ".mkv",
+        ".webm",
+        ".avi",
+        ".m4v",
+    }
+)
 
 
 def get_output_dir(hass: HomeAssistant) -> Path:
@@ -47,6 +48,10 @@ def get_output_dir(hass: HomeAssistant) -> Path:
     out = Path(hass.config.config_dir) / "www" / _OUTPUT_SUBDIR
     out.mkdir(parents=True, exist_ok=True)
     return out
+
+
+def is_output_media_file(path: Path) -> bool:
+    return path.suffix.lower() in _OUTPUT_MEDIA_EXTENSIONS
 
 
 def get_tmp_dir(hass: HomeAssistant) -> Path:
@@ -130,6 +135,61 @@ def _migrate_from_kadermanager(config_dir: Path) -> None:
             LOGGER.warning("Failed to migrate adaptive_memory, will retry next restart")
 
 
+def _migrate_from_openclaw_skills(target_root: Path) -> None:
+    legacy_skills_dir = Path.home() / ".openclaw" / "workspace" / "skills"
+    _import_legacy_skill_dir(legacy_skills_dir, target_root, label="OpenClaw")
+
+
+def _migrate_from_config_skills(config_dir: Path, target_root: Path) -> None:
+    legacy_skills_dir = config_dir / "skills"
+    _import_legacy_skill_dir(legacy_skills_dir, target_root, label="config/skills")
+
+
+def _import_legacy_skill_dir(source_dir: Path, target_root: Path, *, label: str) -> None:
+    if not source_dir.is_dir():
+        return
+
+    target_skills_dir = target_root / "skills"
+    target_skills_dir.mkdir(parents=True, exist_ok=True)
+
+    migrated = 0
+    skipped = 0
+    for source in sorted(source_dir.glob("*.md")):
+        destination = target_skills_dir / source.name
+        try:
+            if destination.exists():
+                skipped += 1
+                continue
+            shutil.copy2(source, destination)
+            migrated += 1
+        except Exception:  # noqa: BLE001
+            LOGGER.warning("Failed to import legacy %s skill: %s", label, source)
+
+    for source_dir_entry in sorted(path for path in source_dir.iterdir() if path.is_dir()):
+        source_skill = source_dir_entry / "SKILL.md"
+        if not source_skill.is_file():
+            continue
+        destination_dir = target_skills_dir / source_dir_entry.name
+        try:
+            if destination_dir.exists():
+                skipped += 1
+                continue
+            shutil.copytree(source_dir_entry, destination_dir)
+            migrated += 1
+        except Exception:  # noqa: BLE001
+            LOGGER.warning("Failed to import legacy %s skill directory: %s", label, source_dir_entry)
+
+    if migrated or skipped:
+        LOGGER.info(
+            "Legacy skill import complete (%s): migrated=%d skipped=%d source=%s target=%s",
+            label,
+            migrated,
+            skipped,
+            source_dir,
+            target_skills_dir,
+        )
+
+
 _SYSTEM_UPDATE_VERSION = "6.6.0"
 
 _FORCE_UPDATE_ENTRIES = [
@@ -137,19 +197,11 @@ _FORCE_UPDATE_ENTRIES = [
     "prompts/memory_routing.md",
     "prompts/native_mode.md",
     "prompts/skill_mode.md",
-    # NOTE: skills/homeassistant_runtime_guide.md is intentionally excluded
-    # here — it has its own per-file version marker (see
-    # _VERSIONED_BUNDLED_DOCS below) so it can evolve independently of the
-    # global _SYSTEM_UPDATE_VERSION.
     "workspace/AGENTS.md",
     "workspace/BOOTSTRAP.md",
     "homeassistant_guide",
 ]
 
-# Markdown documents that carry their own ``<!-- version: N -->`` marker on
-# the first line. On startup we compare bundle vs user copy and force-copy
-# bundle whenever its version is strictly newer. Bumping the marker in
-# ``data/<entry>`` is enough to push an update to every installation.
 _VERSIONED_BUNDLED_DOCS: tuple[str, ...] = (
     "skills/homeassistant_runtime_guide.md",
 )
@@ -192,7 +244,6 @@ def _sync_versioned_docs(root: Path) -> None:
         dst = root / entry
         bundle_version = _read_md_version(src)
         if not bundle_version:
-            # Bundle file lacks a marker — nothing to compare; skip.
             LOGGER.debug("Skipping versioned sync for %s: no marker in bundle", entry)
             continue
         local_version = _read_md_version(dst)
@@ -230,8 +281,9 @@ def _apply_system_update(root: Path) -> None:
 
 def init_storage(hass: HomeAssistant) -> Path:
     global _root
-    _migrate_from_kadermanager(Path(hass.config.config_dir))
-    root = Path(hass.config.config_dir) / ".storage" / _STORAGE_SUBDIR
+    config_dir = Path(hass.config.config_dir)
+    _migrate_from_kadermanager(config_dir)
+    root = config_dir / ".storage" / _STORAGE_SUBDIR
     root.mkdir(parents=True, exist_ok=True)
 
     entries = [
@@ -252,9 +304,16 @@ def init_storage(hass: HomeAssistant) -> Path:
     for subdir in ("skills", "prompts", "workspace", "workspace/memory", "pending"):
         (root / subdir).mkdir(parents=True, exist_ok=True)
 
+    _migrate_from_openclaw_skills(root)
+    _migrate_from_config_skills(config_dir, root)
     _apply_system_update(root)
     _sync_versioned_docs(root)
 
     _root = root
     LOGGER.info("Data storage initialized at %s", root)
     return root
+
+
+def sync_legacy_skill_sources(config_dir: Path, target_root: Path) -> None:
+    _migrate_from_openclaw_skills(target_root)
+    _migrate_from_config_skills(config_dir, target_root)
