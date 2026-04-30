@@ -9,7 +9,7 @@ from homeassistant.core import HomeAssistant
 
 from .adaptive_memory import async_setup_adaptive_memory
 from .coordinator import setup_ai_coordinator
-from .data_path import init_storage
+from .data_path import get_output_dir, init_storage
 from .graph_service import async_setup_graph_store, async_unload_graph_store
 from .ha_guide_store import async_setup_homeassistant_guide_store
 from .hook import uninstall_conversation_hook
@@ -18,6 +18,7 @@ from .official_websocket_hook import (
     install_official_websocket_process_hook,
     uninstall_official_websocket_process_hook,
 )
+from .output_cleanup import async_setup_output_cleanup, async_unload_output_cleanup
 from .patches import (
     patch_chat_log_result_extraction,
     patch_hide_tool_calls_from_pipeline,
@@ -42,12 +43,14 @@ async def async_setup_runtime(hass: HomeAssistant, entry: ConfigEntry) -> None:
     from .hook import install_conversation_hook
 
     await hass.async_add_executor_job(init_storage, hass)
+    hass.config.allowlist_external_dirs.add(str(get_output_dir(hass).resolve(strict=False)))
     await async_setup_workspace_store(hass)
     await async_setup_graph_store(hass)
     await async_setup_adaptive_memory(hass)
     await async_setup_homeassistant_guide_store(hass)
     await async_setup_prompt_store(hass)
     await async_setup_internal_llm(hass)
+    await async_setup_output_cleanup(hass)
     await async_setup_tmp_cleanup(hass)
     patch_local_intents(hass)
     patch_chat_log_result_extraction(hass)
@@ -91,6 +94,7 @@ async def async_unload_runtime(hass: HomeAssistant) -> None:
 
     await async_cleanup_index_manager(hass)
     await async_unload_graph_store(hass)
+    await async_unload_output_cleanup(hass)
     await async_unload_tmp_cleanup(hass)
     uninstall_conversation_hook(hass)
     uninstall_official_websocket_process_hook(hass)
