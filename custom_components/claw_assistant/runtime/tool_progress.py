@@ -57,7 +57,7 @@ def _tool_desc(name: str, a: dict, lang: str) -> str:
             return f"💫 正在查询 {eid} 近{h}小时历史..." if eid else "💫 正在查询历史数据..."
         return f"💫 History: {eid} {h}h..." if eid else "💫 History {h}h..."
     if name == "ExecutePython":
-        return "🧬 正在执行代码..." if zh else "🧬 Executing code..."
+        return "🪐 正在执行代码..." if zh else "🪐 Executing code..."
     if name == "CameraAnalyze":
         cam = e(str(a.get("camera_entity", "")))[:20]
         mode = str(a.get("mode", "snapshot")).lower()
