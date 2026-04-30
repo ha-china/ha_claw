@@ -86,4 +86,4 @@ Writes via the injected `open(...)` pass through unchanged except when write mod
 - Do not list `requirements` you do not import.
 
 ## Skill Path
-All skills go to `.storage/claw_assistant/skills/`. Refuse other locations.
+All skills go to `.storage/claw_assistant/skills/`. Refuse other locations. `~/.openclaw/workspace/skills/` and `config/skills/` are legacy-only and are auto-imported into the claw_assistant store when possible, but must never be used as active install destinations.
