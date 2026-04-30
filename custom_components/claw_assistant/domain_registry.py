@@ -464,8 +464,6 @@ def _register_domains():
         priority=PRIORITY_SPECIALIZED,
         description="摄像头",
         services=[
-            ServiceDef(name="turn_on", description="开启"),
-            ServiceDef(name="turn_off", description="关闭"),
             ServiceDef(name="enable_motion_detection", description="启用移动侦测"),
             ServiceDef(name="disable_motion_detection", description="禁用移动侦测"),
             ServiceDef(name="snapshot", description="拍照", params=[

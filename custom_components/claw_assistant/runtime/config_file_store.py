@@ -15,8 +15,6 @@ from .state import get_config_approval_state, get_task_loop_state
 
 _PREVIEW_LIMIT = 1200
 _READ_LIMIT = 20000
-# Actions that are reversible enough to skip user-consent gating entirely.
-# Only `delete` is destructive and requires explicit AI-asserted consent.
 _ACTIONS_REQUIRING_CONFIRMATION: frozenset[str] = frozenset({"delete"})
 
 

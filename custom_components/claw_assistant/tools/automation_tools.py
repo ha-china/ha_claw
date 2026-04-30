@@ -84,9 +84,6 @@ class AutomationTool(llm.Tool):
         automation_id = str(tool_input.tool_args.get("automation_id", "")).strip()
         config = tool_input.tool_args.get("config") or {}
         args = tool_input.tool_args
-        # Entity-registry-level fields (icon/area_id). Use sentinel so that
-        # omitting them preserves the current value, while explicitly passing
-        # None clears it.
         _SENTINEL = object()
         icon = args.get("icon", _SENTINEL) if "icon" in args else _SENTINEL
         area_id = args.get("area_id", _SENTINEL) if "area_id" in args else _SENTINEL
@@ -265,7 +262,6 @@ class AutomationTool(llm.Tool):
                     raw = getattr(auto, "raw_config", None)
                     if isinstance(raw, dict):
                         return dict(raw)
-        # Read automations.yaml
         path = hass.config.path(AUTOMATION_CONFIG_PATH)
         if not os.path.isfile(path):
             return None

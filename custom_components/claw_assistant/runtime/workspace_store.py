@@ -339,7 +339,6 @@ async def async_save_workspace_doc(
     path = _doc_path(name)
     saved_path = await hass.async_add_executor_job(_write_doc, path, markdown)
     await async_refresh_workspace_store(hass)
-    # Lazy import: graph_service depends on workspace_store at bootstrap.
     try:
         from .graph_service import async_reindex_doc  # noqa: PLC0415
 
@@ -423,9 +422,6 @@ def _build_memory_prompt_block(memory_markdown: str, user_text: str) -> str:
     if not memory_markdown.strip():
         return ""
 
-    # Prefer graph-backed recall: ranked, deduped, decay-aware, edge-expanded.
-    # Falls back to the legacy keyword scan when the store is not ready or
-    # the query is too short to produce hits.
     graph_lines: list[str] = []
     try:
         from .graph_service import recall_memory_lines_sync  # noqa: PLC0415
@@ -612,9 +608,6 @@ def build_workspace_startup_bundle(*, user_text: str = "") -> str:
     sections.append(_workspace_governance_block())
     for name, content in loaded_docs:
         header = f"### {name}.md" if not name.startswith("memory/") else f"### {name}"
-        # Per-doc purpose is intentionally NOT repeated here — the Governance
-        # block above already lists every doc's allowed scope. Repeating it
-        # per loaded doc only bloats the prompt without adding signal.
         sections.append(f"{header}\n{content}")
     if skipped_docs:
         status_lines = [

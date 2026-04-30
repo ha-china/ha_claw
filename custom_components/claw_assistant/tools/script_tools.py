@@ -133,7 +133,6 @@ class ScriptTool(llm.Tool):
             _LOGGER.error("ScriptTool error: %s", err)
             return {"success": False, "error": str(err)}
 
-    # ---------- helpers ----------
 
     @staticmethod
     def _resolve_script_id(entity_id: str, script_id: str) -> str:
@@ -178,7 +177,6 @@ class ScriptTool(llm.Tool):
         item = loaded.get(object_id)
         return dict(item) if isinstance(item, dict) else None
 
-    # ---------- actions ----------
 
     async def _list_scripts(
         self, hass: HomeAssistant, *, page: int = 1, page_size: int = 10
@@ -498,8 +496,6 @@ class ScriptTool(llm.Tool):
             return {"success": False, "error": f"Script '{object_id}' not found"}
 
         async def hook(action: str, config_key: str) -> None:
-            # Reload, then remove the entity registry entry — matches the
-            # frontend behaviour in homeassistant.components.config.script.
             await hass.services.async_call(
                 SCRIPT_DOMAIN, SERVICE_RELOAD, {}, blocking=True
             )
@@ -528,8 +524,6 @@ class ScriptTool(llm.Tool):
             else:
                 return {"success": False, "error": f"Script '{object_id}' not in scripts.yaml"}
 
-        # Use the ACTION_DELETE constant value ("delete") so the hook mirrors
-        # the HA config view semantics for removal.
         await hook("delete", object_id)
 
         return {

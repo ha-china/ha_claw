@@ -244,7 +244,6 @@ async def run_in_sandbox(
     )
 
     if dry_run:
-        # Compile-only smoke test to catch syntax errors cheaply.
         try:
             compile(code, "<sandbox>", "exec")
         except SyntaxError as err:

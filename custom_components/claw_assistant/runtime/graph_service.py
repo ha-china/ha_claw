@@ -25,9 +25,6 @@ LOGGER = logging.getLogger(__name__)
 _HASS_DATA_KEY = "claw_assistant_graph_store"
 _DB_FILENAME = "graph.db"
 
-# Module-level singleton mirror of hass.data[_HASS_DATA_KEY]; lets sync
-# prompt builders (which have no hass handle) reach the store. Set inside
-# async_setup_graph_store, cleared inside async_unload_graph_store.
 _singleton_store: GraphStore | None = None
 
 
@@ -136,8 +133,6 @@ async def async_bootstrap_reindex(
 ) -> dict[str, int]:
     """Read every workspace markdown and upsert their nodes."""
 
-    # Imported lazily to avoid a circular import via workspace_store ->
-    # graph_service -> workspace_store at module load.
     from .workspace_store import WORKSPACE_DOC_NAMES, _doc_path  # noqa: PLC0415
 
     def _scan_and_index() -> dict[str, int]:

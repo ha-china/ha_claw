@@ -488,9 +488,6 @@ class EnhancedAPI(llm.API):
 
     async def async_get_api_instance(self, llm_context: llm.LLMContext) -> llm.APIInstance:
         tools = build_runtime_tool_list()
-        # Per-turn api_prompt: minimal hints only. The full bundle (HA runtime
-        # guide + workspace + governance + master prompt) is injected once at
-        # conversation start via prompting.build_base_prompt -> extra_system_prompt.
         return llm.APIInstance(
             api=self,
             api_prompt=build_internal_llm_prompt(full=False),

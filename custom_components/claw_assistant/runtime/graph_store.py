@@ -103,7 +103,7 @@ class Node:
 class RecallHit:
     node: Node
     score: float
-    via: str  # "fts" | "edge:<relation>"
+    via: str
     related_edges: list[tuple[int, str]] = field(default_factory=list)
 
 
@@ -172,9 +172,6 @@ class GraphStore:
     def __init__(self, db_path: Path | str) -> None:
         self._path = Path(db_path)
         self._path.parent.mkdir(parents=True, exist_ok=True)
-        # check_same_thread=False so the store can be shared across Home
-        # Assistant's executor threads; we serialize ourselves with _lock.
-        # isolation_level=None -> autocommit; explicit transactions only when needed.
         self._conn = sqlite3.connect(
             str(self._path),
             isolation_level=None,
@@ -186,7 +183,6 @@ class GraphStore:
         try:
             self._conn.execute("PRAGMA journal_mode = WAL")
         except sqlite3.DatabaseError:
-            # WAL not available on some platforms; safe to ignore.
             pass
         self._conn.executescript(_SCHEMA)
 
@@ -200,7 +196,6 @@ class GraphStore:
     def __exit__(self, exc_type, exc, tb) -> None:
         self.close()
 
-    # ------------------------------------------------------------------ writes
 
     def upsert_node(
         self,
@@ -302,7 +297,6 @@ class GraphStore:
                 (float(confidence), int(node_id)),
             )
 
-    # ------------------------------------------------------------------- reads
 
     def get(self, node_id: int) -> Node | None:
         with self._lock:
@@ -381,7 +375,6 @@ class GraphStore:
         hits: dict[int, RecallHit] = {}
         for row in rows:
             node = _row_to_node(row)
-            # bm25 returns a distance (lower=better, non-negative for OR'd terms).
             raw_rank = float(row["rank"])
             similarity = 1.0 / (1.0 + abs(raw_rank))
             score = _decay_score(node, now, half_life_days) * similarity

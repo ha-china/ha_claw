@@ -46,7 +46,6 @@ def _sweep(tmp_dir: Path, retention_seconds: float) -> tuple[int, int]:
                     path.unlink()
                     removed_files += 1
             elif path.is_dir():
-                # Drop empty sub-dirs left after sweeping their files.
                 try:
                     next(path.iterdir())
                 except StopIteration:
@@ -80,7 +79,6 @@ async def async_setup_tmp_cleanup(hass: HomeAssistant) -> None:
                 tmp_dir,
             )
 
-    # Initial sweep (don't await — fire-and-forget through executor).
     await hass.async_add_executor_job(_sweep, tmp_dir, retention_seconds)
 
     unsub = async_track_time_interval(hass, _tick, _CLEAN_INTERVAL)

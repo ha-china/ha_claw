@@ -23,9 +23,6 @@ __all__ = [
 ]
 
 
-# kind is the *default* for lines that do not carry stronger signal; a
-# doc may still emit multiple kinds in the future (e.g. MEMORY has both
-# preferences and constraints) — for now we keep it coarse.
 _DOC_DEFAULT_KIND: dict[str, str] = {
     "MEMORY": "preference",
     "USER": "user_fact",

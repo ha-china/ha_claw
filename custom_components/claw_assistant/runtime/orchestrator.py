@@ -249,9 +249,6 @@ async def _execute_conversation_turn_inner(
             base_prompt,
             [extra_system_prompt] if extra_system_prompt else [],
         )
-    # Non-first turns: keep whatever extra_system_prompt the caller passed in.
-    # HA core injects current date/time via DATE_TIME_PROMPT, so no duplicate
-    # "Runtime Context" block is needed here.
 
     if not fallback_agents:
         continuation_index = 0

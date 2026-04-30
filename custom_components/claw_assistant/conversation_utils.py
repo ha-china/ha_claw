@@ -217,7 +217,6 @@ class ConversationHistory:
                     ],
                 }
             )
-        # Most recent conversation first
         result.sort(key=lambda x: x["last_touched_seconds_ago"])
         return result
 
@@ -278,7 +277,6 @@ class ConversationHistory:
             "newest_turn": time.strftime("%Y-%m-%d %H:%M", time.localtime(newest)) if newest else None,
         }
 
-    # -------- Persistence --------
 
     def attach_store(self, store: "Store") -> None:
         """Attach an HA Store; subsequent mutations will schedule debounced saves."""
@@ -374,7 +372,6 @@ async def async_setup_history_store(hass: "HomeAssistant") -> ConversationHistor
             "Restored %d conversation turns from storage (24h retention)", loaded
         )
     history.attach_store(store)
-    # Drop anything expired and persist cleaned snapshot
     history.cleanup_all()
     return history
 
