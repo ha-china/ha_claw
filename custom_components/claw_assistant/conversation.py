@@ -132,8 +132,6 @@ class FallbackConversationAgent(
 
 
 
-        await asyncio.sleep(0.02)
-
         if user_input.conversation_id is None:
             user_input = conversation.ConversationInput(
                 text=user_input.text,
@@ -222,6 +220,15 @@ class FallbackConversationAgent(
     async def _maybe_handle_native_intent(
         self, user_input: conversation.ConversationInput
     ) -> conversation.ConversationResult | None:
+
+        text = (user_input.text or "").strip()
+        if (
+            not text
+            or len(text) > 80
+            or "\n" in text
+            or text.startswith("/")
+        ):
+            return None
 
         default_agent = get_default_agent(self.hass)
         try:

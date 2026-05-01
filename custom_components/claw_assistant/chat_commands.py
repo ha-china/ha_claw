@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 import asyncio
+import re
 from typing import Any
 
 from homeassistant.components import conversation
@@ -24,6 +25,10 @@ from .runtime.skill_store import (
     skill_matches_visibility,
 )
 from .runtime.loop_controller import reset_loop_for_conversation
+from .runtime.continuous_conversation import (
+    continuous_conversation_enabled,
+    start_new_conversation,
+)
 from .runtime.state import (
     get_active_conversation_state,
     get_conversation_status,
@@ -56,27 +61,62 @@ _STOP_REQUESTS_KEY = "chat_command_stop_requests"
 _RESERVED_COMMANDS = reserved_command_names()
 
 
-def parse_chat_command(text: str) -> ChatCommand | None:
-    stripped = text.strip()
-    if not stripped.startswith("/"):
-        return None
+_WRAPPER_PREFIX_RE = re.compile(r"^\s*[\[\<【][^\]\>】]*[\]\>】]\s*")
+_HAS_IM_TAG_RE = re.compile(r"\[IM:[^\]]*\]")
+_COMMAND_TOKEN_RE = re.compile(r"(?<![\w/])/([a-zA-Z][\w\-]*)(?:\s+(.*))?$", re.DOTALL)
 
-    body = stripped[1:].strip()
-    if not body:
-        return None
 
-    parts = body.split(None, 1)
-    name = parts[0].lower()
-    args = parts[1].strip() if len(parts) > 1 else ""
-    if not name:
-        return None
-    core_spec = resolve_core_command(name)
+def _strip_wrapper_prefix(text: str) -> str:
+    cleaned = text
+    while True:
+        match = _WRAPPER_PREFIX_RE.match(cleaned)
+        if not match:
+            break
+        cleaned = cleaned[match.end():]
+    return cleaned
+
+
+def _resolve_command_name(name: str) -> tuple[str, str] | None:
+    lowered = name.lower()
+    core_spec = resolve_core_command(lowered)
     if core_spec is not None:
-        return ChatCommand(name=core_spec.name, args=args, raw_name=name)
+        return core_spec.name, lowered
+    if _skill_command_registry().get(lowered) is not None:
+        return "skill_invoke", lowered
+    return None
 
-    skill_entry = _skill_command_registry().get(name)
-    if skill_entry is not None:
-        return ChatCommand(name="skill_invoke", args=args, raw_name=name)
+
+def parse_chat_command(text: str) -> ChatCommand | None:
+    if not text:
+        return None
+    candidates: list[str] = []
+    stripped = _strip_wrapper_prefix(text).strip()
+    if stripped:
+        candidates.append(stripped)
+    if _HAS_IM_TAG_RE.search(text):
+        candidates.append(text)
+
+    for candidate in candidates:
+        if candidate.startswith("/"):
+            body = candidate[1:].strip()
+            if not body:
+                continue
+            parts = body.split(None, 1)
+            resolved = _resolve_command_name(parts[0])
+            if resolved is None:
+                continue
+            args = parts[1].strip() if len(parts) > 1 else ""
+            return ChatCommand(name=resolved[0], args=args, raw_name=resolved[1])
+
+        match = _COMMAND_TOKEN_RE.search(candidate)
+        if not match:
+            continue
+        resolved = _resolve_command_name(match.group(1))
+        if resolved is None:
+            continue
+        args = (match.group(2) or "").strip()
+        return ChatCommand(name=resolved[0], args=args, raw_name=resolved[1])
+
     return None
 
 
@@ -761,6 +801,18 @@ async def async_handle_chat_command(
         return ChatCommandOutcome(result=_build_result(user_input, _build_command_catalog_message()))
 
     if command.name == "new":
+        if continuous_conversation_enabled(hass):
+            conversation_id = start_new_conversation(hass, conversation_id)
+            user_input = conversation.ConversationInput(
+                text=user_input.text,
+                conversation_id=conversation_id,
+                language=user_input.language,
+                context=getattr(user_input, "context", None),
+                device_id=getattr(user_input, "device_id", None),
+                agent_id=getattr(user_input, "agent_id", None),
+                satellite_id=getattr(user_input, "satellite_id", None),
+                extra_system_prompt=getattr(user_input, "extra_system_prompt", None),
+            )
         _clear_conversation_runtime(hass, conversation_id)
         return ChatCommandOutcome(result=_build_result(user_input, "Started a new conversation."))
 

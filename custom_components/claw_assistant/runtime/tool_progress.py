@@ -242,44 +242,26 @@ def _tool_desc(name: str, a: dict, lang: str) -> str:
     if name == "SetConversationState":
         reason = e(str(a.get("reason", "")))[:20]
         if zh:
-            return f"🔗 正在设置状态: {reason}..." if reason else "🔗 正在设置对话状态..."
+            return f"🔗 准备反馈中: {reason}..." if reason else "🔗 准备对话状态..."
         return f"🔗 Setting state: {reason}..." if reason else "🔗 Setting conversation state..."
     if name == "AgentHandoff":
         raw_target = str(a.get("agent_id", "")).strip()
         target = e(raw_target.replace("conversation.", ""))[:15]
         q = e(str(a.get("question", "")))[:20]
         intent = str(a.get("intent", "consult"))
-        rounds = int(a.get("max_rounds", 1) or 1)
-        _INTENT_ZH = {"consult": "咨询", "request": "请求", "review": "审查"}
-        _INTENT_EN = {"consult": "Consulting", "request": "Requesting", "review": "Review by"}
-        rounds_hint_zh = f"(最多{rounds}轮)" if rounds > 1 else ""
-        rounds_hint_en = f"(up to {rounds} rounds)" if rounds > 1 else ""
+        verb_zh = {"consult": "请教", "request": "委托", "review": "请审阅"}.get(intent, "请教")
+        verb_en = {"consult": "Asking", "request": "Delegating to", "review": "Review by"}.get(intent, "Asking")
         if zh:
-            verb = _INTENT_ZH.get(intent, "咨询")
-            if target and q:
-                return f"🤝 正在{verb} {target}: {q}{rounds_hint_zh}..."
-            if target:
-                return f"🤝 正在{verb} {target}{rounds_hint_zh}..."
-            if q:
-                return f"🤝 正在{verb}另一个 AI: {q}{rounds_hint_zh}..."
-            return f"🤝 正在{verb}另一个 AI{rounds_hint_zh}..."
-        verb = _INTENT_EN.get(intent, "Consulting")
-        if target and q:
-            return f"🤝 {verb} {target}: {q}{rounds_hint_en}..."
-        if target:
-            return f"🤝 {verb} {target}{rounds_hint_en}..."
-        if q:
-            return f"🤝 {verb} peer AI: {q}{rounds_hint_en}..."
-        return f"🤝 {verb} peer AI{rounds_hint_en}..."
+            who = target or "另一个 AI"
+            return f"🤝 {verb_zh} {who}: {q}..." if q else f"🤝 {verb_zh} {who}..."
+        who = target or "peer AI"
+        return f"🤝 {verb_en} {who}: {q}..." if q else f"🤝 {verb_en} {who}..."
     if name == "NextAgentHandoff":
         q = e(str(a.get("question", "")))[:20]
         peer = e(str(a.get("agent_name", "")))[:15] or ("下一个 AI" if zh else "next AI")
-        rounds = int(a.get("max_rounds", 1) or 1)
-        rounds_zh = f"(最多{rounds}轮)" if rounds > 1 else ""
-        rounds_en = f"({rounds} rounds)" if rounds > 1 else ""
         if zh:
-            return f"🤝 正在咨询 {peer}: {q}{rounds_zh}..." if q else f"🤝 正在咨询 {peer}{rounds_zh}..."
-        return f"🤝 Consulting {peer}: {q}{rounds_en}..." if q else f"🤝 Consulting {peer}{rounds_en}..."
+            return f"🤝 交棒给 {peer}: {q}..." if q else f"🤝 交棒给 {peer}..."
+        return f"🤝 Handing off to {peer}: {q}..." if q else f"🤝 Handing off to {peer}..."
     if name == "ValidateService":
         d = e(str(a.get("domain", "")))
         s = e(str(a.get("service", "")))

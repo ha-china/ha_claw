@@ -154,8 +154,6 @@ def parse_heartbeat_tasks(markdown: str) -> list[HeartbeatTask]:
 def serialize_heartbeat_tasks(tasks: list[HeartbeatTask]) -> str:
 
     lines = [
-        "# HEARTBEAT.md",
-        "",
         "Use HeartbeatManager to create, update, complete, or delete follow-up tasks.",
         "These are lightweight reminders/checks, not a background polling engine.",
         "",

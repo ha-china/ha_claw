@@ -8,6 +8,7 @@ CONF_ERROR_RESPONSES = "error_responses"
 CONF_ENABLE_AI_SUMMARY = "enable_ai_summary"
 CONF_ENABLE_WEB_SEARCH = "enable_web_search"
 CONF_ENABLE_STREAMING_EFFECT = "enable_streaming_effect"
+CONF_CONTINUOUS_CONVERSATION = "continuous_conversation"
 CONF_MAX_TOOL_REPEAT = "max_tool_repeat"
 CONF_PIPELINE_TIMEOUT = "pipeline_timeout"
 

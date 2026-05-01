@@ -51,7 +51,7 @@ from .state import (
 from .summary import process_ai_summary
 from .tool_result_summary import extract_successful_tool_response
 from .turn_kernel import execute_kernel_turn
-from .workspace_store import async_refresh_workspace_store
+from .workspace_store import async_refresh_workspace_store, get_user_context_prefix
 
 LOGGER = logging.getLogger(__name__)
 
@@ -222,6 +222,11 @@ async def _execute_conversation_turn_inner(
         await async_refresh_workspace_store(hass)
         await async_refresh_homeassistant_guide_store(hass)
         await async_refresh_prompt_store(hass)
+
+    if int(task_loop.get("turn_count", 0) or 0) > 1:
+        user_prefix = get_user_context_prefix()
+        if user_prefix:
+            text = f"{user_prefix}\n\n{text}"
 
     runtime_config = build_conversation_runtime_config_for_hass(entry, hass)
     fallback_agents = runtime_config.fallback_agents

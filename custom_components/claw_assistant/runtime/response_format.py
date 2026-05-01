@@ -326,9 +326,27 @@ def is_marshaled_tool_payload(text: str) -> bool:
     )
 
 
+_MEMORY_CONTEXT_BLOCK_RE = re.compile(
+    r"<\s*memory-context\s*>[\s\S]*?</\s*memory-context\s*>",
+    flags=re.IGNORECASE,
+)
+_MEMORY_CONTEXT_NOTE_RE = re.compile(
+    r"\[System note:\s*The following is recalled memory context,\s*NOT new user input\.\s*Treat as informational background data\.\]\s*",
+    flags=re.IGNORECASE,
+)
+_MEMORY_CONTEXT_TAG_RE = re.compile(r"</?\s*memory-context\s*>", flags=re.IGNORECASE)
+
+
+def _strip_memory_context(text: str) -> str:
+    text = _MEMORY_CONTEXT_BLOCK_RE.sub("", text)
+    text = _MEMORY_CONTEXT_NOTE_RE.sub("", text)
+    text = _MEMORY_CONTEXT_TAG_RE.sub("", text)
+    return text
+
+
 def sanitize_response_text(text: str) -> str:
 
-    stripped = text.strip()
+    stripped = _strip_memory_context(text).strip()
     if not stripped:
         return ""
 

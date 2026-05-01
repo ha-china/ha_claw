@@ -29,7 +29,7 @@ def _changelog_path() -> Path:
 def _pending_dir() -> Path:
     return get_data_dir() / "pending"
 
-VALID_TARGET_TYPES = frozenset({"skill", "guide"})
+VALID_TARGET_TYPES = frozenset({"skill", "guide", "memory"})
 VALID_ACTIONS = frozenset({"create", "update", "delete"})
 
 _FRONTMATTER_RE = re.compile(r"^---\n(.*?)\n---\n?", flags=re.DOTALL)

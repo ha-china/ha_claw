@@ -101,17 +101,36 @@ async def _delta_stream(
                 }
 
 
-_STREAM_CHUNK_SIZE = 4
-
-
 async def _final_content_stream(
     response_text: str,
 ) -> AsyncGenerator[dict[str, Any]]:
+    """Emit the final assistant content as a single delta.
+
+    Background: previously this generator chunked the response into
+    4-character pieces and yielded one delta per chunk to drive a
+    typewriter animation in the HA voice_command dialog. That stream
+    interacts badly with the upstream frontend in two ways:
+
+    1. The dialog renders the final answer through
+       `<ha-markdown breaks cache>`; the `cache` attribute makes the
+       element reuse its previously rendered markdown DOM. Under heavy
+       per-chunk requestUpdate pressure, the cached subtree can lock to
+       an intermediate state, surfacing as a truncated final answer.
+    2. Each chunk fires a Lit requestUpdate, and the Lit batching can
+       coalesce or skip frames when chunks arrive faster than the render
+       cycle, occasionally dropping the very last appended chunk.
+
+    Sending the full response in one delta sidesteps both issues:
+    the dialog accumulates exactly once, the markdown element receives
+    the complete content in a single render pass, and there is no
+    streaming race window left for the buggy lit element to lose text
+    in. The visual cost is the typewriter effect; the gain is that the
+    final answer is always whole.
+    """
 
     yield {"role": "assistant"}
-    for i in range(0, len(response_text), _STREAM_CHUNK_SIZE):
-        yield {"content": response_text[i : i + _STREAM_CHUNK_SIZE]}
-        await asyncio.sleep(0)
+    if response_text:
+        yield {"content": response_text}
 
 
 async def async_bridge_native_chatlog_turn(
