@@ -181,6 +181,10 @@ async def async_setup_homeassistant_guide_store(hass: HomeAssistant) -> None:
 
 async def async_refresh_homeassistant_guide_store(hass: HomeAssistant) -> None:
 
+    new_signature = await hass.async_add_executor_job(_guide_store_signature)
+    current = _GUIDE_STORE.get("snapshot")
+    if current is not None and current.signature and current.signature == new_signature:
+        return
     snapshot = await hass.async_add_executor_job(_read_guide_store_from_disk)
     _set_guide_store(snapshot)
 

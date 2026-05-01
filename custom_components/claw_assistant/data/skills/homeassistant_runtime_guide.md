@@ -1,4 +1,4 @@
-<!-- version: 8 -->
+<!-- version: 9 -->
 ---
 name: homeassistant_runtime_guide
 description: Primary runtime guide for Home Assistant workflows inside claw_assistant.
@@ -51,16 +51,7 @@ Priority: native tool → inline Python → shell → ssh → sandbox.
 
 ## ExecutePython
 
-Inline mode injects these globals (do not shadow):
-
-| Name | Type | Purpose |
-| --- | --- | --- |
-| `hass` | HomeAssistant | Service calls, state, notify. |
-| `OUTPUT_DIR` | `pathlib.Path` | Persistent dir served as `/local/claw_assistant/<file>`. For shareable output. |
-| `TMP_DIR` | `pathlib.Path` | Ephemeral dir, auto-pruned after 24h. For intermediates. |
-| `output_url(name)` | function | Absolute URL for a file in `OUTPUT_DIR`; falls back to the relative `/local/...` path when no HA URL is configured. |
-| `list_outputs()` | function | `[{name, path, url, size, mtime}, ...]` over `OUTPUT_DIR`. |
-| `list_tmp()` | function | Same shape (no `url`) over `TMP_DIR`. |
+Inline globals and output URL rules live in the `ExecutePython` tool description; do not shadow injected names.
 
 ### Tmp steering (inline only)
 

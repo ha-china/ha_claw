@@ -203,6 +203,7 @@ _FORCE_UPDATE_ENTRIES = [
 ]
 
 _VERSIONED_BUNDLED_DOCS: tuple[str, ...] = (
+    "prompts/runtime_context.md",
     "skills/homeassistant_runtime_guide.md",
 )
 

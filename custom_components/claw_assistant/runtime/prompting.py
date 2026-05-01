@@ -154,11 +154,8 @@ def _build_peer_agents_section(
 
     return (
         "## Peer AI Agents\n"
-        "You have peer AIs available for consultation via the `AgentHandoff` tool. "
-        "Use them when you want a second opinion, hit a blocker outside your strengths, "
-        "or the user explicitly asks for another agent.\n"
+        "Peers via `AgentHandoff` (explicit ask/blocker/second opinion):\n"
         + "\n".join(entries)
-        + "\nUse friendly names only when referring to peers in user-facing replies."
     )
 
 
@@ -181,31 +178,10 @@ def build_base_prompt(
         )
     else:
         appended_sections.append(
-            "## Channel\nType: ha (Home Assistant frontend)\n"
-            "Display format:\n"
-            "- Frontend-previewable assets must be written under `OUTPUT_DIR` "
-            "(= `/config/www/claw_assistant/`). Use `output_url(filename)` to "
-            "obtain the public URL string `/local/claw_assistant/<name>`.\n"
-            "- To embed saved media in your reply, ANY of the following forms "
-            "are auto-rendered into `<video>` / `![img]` / `[file](...)` based "
-            "on the file extension — pick whichever is most natural:\n"
-            "  - the string returned by `output_url(name)`, e.g. "
-            "`/local/claw_assistant/foo.mp4`\n"
-            "  - the absolute URL returned by `absolute_output_url(hass, name)`, "
-            "e.g. `http://<host>:8123/local/claw_assistant/foo.mp4`\n"
-            "  - the explicit tag form `[VIDEO:/local/claw_assistant/foo.mp4]` "
-            "(also `[IMAGE:...]`, `[GIF:...]`, `[FILE:...]`)\n"
-            "- Show image/camera directly: call `CameraAnalyze(mode=\"snapshot\")`, "
-            "include `markdown_hint` from response in your reply.\n"
-            "- Discover cameras: call `CameraAnalyze(camera_entity=\"list\")`.\n"
-            "- Analyze camera content: call `CameraAnalyze(mode=\"analyze\")`, "
-            "describe result, and include `markdown_hint` only when the image "
-            "itself should also be shown.\n"
-            "- Record video: call `ServiceCall(domain=\"camera\", service=\"record\", "
-            "data={\"entity_id\": ..., \"filename\": ..., \"duration\": <seconds>})`. "
-            "`duration` MUST be derived from the user's request (parse whatever "
-            "time expression they used, in any language, into seconds). Do not "
-            "use a silent default. If the user gave no duration, ask first."
+            "## Channel\nType: ha (Home Assistant frontend). "
+            "Write shareable media under `OUTPUT_DIR`; reply with `output_url(name)` "
+            "or `[VIDEO:/local/...]`/`[IMAGE:...]`/`[GIF:...]`/`[FILE:...]` — auto-rendered. "
+            "Camera/media specifics live in their tool descriptions."
         )
 
     topic_hint = build_homeassistant_topic_hint(text)

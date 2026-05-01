@@ -445,12 +445,27 @@ def build_assist_api_tools(
     return build_runtime_tool_list()
 
 
+_CACHED_RUNTIME_TOOLS: list[llm.Tool] | None = None
+
+
 def build_runtime_tool_list() -> list[llm.Tool]:
 
-    from ..tools.registry import build_tool_list
-    from ..tools.skill_tools import build_skill_tool_list
+    global _CACHED_RUNTIME_TOOLS
+    if _CACHED_RUNTIME_TOOLS is None:
+        from ..tools.registry import build_tool_list
+        from ..tools.skill_tools import build_skill_tool_list
 
-    return merge_tool_lists(build_tool_list(), build_skill_tool_list())
+        _CACHED_RUNTIME_TOOLS = merge_tool_lists(
+            build_tool_list(), build_skill_tool_list()
+        )
+    return _CACHED_RUNTIME_TOOLS
+
+
+def invalidate_runtime_tool_cache() -> None:
+    """Drop the memoized runtime tool list (call after dynamic tool edits)."""
+
+    global _CACHED_RUNTIME_TOOLS
+    _CACHED_RUNTIME_TOOLS = None
 
 
 def build_minimal_tool_list(

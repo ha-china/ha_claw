@@ -6,6 +6,7 @@ from copy import deepcopy
 from dataclasses import dataclass
 from difflib import SequenceMatcher
 from functools import partial
+import logging
 import os
 from pathlib import Path
 import re
@@ -17,6 +18,12 @@ from homeassistant.util.file import write_utf8_file
 
 from .data_path import get_data_dir, sync_legacy_skill_sources
 from .route_hints import build_route_envelope, build_route_hint
+
+LOGGER = logging.getLogger(__name__)
+
+_INTERNAL_SKILL_SLUGS: frozenset[str] = frozenset({
+    "homeassistant_runtime_guide",
+})
 
 try:
     import yaml
@@ -191,11 +198,134 @@ def _parse_frontmatter(content: str) -> dict[str, Any]:
     return parsed if isinstance(parsed, dict) else {}
 
 
+def _strip_frontmatter_block(content: str) -> str:
+    """Remove the leading YAML frontmatter from a skill/prompt document body.
+
+    The frontmatter is consumed once via _parse_frontmatter to populate
+    structured SkillDocument fields. Leaving it inside the body would ship
+    the same metadata to the LLM as raw text on every turn, wasting tokens.
+    """
+    return _FRONTMATTER_RE.sub("", content, count=1).lstrip()
+
+
 def ensure_skill_store() -> None:
 
     _data_dir().mkdir(parents=True, exist_ok=True)
     _skills_dir().mkdir(parents=True, exist_ok=True)
     _prompts_dir().mkdir(parents=True, exist_ok=True)
+    _migrate_flat_skills_to_folders()
+
+
+def _migrate_flat_skills_to_folders() -> None:
+    """Normalize installed skills to the ``<slug>/SKILL.md`` pack layout.
+
+    Rule:
+    - Flat ``<slug>.md`` files without a sibling ``<slug>/`` folder are moved
+      to ``<slug>/SKILL.md`` so every skill lives in its own folder and can
+      carry auxiliary files (memory.md, heartbeat.md, ...).
+    - If a ``<slug>/`` folder already exists, the flat file is left alone
+      (no merge, no overwrite). Resolving that conflict is up to the user.
+    """
+
+    skills_dir = _skills_dir()
+    if not skills_dir.exists():
+        return
+
+    for internal_slug in _INTERNAL_SKILL_SLUGS:
+        folder = skills_dir / internal_slug
+        flat = skills_dir / f"{internal_slug}.md"
+        if folder.is_dir() and not flat.exists():
+            pack_md = _folder_skill_file(folder)
+            if pack_md is not None:
+                try:
+                    pack_md.rename(flat)
+                    if not any(folder.iterdir()):
+                        folder.rmdir()
+                    LOGGER.info(
+                        "Restored internal skill %s to root (non-migratable)",
+                        internal_slug,
+                    )
+                except OSError as err:
+                    LOGGER.warning(
+                        "Internal skill restore failed for %s: %s",
+                        internal_slug,
+                        err,
+                    )
+
+    for path in list(skills_dir.iterdir()):
+        if not (path.is_file() and path.suffix.lower() == ".md"):
+            continue
+        slug = path.stem
+        if slug in _INTERNAL_SKILL_SLUGS:
+            continue
+        folder = skills_dir / slug
+        if folder.exists():
+            continue
+        try:
+            folder.mkdir(parents=True, exist_ok=False)
+            path.rename(folder / "SKILL.md")
+            LOGGER.info("Migrated flat skill %s.md -> %s/SKILL.md", slug, slug)
+        except OSError as err:
+            LOGGER.warning("Skill migration failed for %s: %s", slug, err)
+
+
+def _folder_skill_file(folder: Path) -> Path | None:
+    """Return the canonical Markdown file inside a skill folder, if any.
+
+    Supports Anthropic-style skill packs laid out as ``<slug>/SKILL.md``
+    (or ``README.md`` as a fallback).
+    """
+
+    for candidate in ("SKILL.md", "skill.md", "README.md", "readme.md"):
+        candidate_path = folder / candidate
+        if candidate_path.is_file():
+            return candidate_path
+    return None
+
+
+def _iter_skill_entries() -> list[tuple[str, Path]]:
+    """Enumerate installed skills across both layouts.
+
+    Yields ``(slug, path)`` for:
+    - Legacy single-file skills: ``skills/<slug>.md``
+    - Pack-style skills: ``skills/<slug>/SKILL.md``
+    """
+
+    entries: list[tuple[str, Path]] = []
+    skills_dir = _skills_dir()
+    if not skills_dir.exists():
+        return entries
+
+    for path in sorted(skills_dir.iterdir()):
+        if path.is_file() and path.suffix.lower() == ".md":
+            entries.append((path.stem, path))
+            continue
+        if path.is_dir():
+            md_path = _folder_skill_file(path)
+            if md_path is not None:
+                entries.append((path.name, md_path))
+    return entries
+
+
+def _resolve_skill_path(name: str, *, for_write: bool = False) -> Path:
+    """Return the on-disk path representing skill ``name``.
+
+    Preference order:
+    1. Existing pack layout ``<slug>/SKILL.md``
+    2. Existing flat file ``<slug>.md``
+    3. For writes: default to the flat file path (legacy behavior).
+    """
+
+    slug = _slugify(name)
+    folder = _skills_dir() / slug
+    if folder.is_dir():
+        pack_md = _folder_skill_file(folder)
+        if pack_md is not None:
+            return pack_md
+        if for_write:
+            return folder / "SKILL.md"
+    flat = _skills_dir() / f"{slug}.md"
+    return flat
 
 
 def _title_from_content(default_title: str, content: str) -> str:
@@ -220,9 +350,14 @@ def _extract_description(default_title: str, content: str, frontmatter: dict[str
         return description
 
     body = _body_from_markdown(content)
+    if _looks_like_html_document(body):
+        return default_title
+
     for line in body.splitlines():
         stripped = line.strip()
         if not stripped or stripped.startswith("#"):
+            continue
+        if stripped.startswith("<") or stripped.startswith("```"):
             continue
         return stripped[:240]
 
@@ -385,10 +520,14 @@ def infer_skill_name_from_url(url: str) -> str:
     return last_segment or "skill"
 
 
-def _skill_document_from_path(path: Path, content: str) -> SkillDocument:
+def _skill_document_from_path(
+    path: Path, content: str, *, slug_override: str | None = None
+) -> SkillDocument:
     frontmatter = _parse_frontmatter(content)
-    title = _title_from_content(path.stem, content)
-    description = _extract_description(title, content, frontmatter)
+    body = _strip_frontmatter_block(content)
+    slug = slug_override or path.stem
+    title = _title_from_content(slug, body)
+    description = _extract_description(title, body, frontmatter)
     (
         requires_toolsets,
         fallback_for_toolsets,
@@ -396,17 +535,17 @@ def _skill_document_from_path(path: Path, content: str) -> SkillDocument:
         fallback_for_tools,
     ) = _extract_tool_visibility(frontmatter)
     return SkillDocument(
-        slug=path.stem,
+        slug=slug,
         file_name=path.name,
         title=title,
-        content=content,
+        content=body,
         description=description,
         keywords=_extract_keywords(
-            slug=path.stem,
+            slug=slug,
             file_name=path.name,
             title=title,
             description=description,
-            content=content,
+            content=body,
             frontmatter=frontmatter,
         ),
         category=_extract_category(frontmatter),
@@ -426,7 +565,7 @@ def _prompt_document_from_path(path: Path, content: str) -> PromptDocument:
     return PromptDocument(
         slug=path.stem.lower(),
         file_name=path.name,
-        content=content,
+        content=_strip_frontmatter_block(content),
     )
 
 
@@ -436,7 +575,7 @@ def _prompt_store_signature() -> tuple[str, ...]:
     data_dir = _data_dir()
     paths = [
         _master_prompt_path(),
-        *sorted(_skills_dir().glob("*.md")),
+        *(path for _, path in _iter_skill_entries()),
         *sorted(_prompts_dir().glob("*.md")),
     ]
     signature: list[str] = []
@@ -471,13 +610,15 @@ def _read_prompt_store_from_disk() -> PromptStoreSnapshot:
         ).strip()
 
     skills: list[SkillDocument] = []
-    for path in sorted(_skills_dir().glob("*.md")):
+    for slug, path in _iter_skill_entries():
         content = _strip_meta_markers(
             path.read_text(encoding="utf-8")
         ).strip()
         if not content:
             continue
-        skills.append(_skill_document_from_path(path, content))
+        skills.append(
+            _skill_document_from_path(path, content, slug_override=slug)
+        )
 
     runtime_prompt_docs: list[PromptDocument] = []
     for path in sorted(_prompts_dir().glob("*.md")):
@@ -546,11 +687,18 @@ def _write_skill(name: str, markdown: str, *, overwrite: bool) -> Path:
         raise ValueError("Skill name is required")
     if not markdown.strip():
         raise ValueError("Skill markdown is empty")
+    if _looks_like_html_document(markdown):
+        raise ValueError(
+            "Skill content looks like a full HTML document. Installing raw "
+            "HTML bloats prompts and pollutes retrieval. Convert to Markdown "
+            "first (strip <!DOCTYPE>, <html>, <head>, <script>, <style>)."
+        )
 
-    skill_path = _skills_dir() / f"{_slugify(name)}.md"
+    skill_path = _resolve_skill_path(name, for_write=True)
     if skill_path.exists() and not overwrite:
         raise FileExistsError(f"Skill already exists: {skill_path.name}")
 
+    skill_path.parent.mkdir(parents=True, exist_ok=True)
     write_utf8_file(str(skill_path), markdown.strip() + "\n")
     return skill_path
 
@@ -567,6 +715,14 @@ async def async_refresh_prompt_store(hass: HomeAssistant) -> None:
         Path(hass.config.config_dir),
         get_data_dir(),
     )
+    new_signature = await hass.async_add_executor_job(_prompt_store_signature)
+    current = _PROMPT_STORE.get("snapshot")
+    if (
+        current is not None
+        and current.signature
+        and current.signature == new_signature
+    ):
+        return
     snapshot = await hass.async_add_executor_job(_read_prompt_store_from_disk)
     _set_prompt_store(snapshot)
     await async_reload_concept_aliases(hass)
@@ -581,20 +737,36 @@ async def async_save_master_prompt(hass: HomeAssistant, markdown: str) -> Path:
 
 def _read_skill_raw(name: str) -> str | None:
 
-    skill_path = _skills_dir() / f"{_slugify(name)}.md"
+    skill_path = _resolve_skill_path(name)
     if not skill_path.exists():
         return None
     return skill_path.read_text(encoding="utf-8")
+
+
+async def async_read_skill_markdown(hass: HomeAssistant, name: str) -> str:
+    """Return the raw on-disk markdown of an installed skill (or '')."""
+
+    raw = await hass.async_add_executor_job(partial(_read_skill_raw, name))
+    return raw or ""
 
 
 def _delete_skill_sync(name: str) -> tuple[Path, str | None]:
 
     if not name.strip():
         raise ValueError("Skill name is required")
-    skill_path = _skills_dir() / f"{_slugify(name)}.md"
+    skill_path = _resolve_skill_path(name)
     if not skill_path.exists():
         raise FileNotFoundError(f"Skill not found: {skill_path.name}")
     previous = skill_path.read_text(encoding="utf-8")
+
+    slug = _slugify(name)
+    folder = _skills_dir() / slug
+    if skill_path.parent == folder and folder.is_dir():
+        import shutil
+
+        shutil.rmtree(folder)
+        return skill_path, previous
+
     skill_path.unlink()
     return skill_path, previous
 
@@ -912,7 +1084,13 @@ def load_homeassistant_priority_skill_block() -> str:
             continue
         if not _is_homeassistant_priority_skill(skill):
             continue
-        return skill.content.strip()
+        title = skill.title or skill.slug
+        description = skill.description or "Primary Home Assistant runtime guide."
+        return (
+            f"## Home Assistant Runtime Guide\n"
+            f"Index only: {title} — {description}. "
+            "Details: GetInstalledSkill(homeassistant_runtime_guide) or HomeAssistantGuide."
+        )
     return ""
 
 
