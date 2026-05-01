@@ -52,6 +52,7 @@ from ..runtime.tool_progress import tool_progress_line
 from ..sensor import async_sync_heartbeat_sensor
 from ..runtime.workspace_store import (
     async_save_workspace_doc,
+    async_set_bootstrap_active,
     get_today_memory_doc,
     get_workspace_doc,
     list_workspace_docs,
@@ -425,24 +426,38 @@ async def _inline_install_requirements(
 class ExecutePythonTool(llm.Tool):
     name = "ExecutePython"
     description = (
-        "Execute Python code. inline (default): runs in HA process with "
-        "`hass`, supports top-level `await` and `requirements=[...]` "
-        "installed into the HA venv. sandbox (`sandbox=true`): isolated "
-        "child venv subprocess, no `hass`. Returns `{success, phase, "
-        "result, stdout, stderr, install?, artefacts?}`. Destructive ops "
-        "(file deletion, rmtree, etc.) require user consent. "
-        "See skill `homeassistant_runtime_guide` section ExecutePython for "
-        "the full IO contract: injected globals (OUTPUT_DIR, TMP_DIR, "
-        "output_url, list_outputs, list_tmp), tmp redirect policy, and "
-        "artefact reporting. "
-        "IMPORTANT (top-level await mode): user code runs on a worker-thread "
-        "event loop so synchronous I/O (Path.write_bytes, open().write, "
-        "subprocess) is safe and never blocks HA. Trade-off: every `hass.*` "
-        "method call MUST be `await`-ed, including ones that used to be "
-        "synchronous, e.g. `await hass.config.path('foo')`, "
-        "`await hass.states.get('sensor.x')`, "
-        "`await hass.async_add_executor_job(fn, ...)`. Non-callable attrs "
-        "(`hass.config.config_dir`) still work without await."
+        "Execute Python only when a native HA tool cannot do the job cleanly. "
+        "Routing checklist: (1) normal entity state/control/service discovery "
+        "→ prefer GetLiveContext, EntityQuery, ServiceCall, intent tools, "
+        "Automation, Script, ConfigEntries, etc.; do NOT use Python just to "
+        "turn devices on/off or query one entity. (2) Need HA runtime access "
+        "(`hass.states`, services, registries, config dir, generating a file "
+        "for the HA frontend) → use inline mode (default). (3) Need isolated "
+        "or risky computation, third-party packages, large data processing, "
+        "network/file experiments, or code that does NOT need `hass` → use "
+        "sandbox=true. (4) Destructive operations (delete/rmtree/overwrite "
+        "important config) require explicit user consent first. Inline mode: "
+        "runs in HA process with top-level await; requirements are installed "
+        "into the HA venv, so list only packages actually imported. Sandbox: "
+        "child venv subprocess, no `hass`, can use requirements/env/cwd/stdin. "
+        "Inline globals (do not shadow): `hass`; `OUTPUT_DIR` persistent "
+        "browser-served `/local/claw_assistant/<file>` dir for shareable "
+        "files; `TMP_DIR` ephemeral 24h dir for intermediates; "
+        "`output_url(name)` returns absolute URL or `/local/...`; "
+        "`list_outputs()` returns `{name,path,url,size,mtime}` entries; "
+        "`list_tmp()` same without url. Put user-visible/shareable artefacts "
+        "in OUTPUT_DIR, use ASCII filenames only (`A-Za-z0-9_.-`), then reply "
+        "with `output_url(name)`. Put temporary/intermediate files in TMP_DIR; "
+        "do not manually clean TMP_DIR. Writes to system scratch dirs through "
+        "injected open() may be redirected to TMP_DIR and reported as "
+        "`artefacts.redirects[]`. Return shape: `success`, `phase`, `result`, "
+        "`stdout`, `stderr`, `duration_ms`, optional `install`, and "
+        "`artefacts.output/tmp/redirects`. Inline event-loop rule: synchronous "
+        "I/O like Path.write_bytes/open().write/subprocess is safe because it "
+        "runs on a worker thread, but every callable `hass.*` access MUST be "
+        "awaited (`await hass.states.get(...)`, `await hass.config.path(...)`, "
+        "`await hass.async_add_executor_job(...)`). Non-callable attrs such as "
+        "`hass.config.config_dir` are direct."
     )
     parameters = vol.Schema(
         {
@@ -940,15 +955,47 @@ class SystemControlTool(llm.Tool):
 
 class ConversationMemoryTool(llm.Tool):
     name = "ConversationMemory"
-    description = "Save durable facts to persistent memory. Save proactively when you discover user preferences, corrections, or environment facts. Params: action(save/get/list/clear), key, value"
+    description = (
+        "Persistent curated memory that survives across sessions and is "
+        "injected into future system prompts. Keep entries compact and "
+        "focused on facts that will still matter later.\n\n"
+        "WHEN TO SAVE (do this proactively, do not wait to be asked):\n"
+        "- The user corrects you or says 'remember this' / 'don't do that again'.\n"
+        "- The user reveals a stable preference, habit, or personal detail "
+        "(name, role, timezone, household, address style, reply style).\n"
+        "- You discover an environment fact (entity ids, notify targets, "
+        "credentials the user explicitly volunteered, hardware quirks).\n"
+        "- You learn a convention or workflow specific to this user's setup.\n"
+        "- A correction or lesson would make you smarter next time.\n\n"
+        "PRIORITY: user preferences and corrections > environment facts > "
+        "procedural knowledge. The most valuable memory prevents the user "
+        "from having to repeat themselves.\n\n"
+        "DO NOT SAVE: task progress, completed-work logs, current TODO state, "
+        "trivial / obvious info, raw data dumps, anything already in HA's "
+        "entity registry, hypotheticals ('if I were to'), conversational "
+        "filler. Use HeartbeatManager for reminders/follow-ups, "
+        "GetConversationHistory for current task state, and skills for "
+        "discovered procedures.\n\n"
+        "TWO TARGETS (pick the correct one):\n"
+        "- target='user': who the user is — name, role, pronouns, timezone, "
+        "preferred address, communication style, pet peeves, habits.\n"
+        "- target='memory' (default): environment facts, entity ids, notify "
+        "targets, project conventions, tool quirks, lessons learned.\n\n"
+        "Actions: save (add or update one fact), get (read one), list (read "
+        "all), clear (wipe one target — only on explicit user request). "
+        "Params: action, target ('memory' or 'user'), key (short stable "
+        "identifier), value (the fact)."
+    )
     parameters = vol.Schema({
         vol.Required("action"): vol.In(["save", "get", "list", "clear"]),
+        vol.Optional("target", default="memory"): vol.In(["memory", "user"]),
         vol.Optional("key", default=""): str,
         vol.Optional("value", default=""): str,
     })
 
     async def async_call(self, hass: HomeAssistant, tool_input: llm.ToolInput, llm_context: llm.LLMContext) -> JsonObjectType:
         action = tool_input.tool_args.get("action", "")
+        target = tool_input.tool_args.get("target", "memory") or "memory"
         key = tool_input.tool_args.get("key", "")
         value = tool_input.tool_args.get("value", "")
         if action == "save" and key:
@@ -983,7 +1030,7 @@ class ConversationMemoryTool(llm.Tool):
                         recommendation=recommendation,
                     ),
                 }
-            save_result = await async_save_memory_entry_result(hass, key, value)
+            save_result = await async_save_memory_entry_result(hass, key, value, target=target)
             status = save_result["status"]
             if status in {"stored", "updated"}:
                 return {
@@ -996,6 +1043,18 @@ class ConversationMemoryTool(llm.Tool):
                     "success": True,
                     "skipped": True,
                     "message": f"Memory already stored as {save_result['existing_key']}",
+                    **save_result,
+                }
+            if status == "rejected_unsafe":
+                return {
+                    "success": False,
+                    "error": save_result["recommendation"],
+                    **save_result,
+                }
+            if status == "rejected_full":
+                return {
+                    "success": False,
+                    "error": save_result["recommendation"],
                     **save_result,
                 }
             transient_message = (
@@ -1011,12 +1070,13 @@ class ConversationMemoryTool(llm.Tool):
         if action == "get" and key:
             return {
                 "success": True,
-                "value": await async_get_memory_entry(hass, key),
-                **build_route_envelope("memory_read", "ConversationMemory", "list"),
-                "route_hint": build_route_hint("memory_read", "ConversationMemory", "list"),
+                "target": target,
+                "value": await async_get_memory_entry(hass, key, target=target),
+                **build_route_envelope("memory_read", "ConversationMemory", "list", args={"target": target}),
+                "route_hint": build_route_hint("memory_read", "ConversationMemory", "list", args={"target": target}),
             }
         if action == "list":
-            entries = await async_list_memory_entries(hass)
+            entries = await async_list_memory_entries(hass, target=target)
             return {
                 "success": True,
                 "keys": [entry["key"] for entry in entries],
@@ -1025,12 +1085,13 @@ class ConversationMemoryTool(llm.Tool):
                 "route_hint": (build_route_hint("memory_index", "ConversationMemory", "get", args={"key": entries[0]["key"]}) if entries else build_route_hint("memory_index", "ConversationMemory", "save", args={"key": "", "value": ""})),
             }
         if action == "clear":
-            await async_clear_memory_entries(hass)
+            await async_clear_memory_entries(hass, target=target)
             return {
                 "success": True,
-                "message": "Memory cleared",
-                **build_route_envelope("memory_cleared", "ConversationMemory", "list"),
-                "route_hint": build_route_hint("memory_cleared", "ConversationMemory", "list"),
+                "target": target,
+                "message": f"{target} memory cleared",
+                **build_route_envelope("memory_cleared", "ConversationMemory", "list", args={"target": target}),
+                "route_hint": build_route_hint("memory_cleared", "ConversationMemory", "list", args={"target": target}),
             }
         return {"success": False, "error": "Invalid action or missing key"}
 
@@ -1398,6 +1459,38 @@ class SetWorkspaceDocTool(llm.Tool):
             return {"success": False, "error": str(err)}
 
 
+class BootstrapControlTool(llm.Tool):
+    name = "BootstrapControl"
+    description = (
+        "Toggle first-run bootstrap mode. Call with active=false to exit "
+        "bootstrap and switch to normal conversation mode immediately, even "
+        "if some IDENTITY.md or USER.md fields are still empty. The next turn "
+        "will no longer inject BOOTSTRAP.md. Call with active=true to re-enter "
+        "bootstrap. Use only when the user clearly signals the setup is done "
+        "or wants to skip remaining setup."
+    )
+    parameters = vol.Schema(
+        {
+            vol.Required("active"): bool,
+        }
+    )
+
+    async def async_call(
+        self, hass: HomeAssistant, tool_input: llm.ToolInput, llm_context: llm.LLMContext
+    ) -> JsonObjectType:
+        active = bool(tool_input.tool_args.get("active"))
+        await async_set_bootstrap_active(hass, active)
+        return {
+            "success": True,
+            "bootstrap_active": active,
+            "message": (
+                "Bootstrap mode disabled; switched to normal conversation."
+                if not active
+                else "Bootstrap mode enabled."
+            ),
+        }
+
+
 class MemoryGraphTool(llm.Tool):
     name = "MemoryGraph"
     description = (
@@ -1754,14 +1847,18 @@ def _compress_camera_frame(
 class CameraAnalyzeTool(llm.Tool):
     name = "CameraAnalyze"
     description = (
-        "Camera tool: discover cameras and fetch frames. "
-        "camera_entity='list' → list all available cameras (works even if not exposed). "
-        "mode=snapshot → returns snapshot_url + markdown_hint (for HA frontend display only). "
-        "mode=analyze → returns base64 JPEG for vision analysis (describe what you see). "
-        "IMPORTANT: Use markdown_hint only on the HA frontend. "
-        "On non-HA chat channels, call this tool only when you need image analysis or camera discovery. "
-        "Params: camera_entity (entity_id / friendly name / 'list'), mode (snapshot|analyze, default snapshot), "
-        "max_dim (default 640), target_kb (default 40)."
+        "Camera tool: discover cameras, snapshot, or analyze a frame.\n"
+        "- camera_entity='list' (or empty) → enumerate all cameras "
+        "(bypasses exposure filter).\n"
+        "- mode=snapshot (default) → return snapshot_url + `markdown_hint` "
+        "(ready-to-paste `![cam](url)`). On the `ha` channel include "
+        "`markdown_hint` in your reply so the frontend renders the image.\n"
+        "- mode=analyze → return base64 JPEG for vision reasoning; describe "
+        "what you see. Only include `markdown_hint` if the user should ALSO "
+        "see the image alongside your analysis.\n"
+        "Params: camera_entity (entity_id / friendly name / 'list'), "
+        "mode (snapshot|analyze, default snapshot), max_dim (default 640), "
+        "target_kb (default 40)."
     )
     parameters = vol.Schema({
         vol.Optional("camera_entity", default=""): str,
@@ -1841,18 +1938,77 @@ class CameraAnalyzeTool(llm.Tool):
                 }
 
             from homeassistant.components.camera import async_get_image
+            from homeassistant.helpers.aiohttp_client import async_get_clientsession
             import base64
 
-            image = await async_get_image(hass, target_camera)
-            raw_bytes = image.content
-            if not raw_bytes:
-                return {"success": False, "error": f"Camera {target_camera} returned empty image"}
+            # Some camera platforms return frames that the in-process
+            # async_get_image path cannot decode (truncated JPEG, MJPEG-as-still
+            # streams, etc.) — the symptom is PIL raising
+            # UnidentifiedImageError or OSError("broken data stream when
+            # reading image file"). The HTTP /api/camera_proxy view goes
+            # through the standard CameraImageView and produces a clean still
+            # frame, so we try the in-process path first and silently fall
+            # back to the HTTP path when decoding fails. ``snapshot_url`` is
+            # already built above with the entity's access_token.
+            primary_err: Exception | None = None
+            raw_bytes: bytes = b""
+            jpeg_bytes: bytes = b""
+            final_w = final_h = final_q = 0
+            fetch_path = ""
 
-            jpeg_bytes, final_w, final_h, final_q = await hass.async_add_executor_job(
-                _compress_camera_frame, raw_bytes, max_dim, target_kb
-            )
+            try:
+                image = await async_get_image(hass, target_camera)
+                raw_bytes = image.content or b""
+                if not raw_bytes:
+                    raise ValueError("async_get_image returned empty content")
+                jpeg_bytes, final_w, final_h, final_q = await hass.async_add_executor_job(
+                    _compress_camera_frame, raw_bytes, max_dim, target_kb
+                )
+                fetch_path = "internal"
+            except Exception as err:
+                primary_err = err
+                _LOGGER.debug(
+                    "CameraAnalyze internal path failed for %s (%s); trying HTTP proxy fallback",
+                    target_camera,
+                    err,
+                )
+
+            if not jpeg_bytes:
+                if not snapshot_url:
+                    return {
+                        "success": False,
+                        "error": (
+                            f"Failed to capture camera frame: {primary_err}. "
+                            f"No access_token on {target_camera}, cannot fall back to HTTP."
+                        ),
+                    }
+                try:
+                    session = async_get_clientsession(hass)
+                    async with session.get(snapshot_url) as resp:
+                        resp.raise_for_status()
+                        raw_bytes = await resp.read()
+                    if not raw_bytes:
+                        raise ValueError("HTTP camera_proxy returned empty body")
+                    jpeg_bytes, final_w, final_h, final_q = await hass.async_add_executor_job(
+                        _compress_camera_frame, raw_bytes, max_dim, target_kb
+                    )
+                    fetch_path = "http_proxy"
+                except Exception as fallback_err:
+                    _LOGGER.error(
+                        "CameraAnalyze fallback also failed for %s: internal=%s; http=%s",
+                        target_camera,
+                        primary_err,
+                        fallback_err,
+                    )
+                    return {
+                        "success": False,
+                        "error": (
+                            f"Failed to capture camera frame: internal={primary_err}; "
+                            f"http_proxy={fallback_err}"
+                        ),
+                    }
+
             base64_data = base64.b64encode(jpeg_bytes).decode("utf-8")
-
             result: dict[str, Any] = {
                 "success": True,
                 "camera_entity": target_camera,
@@ -1863,9 +2019,10 @@ class CameraAnalyzeTool(llm.Tool):
                 "height": final_h,
                 "jpeg_quality": final_q,
                 "size_bytes": len(jpeg_bytes),
+                "fetch_path": fetch_path,
                 "message": (
                     f"Captured {target_camera}: {final_w}x{final_h} JPEG q={final_q}, "
-                    f"{len(jpeg_bytes)} bytes"
+                    f"{len(jpeg_bytes)} bytes (via {fetch_path})"
                 ),
             }
             if snapshot_url:
