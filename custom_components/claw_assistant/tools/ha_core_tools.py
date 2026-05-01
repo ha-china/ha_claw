@@ -831,7 +831,8 @@ PREFER native intent tools (HassLightSet, HassTurnOn/Off, HassVacuumStart, HassC
 Good for: calendar events, todo items, triggering automations/scripts, notifications, input helpers, timers, and any service not covered by intent tools.
 Do NOT use for: creating automations (use HAControl), installing integrations (use ConfigEntries), managing HACS (use HACS tool), editing YAML config (use ConfigFile), creating helpers (use HelperManager).
 Use ListServices to discover available services, ServiceHelp for parameter details.
-DISCIPLINE: 1) Only call the service the user asked for — no extra "helpful" calls. 2) Minimum data payload — only include params needed for the request. 3) If the target entity is ambiguous, ask before calling. 4) After calling, check the response; if it failed, diagnose before retrying."""
+DISCIPLINE: 1) Only call the service the user asked for — no extra "helpful" calls. 2) Minimum data payload — only include params needed for the request. 3) If the target entity is ambiguous, ask before calling. 4) After calling, check the response; if it failed, diagnose before retrying.
+CAMERA RECORD: ServiceCall(domain="camera", service="record", data={"entity_id": ..., "filename": ..., "duration": <seconds>}). `duration` MUST be parsed from the user's request (any language, any phrasing → seconds). Never use a silent default. If the user gave no duration, ask first."""
     parameters = vol.Schema(
         {
             vol.Required("domain"): str,
