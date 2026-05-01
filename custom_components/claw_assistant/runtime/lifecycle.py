@@ -10,6 +10,10 @@ from homeassistant.core import HomeAssistant
 from .adaptive_memory import async_setup_adaptive_memory
 from .coordinator import setup_ai_coordinator
 from .data_path import get_output_dir, init_storage
+from .frontend_loader import (
+    async_setup_frontend_loader,
+    async_unload_frontend_loader,
+)
 from .graph_service import async_setup_graph_store, async_unload_graph_store
 from .ha_guide_store import async_setup_homeassistant_guide_store
 from .hook import uninstall_conversation_hook
@@ -20,16 +24,24 @@ from .official_websocket_hook import (
 )
 from .output_cleanup import async_setup_output_cleanup, async_unload_output_cleanup
 from .patches import (
+    patch_apiinstance_tool_fallback,
     patch_chat_log_result_extraction,
+    patch_global_response_format,
     patch_hide_tool_calls_from_pipeline,
     patch_local_intents,
     patch_pipeline_timeout,
+    patch_strip_thinking_content_serialization,
     patch_tool_progress,
+    patch_websocket_binary_handler_noise,
+    unpatch_apiinstance_tool_fallback,
     unpatch_chat_log_result_extraction,
+    unpatch_global_response_format,
     unpatch_hide_tool_calls_from_pipeline,
     unpatch_local_intents,
     unpatch_pipeline_timeout,
+    unpatch_strip_thinking_content_serialization,
     unpatch_tool_progress,
+    unpatch_websocket_binary_handler_noise,
 )
 from .skill_store import async_setup_prompt_store
 from .tmp_cleanup import async_setup_tmp_cleanup, async_unload_tmp_cleanup
@@ -52,10 +64,15 @@ async def async_setup_runtime(hass: HomeAssistant, entry: ConfigEntry) -> None:
     await async_setup_internal_llm(hass)
     await async_setup_output_cleanup(hass)
     await async_setup_tmp_cleanup(hass)
+    await async_setup_frontend_loader(hass)
     patch_local_intents(hass)
+    patch_websocket_binary_handler_noise(hass)
     patch_chat_log_result_extraction(hass)
     patch_hide_tool_calls_from_pipeline(hass)
+    patch_strip_thinking_content_serialization(hass)
     patch_tool_progress(hass)
+    patch_apiinstance_tool_fallback(hass)
+    patch_global_response_format(hass)
     patch_pipeline_timeout(hass)
     install_official_websocket_process_hook(hass)
     setup_ai_coordinator(hass, entry)
@@ -96,11 +113,16 @@ async def async_unload_runtime(hass: HomeAssistant) -> None:
     await async_unload_graph_store(hass)
     await async_unload_output_cleanup(hass)
     await async_unload_tmp_cleanup(hass)
+    async_unload_frontend_loader(hass)
     uninstall_conversation_hook(hass)
     uninstall_official_websocket_process_hook(hass)
     unpatch_tool_progress()
+    unpatch_global_response_format()
+    unpatch_apiinstance_tool_fallback()
+    unpatch_strip_thinking_content_serialization()
     unpatch_hide_tool_calls_from_pipeline()
     unpatch_chat_log_result_extraction()
     unpatch_local_intents()
+    unpatch_websocket_binary_handler_noise()
     unpatch_pipeline_timeout()
     async_unload_internal_llm(hass)
