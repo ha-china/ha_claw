@@ -472,12 +472,24 @@ The response always includes available_agents so you know who you can talk to.""
             if not others:
                 return {"success": False, "error": "No other peer agents configured", "available_agents": peers}
             agent_id = others[0]["agent_id"]
+        else:
+            known_ids = {p["agent_id"] for p in peers}
+            if agent_id not in known_ids:
+                return {
+                    "success": False,
+                    "error": f"Agent {agent_id} not found in configured peers",
+                    "available_agents": others,
+                }
 
-        _LOGGER.info("AgentHandoff: consulting %s, max_rounds=%d, question=%s...", agent_id, max_rounds, question[:80])
-        result = await _consult_agent(hass, agent_id, question, context, max_rounds)
-        result["you"] = next((p for p in peers if p.get("is_you")), None)
-        result["available_agents"] = others
-        return result
+        try:
+            _LOGGER.info("AgentHandoff: consulting %s, max_rounds=%d, question=%s...", agent_id, max_rounds, question[:80])
+            result = await _consult_agent(hass, agent_id, question, context, max_rounds)
+            result["you"] = next((p for p in peers if p.get("is_you")), None)
+            result["available_agents"] = others
+            return result
+        except Exception as exc:
+            _LOGGER.warning("AgentHandoff failed for %s: %s", agent_id, exc)
+            return {"success": False, "error": str(exc), "agent_id": agent_id, "available_agents": others}
 
 
 class NextAgentHandoffTool(llm.Tool):
@@ -517,11 +529,15 @@ The response includes available_agents so you always know who else is available.
             }
 
         agent_id = others[0]["agent_id"]
-        _LOGGER.info("NextAgentHandoff: consulting %s, max_rounds=%d, question=%s...", agent_id, max_rounds, question[:80])
-        result = await _consult_agent(hass, agent_id, question, context, max_rounds)
-        result["you"] = next((p for p in peers if p.get("is_you")), None)
-        result["available_agents"] = others
-        return result
+        try:
+            _LOGGER.info("NextAgentHandoff: consulting %s, max_rounds=%d, question=%s...", agent_id, max_rounds, question[:80])
+            result = await _consult_agent(hass, agent_id, question, context, max_rounds)
+            result["you"] = next((p for p in peers if p.get("is_you")), None)
+            result["available_agents"] = others
+            return result
+        except Exception as exc:
+            _LOGGER.warning("NextAgentHandoff failed for %s: %s", agent_id, exc)
+            return {"success": False, "error": str(exc), "agent_id": agent_id, "available_agents": others}
 
 
 class ConfigFileTool(llm.Tool):

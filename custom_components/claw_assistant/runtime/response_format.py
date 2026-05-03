@@ -512,6 +512,9 @@ _AGENT_REPLY_PREFIX_RE = re.compile(
 _ERROR_SIGNAL_PATTERNS = (
     "error getting response",
     "runtimeerror",
+    "tool_failure:",
+    "agent_not_found",
+    "agent not found",
     "api error",
     "api_error",
     "connection reset",
