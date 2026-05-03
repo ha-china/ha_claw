@@ -593,7 +593,20 @@ def get_agent_name(hass: HomeAssistant, agent_id: str) -> str:
     state = hass.states.get(agent_id)
     if state:
         return state.attributes.get("friendly_name", agent_id.split(".")[-1])
-    return agent_id.split(".")[-1].replace("_", " ").title()
+    if "." in agent_id:
+        return agent_id.split(".")[-1].replace("_", " ").title()
+    for ent in ent_reg.entities.get_entries_for_config_entry_id(agent_id):
+        if ent.domain == "conversation":
+            name = ent.name or ent.original_name
+            if name:
+                return name
+            s = hass.states.get(ent.entity_id)
+            if s:
+                return s.attributes.get("friendly_name", ent.entity_id.split(".")[-1])
+    entry = hass.config_entries.async_get_entry(agent_id)
+    if entry and entry.title:
+        return entry.title
+    return "AI Assistant"
 
 
 def is_error_response(hass: HomeAssistant, result: Any) -> bool:
@@ -613,6 +626,17 @@ def is_error_response(hass: HomeAssistant, result: Any) -> bool:
             )
             return True
     return False
+
+
+def _raw_response_text(result: Any) -> str:
+    response = getattr(result, "response", None)
+    speech = getattr(response, "speech", None) if response else None
+    if not isinstance(speech, dict):
+        return ""
+    plain = speech.get("plain", {})
+    if not isinstance(plain, dict):
+        return ""
+    return str(plain.get("original_speech", plain.get("speech", "")) or "")
 
 
 async def run_agent_fallback_chain(
@@ -876,10 +900,21 @@ async def run_agent_fallback_chain(
                 failed_tools = [item for item in all_tools if not item.get("success", True)]
                 previous_tool_results.extend(_snapshot_tool_results(all_tools))
                 synthesized_response = extract_successful_tool_response(all_tools)
+                raw_agent_response_text = _raw_response_text(result).strip()
                 agent_response_text = get_response_text(result).strip()
-                _is_error_text = agent_response_text and any(
-                    kw in agent_response_text.lower()
-                    for kw in ("error getting response", "server disconnected", "timed out", "connection reset")
+                formatted_probe = agent_response_text.lower()
+                error_probe = (raw_agent_response_text or agent_response_text).lower()
+                _is_error_text = bool(error_probe) and any(
+                    kw in formatted_probe
+                    or kw in error_probe
+                    for kw in (
+                        "error getting response",
+                        "api error",
+                        "service temporarily unavailable",
+                        "server disconnected",
+                        "timed out",
+                        "connection reset",
+                    )
                 )
                 failure_reason = _extract_response_error_reason(result)
                 transient_response_error = any(

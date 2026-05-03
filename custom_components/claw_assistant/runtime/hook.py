@@ -160,6 +160,13 @@ def install_conversation_hook(hass: HomeAssistant, entry: ConfigEntry) -> None:
         satellite_id=None,
         extra_system_prompt=None,
     ):
+        if agent_id and "." not in agent_id:
+            from homeassistant.helpers import entity_registry as er
+            ent_reg = er.async_get(hass)
+            for ent in ent_reg.entities.get_entries_for_config_entry_id(agent_id):
+                if ent.domain == "conversation":
+                    agent_id = ent.entity_id
+                    break
         frontend_lang = language
         try:
             user_id = getattr(context, "user_id", None)

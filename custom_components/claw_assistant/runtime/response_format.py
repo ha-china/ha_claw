@@ -12,6 +12,7 @@ from ..const import (
     CONVERSATION_MODE_DETAILED,
     CONVERSATION_MODE_NO_NAME,
 )
+from .i18n import t
 
 _URL_CJK_BOUNDARY_RE = re.compile(
     r"(https?://[^\s<>\[\]()\"']+?)(?=[^\x00-\x7F])"
@@ -344,11 +345,153 @@ def _strip_memory_context(text: str) -> str:
     return text
 
 
-def sanitize_response_text(text: str) -> str:
+_AGENT_ERROR_PREFIX_RE = re.compile(
+    r"(?:Error\s+getting\s+response|获取响应时?出错|获取响应错误)\s*[:：]\s*",
+    re.IGNORECASE,
+)
+_API_ERROR_JSON_RE = re.compile(
+    r"RuntimeError\s*:\s*API\s*error\s*:\s*(\{.*)",
+    re.IGNORECASE | re.DOTALL,
+)
+_AGENT_REPLY_PREFIX_RE = re.compile(
+    r"^(?:conversation\.[\w_]+\s*:\s*)?(\(.+?\)\s*(?:回复|Reply)\s*[:：]\s*)(.*)$",
+    re.DOTALL,
+)
+
+
+def _shorten_model_name(value: str) -> str:
+    value = value.strip().strip('"').strip("'").strip(";").strip()
+    if len(value) > 80:
+        value = value[:77] + "..."
+    return value
+
+
+def _parse_api_error_json(blob: str) -> tuple[str, str, str]:
+    """Best-effort parse of the JSON tail after ``API error:``.
+
+    Returns ``(code, message, model)``. Missing fields are ''.
+    The upstream string is sometimes truncated mid-JSON, so we tolerate
+    partial payloads by falling back to regex extraction.
+    """
+    code = message = model = ""
+    try:
+        payload = json.loads(blob)
+    except Exception:
+        payload = None
+    if isinstance(payload, dict):
+        err = payload.get("error") if isinstance(payload.get("error"), dict) else payload
+        if isinstance(err, dict):
+            code = str(err.get("code") or err.get("type") or "").strip()
+            message = str(err.get("message") or "").strip()
+            model = str(err.get("model") or err.get("param") or "").strip()
+    if not message:
+        m = re.search(r'"message"\s*:\s*"([^"]+)"', blob)
+        if m:
+            message = m.group(1).strip()
+    if not code:
+        m = re.search(r'"(?:code|type)"\s*:\s*"([^"]+)"', blob)
+        if m:
+            code = m.group(1).strip()
+    if not model:
+        m = re.search(r"model\s+([A-Za-z0-9._/\-]+)", blob)
+        if m:
+            model = _shorten_model_name(m.group(1))
+    return code, message, model
+
+
+def prettify_agent_error(text: str, *, language: str | None = None) -> str | None:
+    """Convert raw upstream agent error strings to a short, user-facing note.
+
+    Returns a rewritten string, or ``None`` when ``text`` does not look like
+    an agent error (caller should keep the original text). Messages are
+    beginner-friendly and localized via ``i18n.t``.
+    """
+    if not text:
+        return None
+    candidate = text.strip()
+    if not candidate:
+        return None
+    if not (
+        _AGENT_ERROR_PREFIX_RE.search(candidate)
+        or "RuntimeError: API error" in candidate
+        or "RuntimeError:API error" in candidate
+    ):
+        return None
+
+    body = _AGENT_ERROR_PREFIX_RE.sub("", candidate, count=1).strip()
+
+    json_match = _API_ERROR_JSON_RE.search(body)
+    if json_match:
+        code, message, model = _parse_api_error_json(json_match.group(1))
+        message_l = message.lower()
+        code_l = code.lower()
+        if code_l == "model_not_found" or "no available channel" in message_l:
+            target = model or t("err_model_placeholder", language)
+            return t("err_model_not_found", language).replace("{model}", target)
+        if "temporarily unavailable" in message_l or "服务暂时不可用" in message:
+            return t("err_service_unavailable", language)
+        detail = message or code or body
+    else:
+        detail = body
+    if not detail:
+        return None
+    if len(detail) > 120:
+        detail = detail[:117] + "..."
+    return t("err_generic_api", language).replace("{detail}", detail)
+
+
+def _rewrite_chained_agent_errors(text: str, *, language: str | None = None) -> str:
+    """Handle fallback-chain strings joined by ``;`` or newlines.
+
+    Each segment may be a full ``(agent) reply: <error>`` fragment. Rewrite
+    any segment whose tail matches the agent-error pattern, and deduplicate
+    identical friendly messages so the user sees a concise summary instead
+    of the same ``Service temporarily unavailable`` copied five times.
+    """
+    if not text:
+        return text
+    if "Error getting response" not in text and "RuntimeError: API error" not in text:
+        return text
+
+    parts = re.split(r"\s*;\s*|\n+", text)
+    rewritten: list[str] = []
+    seen: set[str] = set()
+    changed = False
+    for part in parts:
+        segment = part.strip()
+        if not segment:
+            continue
+        head = ""
+        body = segment
+        m = _AGENT_REPLY_PREFIX_RE.match(segment)
+        if m:
+            head, body = m.group(1), m.group(2)
+        friendly = prettify_agent_error(body, language=language)
+        if friendly is None:
+            rewritten.append(segment)
+            continue
+        changed = True
+        combined = f"{head}{friendly}" if head else friendly
+        key = friendly
+        if key in seen:
+            continue
+        seen.add(key)
+        rewritten.append(combined)
+
+    if not changed:
+        return text
+    return "\n".join(rewritten) if rewritten else text
+
+
+def sanitize_response_text(text: str, *, language: str | None = None) -> str:
 
     stripped = _strip_memory_context(text).strip()
     if not stripped:
         return ""
+
+    rewritten = _rewrite_chained_agent_errors(stripped, language=language)
+    if rewritten is not stripped and rewritten != stripped:
+        return _normalize_response_links(rewritten)
 
     payload = _extract_json_payload(stripped)
     if not payload:
@@ -364,13 +507,14 @@ def sanitize_response_text(text: str) -> str:
     return _normalize_response_links(stripped)
 
 
-def get_response_text(result: Any) -> str:
+def get_response_text(result: Any, *, language: str | None = None) -> str:
 
     if not result or not result.response or not result.response.speech:
         return ""
     plain = result.response.speech.get("plain", {})
     return sanitize_response_text(
-        plain.get("original_speech", plain.get("speech", ""))
+        plain.get("original_speech", plain.get("speech", "")),
+        language=language or language_of(result),
     )
 
 
@@ -400,13 +544,13 @@ def apply_agent_response_format(
         return result
 
     plain = result.response.speech.setdefault("plain", {})
-    if response_text is None:
-        response_text = get_response_text(result)
-    else:
-        response_text = sanitize_response_text(response_text)
-
     from .state import get_channel_type, get_conversation_status
     frontend_lang = get_conversation_status(hass).get("user_language") if hass else None
+    effective_lang = frontend_lang or language_of(result)
+    if response_text is None:
+        response_text = get_response_text(result, language=effective_lang)
+    else:
+        response_text = sanitize_response_text(response_text, language=effective_lang)
     conversation_id = str(get_conversation_status(hass).get("last_conversation_id", "") or "") if hass else ""
     channel_type = get_channel_type(conversation_id)
     if hass and channel_type == "ha":
