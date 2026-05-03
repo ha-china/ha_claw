@@ -58,12 +58,21 @@ def _tool_desc(name: str, a: dict, lang: str) -> str:
         return f"💫 History: {eid} {h}h..." if eid else "💫 History {h}h..."
     if name == "ExecutePython":
         return "🪐 正在执行代码..." if zh else "🪐 Executing code..."
-    if name == "CameraAnalyze":
+    if name == "CameraCapture":
         cam = e(str(a.get("camera_entity", "")))[:20]
         mode = str(a.get("mode", "snapshot")).lower()
         if mode == "analyze":
             return (f"📷 正在分析摄像头: {cam}..." if cam else "📷 正在分析摄像头...") if zh else (f"📷 Analyzing: {cam}..." if cam else "📷 Analyzing camera...")
         return (f"📷 正在获取摄像头: {cam}..." if cam else "📷 正在查询摄像头...") if zh else (f"📷 Camera: {cam}..." if cam else "📷 Camera query...")
+    if name == "MediaAnalyze":
+        fpath = str(a.get("file_path", "")).strip()
+        fname = e(fpath.rsplit("/", 1)[-1])[:20] if fpath else ""
+        ext = fpath.rsplit(".", 1)[-1].lower() if "." in fpath else ""
+        if ext in ("mp4", "avi", "mov", "mkv", "webm", "flv"):
+            return (f"🎬 正在分析视频: {fname}..." if fname else "🎬 正在分析视频...") if zh else (f"🎬 Analyzing video: {fname}..." if fname else "🎬 Analyzing video...")
+        if ext in ("gif",):
+            return (f"🎞️ 正在分析GIF: {fname}..." if fname else "🎞️ 正在分析GIF...") if zh else (f"🎞️ Analyzing GIF: {fname}..." if fname else "🎞️ Analyzing GIF...")
+        return (f"🖼️ 正在分析图片: {fname}..." if fname else "🖼️ 正在分析图片...") if zh else (f" Analyzing image: {fname}..." if fname else "🖼️ Analyzing image...")
     if name == "ThinkContinue":
         return "⚡️ 正在思考中..." if zh else "⚡️ Deep reasoning..."
     if name == "ParallelToolCall":

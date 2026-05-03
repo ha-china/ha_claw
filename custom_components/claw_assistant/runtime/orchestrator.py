@@ -23,6 +23,7 @@ from .agent_fallback import (
     run_agent_fallback_chain,
 )
 from .config import DEFAULT_FALLBACK_AGENT_ID, DEFAULT_THRESHOLDS
+from .data_path import get_tmp_dir
 from .i18n import t
 from .ha_guide_store import async_refresh_homeassistant_guide_store
 from .internal_llm import _MAX_SYSTEM_PROMPT_CHARS, _fit_head_section_to_required_suffix
@@ -62,6 +63,128 @@ _PENDING_ATTACHMENTS: ContextVar[list[tuple[str, str]] | None] = ContextVar(
     default=None,
 )
 
+_ATTACHMENT_COMPRESS_THRESHOLD = 100 * 1024
+_ATTACHMENT_MAX_DIM = 1280
+_ATTACHMENT_TARGET_KB = 180
+_ATTACHMENT_QUALITY_LADDER = (82, 75, 68, 60)
+_ATTACHMENT_MIN_QUALITY = 60
+_ATTACHMENT_MAX_INPUT_BYTES = 32 * 1024 * 1024
+
+
+def _compress_image_blocking(raw: bytes) -> bytes | None:
+    try:
+        from io import BytesIO
+        from PIL import Image
+    except Exception:
+        return None
+    try:
+        img = Image.open(BytesIO(raw))
+        img.load()
+    except Exception:
+        return None
+    try:
+        if img.mode not in ("RGB", "L"):
+            img = img.convert("RGB")
+        w, h = img.size
+        longest = max(w, h)
+        if longest > _ATTACHMENT_MAX_DIM:
+            scale = _ATTACHMENT_MAX_DIM / longest
+            img = img.resize(
+                (max(1, int(w * scale)), max(1, int(h * scale))),
+                Image.LANCZOS,
+            )
+        target = _ATTACHMENT_TARGET_KB * 1024
+        last: bytes = b""
+        for quality in _ATTACHMENT_QUALITY_LADDER:
+            buf = BytesIO()
+            img.save(
+                buf,
+                format="JPEG",
+                quality=quality,
+                optimize=True,
+                progressive=False,
+            )
+            last = buf.getvalue()
+            if len(last) <= target or quality == _ATTACHMENT_MIN_QUALITY:
+                return last
+        return last or None
+    except Exception:
+        return None
+
+
+def _sanitize_attachment(mime: str, fpath: str, tmp_dir: Path | None = None) -> tuple[str, Path] | None:
+    """Validate, size-check and (for images) re-encode an attachment.
+
+    Goals:
+    - Never let a malformed file crash the conversation pipeline.
+    - Strip EXIF / container metadata via a clean PIL re-encode.
+    - Cap oversized images so downstream vision models don't OOM / overflow.
+    Returns ``None`` when the source is unusable.
+    """
+    try:
+        p = Path(fpath)
+        if not p.is_file():
+            return None
+        size = p.stat().st_size
+    except Exception:
+        return None
+    if size <= 0:
+        return None
+
+    mime_lower = (mime or "").strip().lower() or "application/octet-stream"
+
+    if mime_lower.startswith("video/") or mime_lower == "image/gif":
+        return (mime_lower, p)
+
+    if size > _ATTACHMENT_MAX_INPUT_BYTES:
+        LOGGER.warning(
+            "Rejecting attachment %s: size=%s bytes (limit=%s)",
+            p.name,
+            size,
+            _ATTACHMENT_MAX_INPUT_BYTES,
+        )
+        return None
+
+    if not mime_lower.startswith("image/"):
+        return (mime_lower, p)
+    if mime_lower == "image/gif":
+        return (mime_lower, p)
+    if size <= _ATTACHMENT_COMPRESS_THRESHOLD:
+        return (mime_lower, p)
+
+    try:
+        raw = p.read_bytes()
+    except Exception:
+        return None
+
+    compressed = _compress_image_blocking(raw)
+    if not compressed:
+        LOGGER.warning(
+            "Image re-encode failed for %s (%d bytes); dropping attachment",
+            p.name,
+            size,
+        )
+        return None
+
+    try:
+        import uuid
+
+        if tmp_dir is not None:
+            tmp_dir.mkdir(parents=True, exist_ok=True)
+        dest = (tmp_dir or Path(".")) / f"claw_att_{uuid.uuid4().hex[:12]}.jpg"
+        dest.write_bytes(compressed)
+        new_path = dest
+    except Exception:
+        return None
+
+    LOGGER.info(
+        "Compressed attachment %s: %d -> %d bytes",
+        p.name,
+        size,
+        len(compressed),
+    )
+    return ("image/jpeg", new_path)
+
 
 def _extract_attachment_tags(
     text: str,
@@ -75,6 +198,15 @@ def _extract_attachment_tags(
     if not clean and attachments:
         clean = t("attachment_only_input", language)
     return clean, attachments
+
+
+def _append_attachment_tags(text: str, attachments: list[tuple[str, str]]) -> str:
+    if not attachments:
+        return text
+    tags = "\n".join(f"[ATTACHMENT:{mime}:{fpath}]" for mime, fpath in attachments)
+    if not text:
+        return tags
+    return f"{text}\n{tags}"
 
 
 def _install_attachment_hook(hass: HomeAssistant) -> None:
@@ -92,11 +224,18 @@ def _install_attachment_hook(hass: HomeAssistant) -> None:
             for mime, fpath in pending:
                 p = Path(fpath)
                 if p.is_file():
+                    size = p.stat().st_size
                     att_list.append(Attachment(
                         media_content_id="",
                         mime_type=mime,
                         path=p,
                     ))
+                    LOGGER.info(
+                        "Prepared attachment for ChatLog: mime=%s path=%s size=%d",
+                        mime,
+                        p,
+                        size,
+                    )
             if att_list:
                 content = UserContent(
                     content=content.content,
@@ -209,8 +348,48 @@ async def _execute_conversation_turn_inner(
     text, pending_attachments = _extract_attachment_tags(text, language=language)
     attachment_token = None
     if pending_attachments:
-        attachment_token = _PENDING_ATTACHMENTS.set(pending_attachments)
-        _install_attachment_hook(hass)
+        sanitized: list[tuple[str, str]] = []
+        for mime, fpath in pending_attachments:
+            try:
+                _tmp_dir = get_tmp_dir(hass)
+                result = await hass.async_add_executor_job(
+                    _sanitize_attachment, mime, fpath, _tmp_dir
+                )
+            except Exception as err:
+                LOGGER.warning(
+                    "Attachment sanitize crashed for %s (%s): %s", fpath, mime, err
+                )
+                result = None
+            if result is not None:
+                new_mime, new_path = result
+                sanitized.append((new_mime, str(new_path)))
+        if sanitized:
+            _MEDIA_MIMES = ("image/", "video/")
+            media_atts = [(m, p) for m, p in sanitized if any(m.startswith(pfx) for pfx in _MEDIA_MIMES)]
+            other_atts = [(m, p) for m, p in sanitized if not any(m.startswith(pfx) for pfx in _MEDIA_MIMES)]
+            if media_atts:
+                hints = []
+                for _mime, fpath in media_atts:
+                    hints.append(
+                        f"[User sent media: {fpath} — "
+                        f"call MediaAnalyze(file_path=\"{fpath}\") to see it, "
+                        f"then respond naturally based on the content/mood/intent. "
+                        f"Do NOT just describe what you see — react to it like a human would.]"
+                    )
+                hint_block = "\n".join(hints)
+                text = f"{text}\n{hint_block}" if text else hint_block
+                LOGGER.info(
+                    "Routed %d media file(s) to MediaAnalyze tool path", len(media_atts)
+                )
+            if other_atts:
+                text = _append_attachment_tags(text, other_atts)
+                attachment_token = _PENDING_ATTACHMENTS.set(other_atts)
+                _install_attachment_hook(hass)
+        else:
+            LOGGER.info(
+                "All %d attachment(s) dropped after sanitization",
+                len(pending_attachments),
+            )
     task_loop = record_user_turn(hass, text=text)
     LOGGER.info("Task loop turn %s: %s...", task_loop["turn_count"], text[:50])
 

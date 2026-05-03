@@ -804,7 +804,7 @@ class ExecutePythonTool(llm.Tool):
                                 worker_loop.run_until_complete(
                                     asyncio.wait_for(maybe, timeout=max(1, timeout))
                                 )
-                    except BaseException as err:  # noqa: BLE001 - relay
+                    except BaseException as err:
                         worker_error.append(err)
                     finally:
                         try:
@@ -815,11 +815,11 @@ class ExecutePythonTool(llm.Tool):
                                 worker_loop.run_until_complete(
                                     asyncio.gather(*pending, return_exceptions=True)
                                 )
-                        except Exception:  # noqa: BLE001
+                        except Exception:
                             pass
                         try:
                             worker_loop.close()
-                        except Exception:  # noqa: BLE001
+                        except Exception:
                             pass
                         asyncio.set_event_loop(None)
 
@@ -848,7 +848,7 @@ class ExecutePythonTool(llm.Tool):
                 "error": f"SystemExit: {err.code}",
                 "traceback": traceback.format_exc(),
             }
-        except BaseException:  # noqa: BLE001 - surface everything to AI
+        except BaseException:
             err_info = {
                 "error": traceback.format_exception_only(*sys.exc_info()[:2])[-1].strip(),
                 "traceback": traceback.format_exc(),
@@ -1844,10 +1844,10 @@ def _compress_camera_frame(
     return data, w, h, min_quality
 
 
-class CameraAnalyzeTool(llm.Tool):
-    name = "CameraAnalyze"
+class CameraCaptureTool(llm.Tool):
+    name = "CameraCapture"
     description = (
-        "Camera tool: discover cameras, snapshot, or analyze a frame.\n"
+        "Camera tool: capture snapshots or analyze live camera frames.\n"
         "- camera_entity='list' (or empty) → enumerate all cameras "
         "(bypasses exposure filter).\n"
         "- mode=snapshot (default) → return snapshot_url + `markdown_hint` "
@@ -1858,7 +1858,8 @@ class CameraAnalyzeTool(llm.Tool):
         "see the image alongside your analysis.\n"
         "Params: camera_entity (entity_id / friendly name / 'list'), "
         "mode (snapshot|analyze, default snapshot), max_dim (default 640), "
-        "target_kb (default 40)."
+        "target_kb (default 40).\n"
+        "For uploaded images/videos/GIFs, use MediaAnalyze instead."
     )
     parameters = vol.Schema({
         vol.Optional("camera_entity", default=""): str,
@@ -1893,7 +1894,7 @@ class CameraAnalyzeTool(llm.Tool):
                 "action": "list",
                 "count": len(cameras),
                 "cameras": cameras,
-                "message": f"Found {len(cameras)} camera(s). Call CameraAnalyze again with camera_entity set to a specific entity_id.",
+                "message": f"Found {len(cameras)} camera(s). Call CameraCapture again with camera_entity set to a specific entity_id.",
             }
 
         target_camera = None
@@ -1968,7 +1969,7 @@ class CameraAnalyzeTool(llm.Tool):
             except Exception as err:
                 primary_err = err
                 _LOGGER.debug(
-                    "CameraAnalyze internal path failed for %s (%s); trying HTTP proxy fallback",
+                    "CameraCapture internal path failed for %s (%s); trying HTTP proxy fallback",
                     target_camera,
                     err,
                 )
@@ -1995,7 +1996,7 @@ class CameraAnalyzeTool(llm.Tool):
                     fetch_path = "http_proxy"
                 except Exception as fallback_err:
                     _LOGGER.error(
-                        "CameraAnalyze fallback also failed for %s: internal=%s; http=%s",
+                        "CameraCapture fallback also failed for %s: internal=%s; http=%s",
                         target_camera,
                         primary_err,
                         fallback_err,
@@ -2030,8 +2031,505 @@ class CameraAnalyzeTool(llm.Tool):
                 result["markdown_hint"] = f"![{target_camera}]({snapshot_url})"
             return result
         except Exception as err:
-            _LOGGER.error("CameraAnalyzeTool error: %s", err)
+            _LOGGER.error("CameraCaptureTool error: %s", err)
             return {"success": False, "error": f"Failed to capture camera frame: {err}"}
+
+
+_VIDEO_EXTENSIONS = frozenset({"mp4", "avi", "mov", "mkv", "webm", "flv", "m4v", "ts", "3gp"})
+_GIF_EXTENSION = "gif"
+_MIN_VIDEO_FRAMES = 3
+_MAX_VIDEO_FRAMES = 10
+
+
+def _calc_frame_count(duration: float) -> int:
+    if duration <= 0:
+        return 4
+    if duration <= 5:
+        return _MIN_VIDEO_FRAMES
+    if duration <= 30:
+        return 4
+    if duration <= 60:
+        return 6
+    if duration <= 180:
+        return 8
+    return _MAX_VIDEO_FRAMES
+
+_FFPROBE_TIMEOUT = 10
+_FFMPEG_FRAME_TIMEOUT = 30
+_VIDEO_COMPRESS_THRESHOLD = 5 * 1024 * 1024  # 5MB
+_VIDEO_COMPRESS_TIMEOUT = 120
+
+
+def _compress_video_sync(ffmpeg_bin: str, src: str, dst: str) -> bool:
+    import subprocess
+    cmd = [
+        ffmpeg_bin, "-y",
+        "-i", src,
+        "-vf", "scale='min(480,iw)':-2",
+        "-c:v", "libx264", "-preset", "ultrafast",
+        "-crf", "35",
+        "-an",
+        "-movflags", "+faststart",
+        dst,
+    ]
+    try:
+        proc = subprocess.run(cmd, capture_output=True, timeout=_VIDEO_COMPRESS_TIMEOUT)
+        from pathlib import Path as _P
+        return proc.returncode == 0 and _P(dst).is_file() and _P(dst).stat().st_size > 0
+    except Exception as err:
+        _LOGGER.debug("Video compress failed: %s", err)
+        return False
+
+
+def _get_video_duration(ffprobe_bin: str, file_path: str) -> float:
+    import subprocess
+    try:
+        result = subprocess.run(
+            [
+                ffprobe_bin, "-v", "quiet",
+                "-show_entries", "format=duration",
+                "-of", "csv=p=0", file_path,
+            ],
+            capture_output=True, text=True, timeout=_FFPROBE_TIMEOUT,
+        )
+        return float(result.stdout.strip()) if result.returncode == 0 else 0.0
+    except Exception:
+        return 0.0
+
+
+def _extract_frames_sync(
+    ffmpeg_bin: str,
+    file_path: str,
+    out_dir: str,
+    num_frames: int,
+    duration: float,
+) -> list[str]:
+    import subprocess
+    if duration <= 0:
+        timestamps = [0.0, 0.5, 1.0, 2.0, 5.0, 8.0, 12.0, 16.0, 20.0, 25.0][:num_frames]
+    else:
+        step = duration / num_frames
+        timestamps = [step * i for i in range(num_frames)]
+
+    paths: list[str] = []
+    for i, ts in enumerate(timestamps):
+        out = f"{out_dir}/frame_{i:03d}.jpg"
+        cmd = [
+            ffmpeg_bin, "-y",
+            "-i", file_path,
+            "-ss", f"{ts:.2f}",
+            "-frames:v", "1",
+            "-q:v", "2",
+            out,
+        ]
+        try:
+            proc = subprocess.run(
+                cmd, capture_output=True, timeout=_FFMPEG_FRAME_TIMEOUT,
+            )
+            from pathlib import Path as _P
+            if _P(out).is_file() and _P(out).stat().st_size > 0:
+                paths.append(out)
+            elif proc.returncode != 0:
+                _LOGGER.debug(
+                    "ffmpeg frame %d failed (rc=%d): %s",
+                    i, proc.returncode,
+                    (proc.stderr or b"")[-500:].decode("utf-8", errors="replace"),
+                )
+        except Exception as err:
+            _LOGGER.debug("ffmpeg frame %d exception: %s", i, err)
+    return paths
+
+
+def _compose_frame_grid(
+    frame_bytes_list: list[bytes],
+    max_dim: int = 640,
+    target_kb: int = 80,
+) -> tuple[bytes, int, int] | None:
+    from io import BytesIO
+    try:
+        from PIL import Image
+    except ImportError:
+        return None
+
+    if not frame_bytes_list:
+        return None
+
+    images = []
+    for fb in frame_bytes_list:
+        try:
+            images.append(Image.open(BytesIO(fb)).convert("RGB"))
+        except Exception:
+            pass
+    if not images:
+        return None
+
+    n = len(images)
+    if n <= 2:
+        cols, rows = n, 1
+    elif n <= 4:
+        cols, rows = 2, 2
+    elif n <= 6:
+        cols, rows = 3, 2
+    elif n <= 8:
+        cols, rows = 4, 2
+    else:
+        cols, rows = 5, 2
+
+    grid_dim = max_dim if n <= 6 else int(max_dim * 1.4)
+    thumb_w = grid_dim // cols
+    thumb_h = thumb_w * 3 // 4
+    grid_w = cols * thumb_w
+    grid_h = rows * thumb_h
+
+    grid = Image.new("RGB", (grid_w, grid_h), (30, 30, 30))
+    for idx, img in enumerate(images[:cols * rows]):
+        r, c = divmod(idx, cols)
+        resized = img.resize((thumb_w, thumb_h), Image.LANCZOS)
+        grid.paste(resized, (c * thumb_w, r * thumb_h))
+
+    buf = BytesIO()
+    quality = 70
+    grid.save(buf, format="JPEG", quality=quality, optimize=True)
+    data = buf.getvalue()
+    if len(data) > target_kb * 1024 and quality > 40:
+        buf = BytesIO()
+        grid.save(buf, format="JPEG", quality=50, optimize=True)
+        data = buf.getvalue()
+
+    return data, grid_w, grid_h
+
+
+def _extract_at_timestamps(
+    ffmpeg_bin: str,
+    file_path: str,
+    out_dir: str,
+    timestamps: list[float],
+) -> list[str]:
+    import subprocess
+    paths: list[str] = []
+    for i, ts in enumerate(timestamps):
+        out = f"{out_dir}/frame_{i:03d}.jpg"
+        cmd = [
+            ffmpeg_bin, "-y",
+            "-i", file_path,
+            "-ss", f"{ts:.2f}",
+            "-frames:v", "1",
+            "-q:v", "2",
+            out,
+        ]
+        try:
+            proc = subprocess.run(cmd, capture_output=True, timeout=_FFMPEG_FRAME_TIMEOUT)
+            from pathlib import Path as _P
+            if _P(out).is_file() and _P(out).stat().st_size > 0:
+                paths.append(out)
+            elif proc.returncode != 0:
+                _LOGGER.debug(
+                    "ffmpeg ts=%.2f failed (rc=%d): %s",
+                    ts, proc.returncode,
+                    (proc.stderr or b"")[-300:].decode("utf-8", errors="replace"),
+                )
+        except Exception as err:
+            _LOGGER.debug("ffmpeg ts=%.2f exception: %s", ts, err)
+    return paths
+
+
+def _extract_gif_frames_pil_raw(
+    file_path: str, max_dim: int, max_frames: int = 6,
+) -> list[bytes]:
+    from io import BytesIO
+    try:
+        from PIL import Image
+        img = Image.open(file_path)
+    except Exception:
+        return []
+
+    n_frames = getattr(img, "n_frames", 1)
+    if n_frames <= 1:
+        step = 1
+    else:
+        step = max(1, n_frames // max_frames)
+    indices = list(range(0, n_frames, step))[:max_frames]
+
+    frames: list[bytes] = []
+    for idx in indices:
+        try:
+            img.seek(idx)
+            rgb = img.convert("RGB")
+            w, h = rgb.size
+            if w > max_dim or h > max_dim:
+                ratio = max_dim / max(w, h)
+                rgb = rgb.resize((int(w * ratio), int(h * ratio)), Image.LANCZOS)
+            buf = BytesIO()
+            rgb.save(buf, format="JPEG", quality=70, optimize=True)
+            frames.append(buf.getvalue())
+        except Exception:
+            pass
+    return frames
+
+
+def _ffmpeg_diagnose(ffmpeg_bin: str, file_path: str) -> str:
+    import subprocess
+    try:
+        proc = subprocess.run(
+            [ffmpeg_bin, "-y", "-i", file_path, "-frames:v", "1", "-f", "null", "-"],
+            capture_output=True, timeout=15,
+        )
+        stderr = (proc.stderr or b"").decode("utf-8", errors="replace")
+        lines = [ln.strip() for ln in stderr.splitlines() if ln.strip()]
+        return "\n".join(lines[-20:]) if lines else f"rc={proc.returncode}, no stderr"
+    except Exception as err:
+        return f"diagnose failed: {err}"
+
+
+class MediaAnalyzeTool(llm.Tool):
+    name = "MediaAnalyze"
+    description = (
+        "Analyze uploaded media files (images, GIFs, videos).\n"
+        "Use this when the user sends a picture, photo, GIF, or video "
+        "via IM or references a local file path.\n"
+        "For images: returns a single base64 JPEG.\n"
+        "For videos/GIFs: extracts key frames and returns multiple "
+        "base64 JPEGs so you can understand the video content.\n"
+        "Workflow for videos:\n"
+        "  1) First call without timestamps → auto-extracts overview frames.\n"
+        "  2) If you need more detail at specific moments, call again with "
+        "timestamps=[1.5, 3.0, 7.2] to extract frames at those exact seconds.\n"
+        "IMPORTANT: After seeing the media, respond NATURALLY — react to "
+        "its mood, humor, meaning, or intent. Do NOT mechanically list "
+        "objects or describe frames. Act like a human reacting to the content.\n"
+        "Params: file_path (required), max_dim (default 640), "
+        "target_kb (default 40), timestamps (optional list of seconds "
+        "for precise frame extraction on follow-up calls)."
+    )
+    parameters = vol.Schema({
+        vol.Required("file_path"): str,
+        vol.Optional("max_dim", default=640): int,
+        vol.Optional("target_kb", default=40): int,
+        vol.Optional("timestamps", default=[]): list,
+    })
+
+    async def async_call(self, hass: HomeAssistant, tool_input: llm.ToolInput, llm_context: llm.LLMContext) -> JsonObjectType:
+        import base64
+        from pathlib import Path
+
+        file_path = (tool_input.tool_args.get("file_path", "") or "").strip()
+        max_dim = max(160, int(tool_input.tool_args.get("max_dim", 640) or 640))
+        target_kb = max(10, int(tool_input.tool_args.get("target_kb", 40) or 40))
+        timestamps = tool_input.tool_args.get("timestamps") or []
+
+        if not file_path:
+            return {"success": False, "error": "file_path is required"}
+
+        p = Path(file_path)
+        if not p.is_file():
+            return {"success": False, "error": f"File not found: {file_path}"}
+
+        ext = p.suffix.lstrip(".").lower()
+
+        if ext == _GIF_EXTENSION:
+            return await self._analyze_gif(hass, file_path, p, max_dim, target_kb)
+
+        if ext in _VIDEO_EXTENSIONS:
+            return await self._analyze_video(hass, file_path, p, ext, max_dim, target_kb, timestamps)
+
+        return await self._analyze_image(hass, file_path, p, max_dim, target_kb)
+
+    async def _analyze_image(
+        self, hass: HomeAssistant, file_path: str, p, max_dim: int, target_kb: int,
+    ) -> JsonObjectType:
+        import base64
+
+        try:
+            raw_bytes = await hass.async_add_executor_job(p.read_bytes)
+        except Exception as err:
+            return {"success": False, "error": f"Failed to read file: {err}"}
+        if not raw_bytes:
+            return {"success": False, "error": "File is empty"}
+
+        try:
+            jpeg_bytes, w, h, q = await hass.async_add_executor_job(
+                _compress_camera_frame, raw_bytes, max_dim, target_kb
+            )
+        except Exception as err:
+            _LOGGER.warning("MediaAnalyze image compress failed for %s: %s", p.name, err)
+            return {"success": False, "error": f"Image processing failed: {err}"}
+
+        return {
+            "success": True,
+            "media_type": "image",
+            "source": file_path,
+            "image_base64": base64.b64encode(jpeg_bytes).decode("utf-8"),
+            "content_type": "image/jpeg",
+            "width": w,
+            "height": h,
+            "message": f"Image {p.name}: {w}x{h}. React naturally to what you see — do NOT just list objects.",
+        }
+
+    async def _analyze_gif(
+        self, hass: HomeAssistant, file_path: str, p, max_dim: int, target_kb: int,
+    ) -> JsonObjectType:
+        import base64
+
+        frames_data = await hass.async_add_executor_job(
+            _extract_gif_frames_pil_raw, file_path, max_dim
+        )
+        if not frames_data:
+            return await self._analyze_image(hass, file_path, p, max_dim, target_kb)
+
+        grid_result = await hass.async_add_executor_job(
+            _compose_frame_grid, frames_data, max_dim, target_kb * 2
+        )
+        if not grid_result:
+            return await self._analyze_image(hass, file_path, p, max_dim, target_kb)
+
+        grid_bytes, grid_w, grid_h = grid_result
+        return {
+            "success": True,
+            "media_type": "GIF",
+            "source": file_path,
+            "image_base64": base64.b64encode(grid_bytes).decode("utf-8"),
+            "content_type": "image/jpeg",
+            "width": grid_w,
+            "height": grid_h,
+            "frame_count": len(frames_data),
+            "message": (
+                f"GIF {p.name}: {len(frames_data)} frames as grid."
+                " React naturally to the content — humor, emotion, meaning. Don't mechanically describe each frame."
+            ),
+        }
+
+    async def _analyze_video(
+        self, hass: HomeAssistant, file_path: str, p, ext: str,
+        max_dim: int, target_kb: int, timestamps: list | None = None,
+    ) -> JsonObjectType:
+        import base64
+        import shutil
+        from pathlib import Path
+
+        ffmpeg_bin = shutil.which("ffmpeg")
+        ffprobe_bin = shutil.which("ffprobe")
+        if not ffmpeg_bin:
+            return {"success": False, "error": "ffmpeg not found — cannot extract video frames"}
+
+        if not p.is_file():
+            return {"success": False, "error": f"Video file not found: {file_path}"}
+        file_size = p.stat().st_size
+        if file_size == 0:
+            return {"success": False, "error": f"Video file is empty: {file_path}"}
+
+        from ..runtime.data_path import get_tmp_dir
+        import uuid
+        work_dir = get_tmp_dir(hass) / f"vframes_{uuid.uuid4().hex[:8]}"
+        await hass.async_add_executor_job(lambda: work_dir.mkdir(parents=True, exist_ok=True))
+        frame_dir = work_dir
+
+        effective_path = file_path
+        if file_size > _VIDEO_COMPRESS_THRESHOLD:
+            compressed_path = str(work_dir / "compressed.mp4")
+            ok = await hass.async_add_executor_job(
+                _compress_video_sync, ffmpeg_bin, file_path, compressed_path
+            )
+            if ok:
+                effective_path = compressed_path
+                _LOGGER.debug(
+                    "MediaAnalyze compressed video: %d -> %d bytes",
+                    file_size, Path(compressed_path).stat().st_size,
+                )
+
+        duration = 0.0
+        if ffprobe_bin:
+            duration = await hass.async_add_executor_job(
+                _get_video_duration, ffprobe_bin, effective_path
+            )
+
+        ai_timestamps = None
+        if timestamps:
+            ai_timestamps = [max(0.0, float(t)) for t in timestamps[:10]]
+
+        _LOGGER.debug(
+            "MediaAnalyze video: path=%s size=%d duration=%.1f timestamps=%s compressed=%s",
+            file_path, file_size, duration, ai_timestamps, effective_path != file_path,
+        )
+
+        if ai_timestamps:
+            frame_paths = await hass.async_add_executor_job(
+                _extract_at_timestamps,
+                ffmpeg_bin, effective_path, str(frame_dir), ai_timestamps,
+            )
+            used_timestamps = ai_timestamps
+        else:
+            num_frames = _calc_frame_count(duration)
+            frame_paths = await hass.async_add_executor_job(
+                _extract_frames_sync,
+                ffmpeg_bin, effective_path, str(frame_dir),
+                num_frames, duration,
+            )
+            if duration <= 0:
+                used_timestamps = [0.0, 0.5, 1.0, 2.0, 5.0, 8.0, 12.0, 16.0, 20.0, 25.0][:len(frame_paths)]
+            else:
+                step = duration / num_frames
+                used_timestamps = [step * i for i in range(num_frames)][:len(frame_paths)]
+
+        if not frame_paths:
+            diag = await hass.async_add_executor_job(
+                _ffmpeg_diagnose, ffmpeg_bin, effective_path
+            )
+            _LOGGER.warning(
+                "MediaAnalyze ffmpeg failed for %s: %s", p.name, diag[:200]
+            )
+            return {
+                "success": False,
+                "error": f"Failed to extract frames from {p.name}",
+                "diagnostics": diag,
+            }
+
+        raw_frames: list[bytes] = []
+        ts_labels: list[str] = []
+        for idx, fp in enumerate(frame_paths):
+            try:
+                raw = await hass.async_add_executor_job(Path(fp).read_bytes)
+                if raw:
+                    raw_frames.append(raw)
+                    if idx < len(used_timestamps):
+                        ts_labels.append(f"{used_timestamps[idx]:.1f}s")
+            except Exception as err:
+                _LOGGER.debug("MediaAnalyze frame read skip %s: %s", fp, err)
+
+        if not raw_frames:
+            return {"success": False, "error": f"All frames failed to read for {p.name}"}
+
+        grid_result = await hass.async_add_executor_job(
+            _compose_frame_grid, raw_frames, max_dim, target_kb * 2
+        )
+        if not grid_result:
+            return {"success": False, "error": f"Failed to compose frame grid for {p.name}"}
+
+        grid_bytes, grid_w, grid_h = grid_result
+
+        import shutil as _shutil
+        await hass.async_add_executor_job(lambda: _shutil.rmtree(work_dir, ignore_errors=True))
+
+        mode_hint = "AI-selected timestamps" if ai_timestamps else "auto overview"
+        return {
+            "success": True,
+            "media_type": "video",
+            "source": file_path,
+            "image_base64": base64.b64encode(grid_bytes).decode("utf-8"),
+            "content_type": "image/jpeg",
+            "width": grid_w,
+            "height": grid_h,
+            "frame_count": len(raw_frames),
+            "duration_seconds": round(duration, 1) if duration > 0 else None,
+            "frame_timestamps": ts_labels,
+            "extraction_mode": mode_hint,
+            "message": (
+                f"Video {p.name}: {len(raw_frames)} frames as grid ({mode_hint})"
+                + (f", {duration:.1f}s total" if duration > 0 else "")
+                + f". Frames at: {', '.join(ts_labels)}."
+                + " React naturally to the video content — don't just list what each frame shows."
+                + (" Call again with timestamps=[...] if you need specific moments." if not ai_timestamps else "")
+            ),
+        }
 
 
 class GetConversationHistoryTool(llm.Tool):
