@@ -32,6 +32,7 @@ from .loop_controller import record_response
 from .native_chatlog_bridge import async_bridge_native_chatlog_turn
 from .prompting import _fit_base_prompt
 from .response_format import (
+    _looks_like_error,
     apply_agent_response_format,
     get_response_text,
     sanitize_response_text,
@@ -902,20 +903,8 @@ async def run_agent_fallback_chain(
                 synthesized_response = extract_successful_tool_response(all_tools)
                 raw_agent_response_text = _raw_response_text(result).strip()
                 agent_response_text = get_response_text(result).strip()
-                formatted_probe = agent_response_text.lower()
-                error_probe = (raw_agent_response_text or agent_response_text).lower()
-                _is_error_text = bool(error_probe) and any(
-                    kw in formatted_probe
-                    or kw in error_probe
-                    for kw in (
-                        "error getting response",
-                        "api error",
-                        "service temporarily unavailable",
-                        "server disconnected",
-                        "timed out",
-                        "connection reset",
-                    )
-                )
+                error_probe = raw_agent_response_text or agent_response_text
+                _is_error_text = bool(error_probe) and _looks_like_error(error_probe)
                 failure_reason = _extract_response_error_reason(result)
                 transient_response_error = any(
                     kw in failure_reason.lower() for kw in _TRANSIENT_ERROR_KEYWORDS

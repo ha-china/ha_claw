@@ -346,17 +346,58 @@ def _strip_memory_context(text: str) -> str:
 
 
 _AGENT_ERROR_PREFIX_RE = re.compile(
-    r"(?:Error\s+getting\s+response|获取响应时?出错|获取响应错误)\s*[:：]\s*",
+    r"(?:"
+    r"Error\s+getting\s+response"
+    r"|获取响应[时出]*[错误]*"
+    r"|RuntimeError\s*:"
+    r"|Exception\s*:"
+    r"|APIError\s*:"
+    r"|ConnectionError\s*:"
+    r"|TimeoutError\s*:"
+    r")\s*[:：]?\s*",
     re.IGNORECASE,
 )
 _API_ERROR_JSON_RE = re.compile(
-    r"RuntimeError\s*:\s*API\s*error\s*:\s*(\{.*)",
+    r"(?:API\s*error|RuntimeError|Error)\s*[:：]\s*(\{.*)",
     re.IGNORECASE | re.DOTALL,
 )
 _AGENT_REPLY_PREFIX_RE = re.compile(
     r"^(?:conversation\.[\w_]+\s*:\s*)?(\(.+?\)\s*(?:回复|Reply)\s*[:：]\s*)(.*)$",
     re.DOTALL,
 )
+_ERROR_SIGNAL_PATTERNS = (
+    "error getting response",
+    "runtimeerror",
+    "api error",
+    "api_error",
+    "connection reset",
+    "server disconnected",
+    "serverdisconnected",
+    "timed out",
+    "timeout",
+    "broken pipe",
+    "eof occurred",
+    "cannot connect",
+    "ssl:",
+    "clientconnectorerror",
+    "rate limit",
+    "rate_limit",
+    "insufficient_quota",
+    "invalid_api_key",
+    "authentication",
+    "unauthorized",
+    "model_not_found",
+    "context_length_exceeded",
+    "content_filter",
+    "temporarily unavailable",
+    "服务暂时不可用",
+    "获取响应",
+)
+
+
+def _looks_like_error(text: str) -> bool:
+    low = text.lower()
+    return any(pat in low for pat in _ERROR_SIGNAL_PATTERNS)
 
 
 def _shorten_model_name(value: str) -> str:
@@ -367,12 +408,6 @@ def _shorten_model_name(value: str) -> str:
 
 
 def _parse_api_error_json(blob: str) -> tuple[str, str, str]:
-    """Best-effort parse of the JSON tail after ``API error:``.
-
-    Returns ``(code, message, model)``. Missing fields are ''.
-    The upstream string is sometimes truncated mid-JSON, so we tolerate
-    partial payloads by falling back to regex extraction.
-    """
     code = message = model = ""
     try:
         payload = json.loads(blob)
@@ -381,41 +416,116 @@ def _parse_api_error_json(blob: str) -> tuple[str, str, str]:
     if isinstance(payload, dict):
         err = payload.get("error") if isinstance(payload.get("error"), dict) else payload
         if isinstance(err, dict):
-            code = str(err.get("code") or err.get("type") or "").strip()
-            message = str(err.get("message") or "").strip()
+            code = str(err.get("code") or err.get("type") or err.get("status") or "").strip()
+            message = str(err.get("message") or err.get("msg") or err.get("detail") or "").strip()
             model = str(err.get("model") or err.get("param") or "").strip()
     if not message:
-        m = re.search(r'"message"\s*:\s*"([^"]+)"', blob)
+        m = re.search(r'"(?:message|msg|detail)"\s*:\s*"([^"]+)"', blob)
         if m:
             message = m.group(1).strip()
     if not code:
-        m = re.search(r'"(?:code|type)"\s*:\s*"([^"]+)"', blob)
+        m = re.search(r'"(?:code|type|status|err_code)"\s*:\s*"?([^",}\s]+)', blob)
         if m:
             code = m.group(1).strip()
     if not model:
-        m = re.search(r"model\s+([A-Za-z0-9._/\-]+)", blob)
+        m = re.search(r"model[\"'\s:]+([A-Za-z0-9._/\-]+)", blob)
         if m:
             model = _shorten_model_name(m.group(1))
     return code, message, model
 
 
-def prettify_agent_error(text: str, *, language: str | None = None) -> str | None:
-    """Convert raw upstream agent error strings to a short, user-facing note.
+def _classify_error(code: str, message: str, body: str) -> str | None:
+    code_l = code.lower()
+    msg_l = message.lower()
+    all_l = f"{code_l} {msg_l} {body.lower()}"
 
-    Returns a rewritten string, or ``None`` when ``text`` does not look like
-    an agent error (caller should keep the original text). Messages are
-    beginner-friendly and localized via ``i18n.t``.
-    """
+    if code_l in ("model_not_found", "model_not_exist", "no_model"):
+        return "err_model_not_found"
+    if "no available channel" in msg_l or "no available channel" in all_l:
+        return "err_model_not_found"
+    if "does not exist" in msg_l and "model" in msg_l:
+        return "err_model_not_found"
+
+    if code_l in ("rate_limit_exceeded", "rate_limit", "429", "too_many_requests"):
+        return "err_rate_limited"
+    if "rate limit" in msg_l or "too many request" in msg_l or "请求过于频繁" in msg_l:
+        return "err_rate_limited"
+    if "throttl" in msg_l:
+        return "err_rate_limited"
+
+    if code_l in ("invalid_api_key", "authentication_error", "auth_failed", "401", "unauthorized"):
+        return "err_auth_failed"
+    if "invalid api key" in msg_l or "authentication" in msg_l or "unauthorized" in msg_l:
+        return "err_auth_failed"
+    if "api key" in msg_l and ("invalid" in msg_l or "expired" in msg_l or "incorrect" in msg_l):
+        return "err_auth_failed"
+
+    if code_l in ("insufficient_quota", "quota_exceeded", "billing_limit", "402"):
+        return "err_quota_exceeded"
+    if "quota" in msg_l or "insufficient" in msg_l or "balance" in msg_l or "余额" in msg_l:
+        return "err_quota_exceeded"
+    if "billing" in msg_l or "payment" in msg_l:
+        return "err_quota_exceeded"
+
+    if code_l in ("context_length_exceeded", "max_tokens", "token_limit"):
+        return "err_context_too_long"
+    if "context length" in msg_l or ("token" in msg_l and ("max" in msg_l or "limit" in msg_l or "exceed" in msg_l)):
+        return "err_context_too_long"
+    if "too long" in msg_l and ("input" in msg_l or "context" in msg_l or "message" in msg_l):
+        return "err_context_too_long"
+
+    if code_l in ("content_filter", "content_policy", "content_blocked", "responsibleai"):
+        return "err_content_filtered"
+    if "content filter" in msg_l or "content policy" in msg_l or ("safety" in msg_l and "blocked" in msg_l):
+        return "err_content_filtered"
+
+    if "temporarily unavailable" in msg_l or "服务暂时不可用" in message:
+        return "err_service_unavailable"
+    if code_l in ("503", "service_unavailable", "overloaded", "server_error", "500", "502"):
+        return "err_service_unavailable"
+    if "overloaded" in msg_l or "capacity" in msg_l or "503" in code_l:
+        return "err_service_unavailable"
+
+    if "timed out" in all_l or "timeout" in all_l:
+        return "err_timeout"
+
+    if any(kw in all_l for kw in ("connection reset", "server disconnected", "broken pipe",
+                                   "eof occurred", "cannot connect", "clientconnector")):
+        return "err_connection"
+
+    return None
+
+
+def _classify_plaintext_error(text: str) -> str | None:
+    low = text.lower()
+    if "timed out" in low or "timeout" in low or "超时" in low:
+        return "err_timeout"
+    if any(kw in low for kw in ("connection reset", "server disconnected", "broken pipe",
+                                 "eof occurred", "cannot connect", "clientconnector",
+                                 "serverdisconnected", "ssl:")):
+        return "err_connection"
+    if "rate limit" in low or "rate_limit" in low or "429" in low or "too many request" in low:
+        return "err_rate_limited"
+    if "unauthorized" in low or "invalid api key" in low or "authentication" in low or "401" in low:
+        return "err_auth_failed"
+    if "quota" in low or "insufficient" in low or "余额" in low:
+        return "err_quota_exceeded"
+    if "temporarily unavailable" in low or "服务暂时不可用" in low or "503" in low or "overloaded" in low:
+        return "err_service_unavailable"
+    if "context length" in low or ("token" in low and ("limit" in low or "exceed" in low)):
+        return "err_context_too_long"
+    if "content filter" in low or "content policy" in low:
+        return "err_content_filtered"
+    return None
+
+
+def prettify_agent_error(text: str, *, language: str | None = None) -> str | None:
     if not text:
         return None
     candidate = text.strip()
     if not candidate:
         return None
-    if not (
-        _AGENT_ERROR_PREFIX_RE.search(candidate)
-        or "RuntimeError: API error" in candidate
-        or "RuntimeError:API error" in candidate
-    ):
+    if not _looks_like_error(candidate):
         return None
 
     body = _AGENT_ERROR_PREFIX_RE.sub("", candidate, count=1).strip()
@@ -423,16 +533,24 @@ def prettify_agent_error(text: str, *, language: str | None = None) -> str | Non
     json_match = _API_ERROR_JSON_RE.search(body)
     if json_match:
         code, message, model = _parse_api_error_json(json_match.group(1))
-        message_l = message.lower()
-        code_l = code.lower()
-        if code_l == "model_not_found" or "no available channel" in message_l:
+        category = _classify_error(code, message, body)
+        if category == "err_model_not_found":
             target = model or t("err_model_placeholder", language)
-            return t("err_model_not_found", language).replace("{model}", target)
-        if "temporarily unavailable" in message_l or "服务暂时不可用" in message:
-            return t("err_service_unavailable", language)
+            return t(category, language).replace("{model}", target)
+        if category:
+            return t(category, language)
         detail = message or code or body
-    else:
-        detail = body
+        if not detail:
+            return None
+        if len(detail) > 120:
+            detail = detail[:117] + "..."
+        return t("err_generic_api", language).replace("{detail}", detail)
+
+    category = _classify_plaintext_error(body)
+    if category:
+        return t(category, language)
+
+    detail = body
     if not detail:
         return None
     if len(detail) > 120:
@@ -441,16 +559,9 @@ def prettify_agent_error(text: str, *, language: str | None = None) -> str | Non
 
 
 def _rewrite_chained_agent_errors(text: str, *, language: str | None = None) -> str:
-    """Handle fallback-chain strings joined by ``;`` or newlines.
-
-    Each segment may be a full ``(agent) reply: <error>`` fragment. Rewrite
-    any segment whose tail matches the agent-error pattern, and deduplicate
-    identical friendly messages so the user sees a concise summary instead
-    of the same ``Service temporarily unavailable`` copied five times.
-    """
     if not text:
         return text
-    if "Error getting response" not in text and "RuntimeError: API error" not in text:
+    if not _looks_like_error(text):
         return text
 
     parts = re.split(r"\s*;\s*|\n+", text)
