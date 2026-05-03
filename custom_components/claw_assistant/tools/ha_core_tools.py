@@ -889,7 +889,7 @@ CAMERA RECORD: ServiceCall(domain="camera", service="record", data={"entity_id":
                 "error": f"camera.{service} requires an explicit camera entity_id target.",
                 "suggestions": {
                     "required_fields": ["entity_id", "filename"],
-                    "discovery_hint": "Use CameraAnalyze with camera_entity='list' to discover available cameras before calling this service.",
+                    "discovery_hint": "Use CameraCapture with camera_entity='list' to discover available cameras before calling this service.",
                     "example": {
                         "entity_id": "camera.your_camera_entity",
                         "filename": str(get_output_dir(hass) / ("camera.mp4" if service == "record" else "camera.jpg")),

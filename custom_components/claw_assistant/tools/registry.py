@@ -34,7 +34,8 @@ from .dashboard_card_tools import DashboardCardTool
 from .ha_tools import ConfigEntriesTool, HAControlTool, HACSTool
 from .helper_tools import HelperManagerTool
 from .misc_tools import (
-    CameraAnalyzeTool,
+    CameraCaptureTool,
+    MediaAnalyzeTool,
     ConversationMemoryTool,
     ExecutePythonTool,
     GetConversationHistoryTool,
@@ -72,7 +73,8 @@ TOOL_REGISTRY: dict[str, dict[str, Any]] = {
     "ServiceCall": {"category": "device", "desc": "Call a registered HA service. Prefer native intent tools for device control; use ServiceCall when no intent tool fits. Good for calendar/todo/automation/script/notification/timer/input-helper services. Camera recording: domain=camera, service=record, data includes entity_id, filename, duration(seconds); parse duration from the user, ask if absent. Params: domain, service, data(dict). Use ListServices/ServiceHelp if unsure.", "priority": 2},
     "EntityQuery": {"category": "query", "desc": "Query a single entity state. Params: entity_id (supports fuzzy matching such as 'living room light')", "priority": 1},
     "GetLiveContext": {"category": "query", "desc": "Get the real-time state list of all exposed entities. No parameters required.", "priority": 1},
-    "CameraAnalyze": {"category": "device", "desc": "Discover cameras, snapshot, or analyze a frame. camera_entity='list'/empty enumerates. mode=snapshot returns snapshot_url + markdown_hint; on HA channel include markdown_hint to render image. mode=analyze returns base64 JPEG for vision; include markdown_hint only if the user should also see the image. Params: camera_entity, mode(snapshot|analyze), max_dim(default 640), target_kb(default 40)", "priority": 1},
+    "CameraCapture": {"category": "device", "desc": "Camera tool: capture snapshots or analyze live camera frames. camera_entity='list'/empty enumerates cameras. mode=snapshot returns snapshot_url+markdown_hint; mode=analyze returns base64 JPEG for vision. For uploaded images/GIFs/videos use MediaAnalyze. Params: camera_entity, mode(snapshot|analyze), max_dim(default 640), target_kb(default 40)", "priority": 1},
+    "MediaAnalyze": {"category": "device", "desc": "Analyze uploaded media (images/GIFs/videos). Images→single JPEG. Videos→key frames. First call auto-extracts overview frames with timestamp_sec per frame. For deeper analysis, call again with timestamps=[1.5,3.0,...] to extract at exact seconds. Describe what you see and respond to intent/mood. Params: file_path(required), max_dim(default 640), target_kb(default 40), timestamps(optional list of seconds)", "priority": 1},
     "ThinkContinue": {"category": "core", "desc": "Record internal reasoning steps (optional). Params: thought, next_action", "priority": 0},
     "StockQuery": {"category": "search", "desc": "Query stock or fund quotes. Params: codes (for example 'TSLA,AAPL')", "priority": 1},
     "WebSearch": {"category": "search", "desc": "General-purpose web search for ALL real-time info (news, finance, weather, entertainment, tech). Queries both Baidu and Bing and merges the results. Params: query, num_results (default 3), engine (optional: baidu/bing)", "priority": 2},
@@ -144,7 +146,8 @@ def build_tool_map() -> dict[str, type]:
     return {
         "ServiceCall": ServiceCallTool,
         "EntityQuery": EntityQueryTool,
-        "CameraAnalyze": CameraAnalyzeTool,
+        "CameraCapture": CameraCaptureTool,
+        "MediaAnalyze": MediaAnalyzeTool,
         "StockQuery": StockQueryTool,
         "WebSearch": WebSearchTool,
         "BatchControl": BatchControlTool,
