@@ -52,11 +52,15 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 async def _async_update_listener(hass: HomeAssistant, entry: ConfigEntry) -> None:
     from .runtime.patches import patch_pipeline_timeout, patch_aihub_markdown_filter
     from .runtime.continuous_conversation import continuous_conversation_enabled
+    from .runtime.official_websocket_hook import context_status_bar_enabled
     patch_pipeline_timeout(hass)
     patch_aihub_markdown_filter(hass)
     hass.bus.async_fire(
         "ha_crack_settings_changed",
-        {"continuous_conversation": continuous_conversation_enabled(hass)},
+        {
+            "continuous_conversation": continuous_conversation_enabled(hass),
+            "enable_context_status_bar": context_status_bar_enabled(hass),
+        },
     )
 
 async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:

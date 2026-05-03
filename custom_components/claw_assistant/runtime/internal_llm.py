@@ -100,10 +100,20 @@ def _compact_result_summary(result: dict[str, Any]) -> dict[str, Any]:
             compacted[key] = value if len(value) <= limit else value[:limit] + "..."
             continue
         if isinstance(value, list) and len(value) > 20:
-            compacted[key] = value[:20]
+            compacted[key] = _json_safe(value[:20])
             continue
-        compacted[key] = value
+        compacted[key] = _json_safe(value)
     return compacted
+
+
+def _json_safe(value: Any) -> Any:
+    if value is None or isinstance(value, (str, int, float, bool)):
+        return value
+    if isinstance(value, dict):
+        return {str(k): _json_safe(v) for k, v in value.items()}
+    if isinstance(value, (list, tuple, set)):
+        return [_json_safe(v) for v in value]
+    return str(value)
 
 
 def _build_runtime_prompt_kwargs(user_text: str = "") -> dict[str, str]:
@@ -644,7 +654,7 @@ def _patch_tool_call_tracking(hass: HomeAssistant) -> None:
             tool_results.append(
                 {
                     "tool_name": tool_input.tool_name,
-                    "tool_args": tool_input.tool_args,
+                    "tool_args": _json_safe(tool_input.tool_args),
                     "success": success,
                     "error": error,
                     "result": result_summary,
@@ -659,7 +669,7 @@ def _patch_tool_call_tracking(hass: HomeAssistant) -> None:
             tool_results.append(
                 {
                     "tool_name": tool_input.tool_name,
-                    "tool_args": tool_input.tool_args,
+                    "tool_args": _json_safe(tool_input.tool_args),
                     "success": False,
                     "error": str(err),
                     "result": None,

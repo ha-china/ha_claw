@@ -1078,12 +1078,21 @@ _DEFAULT_CONTEXT_WINDOW = 196_608
 
 
 def _estimate_input_tokens(messages: list) -> int:
-    total = sum(len(str(m)) for m in messages)
-    return (total + 3) // 4
+    try:
+        total = len(json.dumps(messages, ensure_ascii=False, default=str))
+    except Exception:
+        total = sum(len(str(m)) for m in messages)
+    return int(((total + 3) // 4) * 1.25)
 
 
 def _clamp_max_tokens(request: dict, context_window: int = _DEFAULT_CONTEXT_WINDOW) -> dict:
-    max_tok = request.get("max_tokens")
+    token_key = next(
+        (key for key in ("max_tokens", "max_completion_tokens", "num_predict") if key in request),
+        None,
+    )
+    if not token_key:
+        return request
+    max_tok = request.get(token_key)
     if not max_tok or max_tok <= 4096:
         return request
     messages = request.get("messages") or []
@@ -1096,12 +1105,14 @@ def _clamp_max_tokens(request: dict, context_window: int = _DEFAULT_CONTEXT_WIND
         input_est += (len(str(system)) + 3) // 4
     headroom = context_window - input_est
     if headroom < max_tok:
-        new_max = max(1024, headroom - 512)
+        new_max = max(512, headroom - 2048)
+        if new_max >= max_tok:
+            return request
         LOGGER.debug(
-            "Dynamic max_tokens clamp: %d -> %d (input ~%d, ctx %d)",
-            max_tok, new_max, input_est, context_window,
+            "Dynamic max tokens clamp: %s %d -> %d (input ~%d, ctx %d)",
+            token_key, max_tok, new_max, input_est, context_window,
         )
-        request["max_tokens"] = new_max
+        request[token_key] = new_max
     return request
 
 

@@ -1,7 +1,7 @@
 (function() {
     'use strict';
     
-    const HACRACK_VERSION = '20260501-toggle-v18';
+    const HACRACK_VERSION = '20260503-statusbar-v28';
     let initialized = false;
     let pollInterval = null;
     let hassRef = null;
@@ -104,6 +104,7 @@
         pollPendingJS(hass);
         exposeGlobalAPI();
         setupContinuousConversation(hass);
+        setupContextStatusBar(hass);
         setTimeout(() => {
             if (window.HACrack?.preventAssistDialogClose) {
                 window.HACrack.preventAssistDialogClose();
@@ -215,6 +216,8 @@
                         state.conversationId = this._conversationId;
                     }
                     state.persist?.();
+                } else {
+                    window.__clawResetContextStatusBar?.(true);
                 }
                 originalDisconnected?.call(this);
             };
@@ -289,6 +292,7 @@
                         const welcome = { who: 'hass', text: welcomeText, thinking: '', tool_calls: {} };
                         state.conversation = null;
                         state.conversationId = null;
+                        window.__clawResetContextStatusBar?.(false);
                         this._conversation = [welcome];
                         this._conversationId = null;
                         this.requestUpdate?.('_conversation');
@@ -308,6 +312,240 @@
                 };
             }
         }).catch(() => {});
+    }
+
+    function setupContextStatusBar(hass) {
+        if (window.__clawStatusBarInstalled) return;
+        window.__clawStatusBarInstalled = true;
+
+        const CPT = 3.5;
+        const CTX = 262144;
+        const BASE_PROMPT_TOKENS = Math.round(4200 / CPT);
+        const BAR_ID = 'claw-context-status-bar';
+        const S_IDLE = 'idle', S_THINKING = 'thinking', S_TOOL = 'tool_call', S_REPLYING = 'replying';
+        const settings = window.__clawSettings = window.__clawSettings || {};
+        settings.enable_context_status_bar = false;
+
+        let phase = S_IDLE;
+        let turnStart = null;
+        let turnEnd = null;
+        let tickTimer = null;
+        let totalChars = 0;
+        let windowStart = Date.now();
+        let windowTimeLabel = '0s';
+        let hasTurn = false;
+        let statusLoop = null;
+
+        const resetState = (removeBar) => {
+            phase = S_IDLE;
+            turnStart = null;
+            turnEnd = null;
+            totalChars = 0;
+            windowStart = Date.now();
+            windowTimeLabel = '0s';
+            hasTurn = false;
+            if (tickTimer) { clearInterval(tickTimer); tickTimer = null; }
+            if (removeBar) {
+                deepQuery('ha-assist-chat')?.shadowRoot?.getElementById(BAR_ID)?.remove();
+            } else {
+                render();
+            }
+        };
+        window.__clawResetContextStatusBar = resetState;
+
+        const refreshSettings = async () => {
+            try {
+                const r = await hass.connection.sendMessagePromise({ type: 'ha_crack/get_settings' });
+                settings.enable_context_status_bar = !!r?.enable_context_status_bar;
+                if (!settings.enable_context_status_bar) {
+                    stopStatusBar();
+                    resetState(true);
+                } else {
+                    startStatusBar();
+                }
+            } catch(e) {}
+        };
+        refreshSettings();
+        hass.connection.subscribeEvents(() => refreshSettings(), 'ha_crack_settings_changed').catch(() => {});
+
+        const fmt = (n) => {
+            if (n >= 1048576) { const v=n/1048576; return (v<10?v.toFixed(1):Math.round(v))+'M'; }
+            if (n >= 1024) { const v=n/1024; return (v<10?v.toFixed(1):Math.round(v))+'K'; }
+            return ''+n;
+        };
+        const fmtR = (n) => {
+            if (n >= 1048576) return Math.round(n/1048576)+'M';
+            if (n >= 1024) return Math.round(n/1024)+'K';
+            return ''+n;
+        };
+        const ftime = (s) => { if(s<60) return s+'s'; const m=Math.floor(s/60),r=s%60; return r?m+'m'+r+'s':m+'m'; };
+        const fwindow = (s) => {
+            const h = Math.floor(s/3600), m = Math.floor((s%3600)/60);
+            if (h > 0) return h+'h '+m+'m';
+            if (m > 0) return m+'m';
+            return s+'s';
+        };
+        const pctColor = (p) => p<50?'var(--label-badge-green,#4caf50)':p<80?'var(--label-badge-yellow,#ffb300)':p<90?'var(--error-color,#db4437)':'#b71c1c';
+
+        const agentName = () => {
+            const d = deepQuery('ha-voice-command-dialog');
+            const p = d?.shadowRoot ? d._pipeline : null;
+            if (p?.conversation_engine) { const n = p.conversation_engine; return n.includes('.')?n.split('.').pop():n; }
+            return '';
+        };
+
+        const calcCurrentChars = () => {
+            const chat = deepQuery('ha-assist-chat');
+            if (!chat) return 0;
+            let c = 0;
+            const conv = chat._conversation;
+            if (Array.isArray(conv)) {
+                for (const m of conv) {
+                    const txt = m.text||'';
+                    if (m.who==='hass' && /^(how can i help|what would you like|请问需要什么帮助|有什么可以帮)/i.test(txt.trim())) continue;
+                    c += txt.length;
+                    if (m.tool_calls) try { c += JSON.stringify(m.tool_calls).length; } catch(e){}
+                }
+            }
+            return c;
+        };
+
+        const startTurn = (userText) => {
+            totalChars = calcCurrentChars() + (userText||'').length;
+            hasTurn = true;
+            windowTimeLabel = fwindow(Math.round((Date.now()-windowStart)/1000));
+            turnStart = Date.now();
+            turnEnd = null;
+            phase = S_THINKING;
+            if (tickTimer) clearInterval(tickTimer);
+            tickTimer = setInterval(render, 200);
+            render();
+        };
+
+        const endTurn = () => {
+            if (phase === S_IDLE) return;
+            turnEnd = Date.now();
+            phase = S_IDLE;
+            if (tickTimer) { clearInterval(tickTimer); tickTimer = null; }
+            render();
+        };
+
+        let hooked = false;
+
+        const installHooks = () => {
+            if (hooked) return;
+            hooked = true;
+
+            const origSubscribe = hass.connection.subscribeMessage.bind(hass.connection);
+            hass.connection.subscribeMessage = function(callback, msg, ...rest) {
+                if (msg?.type === 'assist_pipeline/run' && msg.start_stage === 'intent') {
+                    startTurn(msg.input?.text);
+                    const wrappedCb = (ev) => {
+                        const t = ev.type, d = ev.data;
+                        if (t === 'intent-progress' && d?.chat_log_delta) {
+                            const delta = d.chat_log_delta;
+                            if (delta.role === 'assistant') phase = S_REPLYING;
+                            if (delta.content) totalChars += delta.content.length;
+                            if (delta.tool_calls) { phase = S_TOOL; totalChars += JSON.stringify(delta.tool_calls).length; }
+                            if (delta.tool_result) { phase = S_TOOL; totalChars += JSON.stringify(delta.tool_result).length; }
+                            if (delta.tool_call_id && !delta.tool_calls) phase = S_TOOL;
+                            render();
+                        } else if (t === 'run-start') {
+                            phase = S_THINKING;
+                            render();
+                        } else if (t === 'intent-end' || t === 'run-end' || t === 'error') {
+                            endTurn();
+                        }
+                        callback(ev);
+                    };
+                    return origSubscribe(wrappedCb, msg, ...rest);
+                }
+                return origSubscribe(callback, msg, ...rest);
+            };
+        };
+
+        const injectCSS = (sr) => {
+            if (!sr || sr.getElementById('claw-sb-css')) return;
+            const s = document.createElement('style');
+            s.id = 'claw-sb-css';
+            s.textContent = `
+                #${BAR_ID} {
+                    display:flex; align-items:center; gap:7px;
+                    padding:0px 16px 0px 30px;
+                    font:500 11px/1 'SF Mono','Cascadia Code','Fira Code','Menlo','Consolas',monospace;
+                    color:var(--secondary-text-color);
+                    background:transparent;
+                    user-select:none; min-height:22px; flex-shrink:0; opacity:0.88;
+                }
+                #${BAR_ID} .sb-sep { opacity:0.3; }
+                #${BAR_ID} .sb-tok { font-variant-numeric:tabular-nums; }
+                #${BAR_ID} .sb-bar { letter-spacing:-0.5px; font-size:10px; }
+                #${BAR_ID} .sb-pct { font-variant-numeric:tabular-nums; font-weight:600; font-size:10px; }
+                #${BAR_ID} .sb-time { font-variant-numeric:tabular-nums; opacity:0.6; }
+            `;
+            sr.appendChild(s);
+        };
+
+        const render = () => {
+            const chat = deepQuery('ha-assist-chat');
+            if (!chat?.shadowRoot) return;
+            const sr = chat.shadowRoot;
+            if (!settings.enable_context_status_bar) {
+                sr.getElementById(BAR_ID)?.remove();
+                return;
+            }
+            injectCSS(sr);
+            let bar = sr.getElementById(BAR_ID);
+            if (!bar) {
+                bar = document.createElement('div');
+                bar.id = BAR_ID;
+                const inp = sr.querySelector('.input')||sr.querySelector('.chatbox')||sr.querySelector('[class*="input"]');
+                if (inp) inp.parentNode.insertBefore(bar, inp);
+                else { const m=sr.querySelector('.messages'); if(m) m.parentNode.insertBefore(bar,m.nextSibling); else sr.appendChild(bar); }
+            }
+
+            if (hasTurn) totalChars = calcCurrentChars();
+            const tk = Math.round(totalChars/CPT) + (hasTurn ? BASE_PROMPT_TOKENS : 0);
+            const pct = Math.min(100, Math.round(tk/CTX*100));
+            const pc = pctColor(pct);
+            const active = phase !== S_IDLE;
+            let timer = '--';
+            if (active && turnStart) timer = ftime(Math.round((Date.now()-turnStart)/1000));
+            else if (turnStart && turnEnd) timer = ftime(Math.round((turnEnd-turnStart)/1000));
+            const tkLabel = hasTurn ? fmt(tk) : '--';
+            const pctLabel = hasTurn ? pct+'%' : '--%';
+            const winLabel = hasTurn ? windowTimeLabel : '--';
+            const barW=12, filled=Math.round(pct/100*barW);
+            const barStr = hasTurn ? '█'.repeat(filled)+'░'.repeat(barW-filled) : '░'.repeat(barW);
+            const barColor = hasTurn ? pc : 'var(--secondary-text-color)';
+            bar.innerHTML =
+                `<span class="sb-tok">${tkLabel} / ${fmtR(CTX)}</span>` +
+                '<span class="sb-sep">│</span>' +
+                `<span class="sb-bar" style="color:${barColor}">${barStr}</span> <span class="sb-pct" style="color:${barColor}">${pctLabel}</span>` +
+                '<span class="sb-sep">│</span>' +
+                `<span class="sb-time">${winLabel}</span>` +
+                '<span class="sb-sep">│</span>' +
+                `⏲ <span class="sb-time">${timer}</span>`;
+        };
+
+        const startStatusBar = () => {
+            if (statusLoop) return;
+            statusLoop = setInterval(() => {
+                if (!settings.enable_context_status_bar) return;
+                if (deepQuery('ha-assist-chat')?.shadowRoot) {
+                    installHooks();
+                    render();
+                } else if (!settings.continuous_conversation && hasTurn) {
+                    resetState(false);
+                }
+            }, 800);
+        };
+
+        const stopStatusBar = () => {
+            if (!statusLoop) return;
+            clearInterval(statusLoop);
+            statusLoop = null;
+        };
     }
 
     function reportState(data) {

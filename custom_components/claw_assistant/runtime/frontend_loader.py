@@ -9,7 +9,7 @@ from homeassistant.core import HomeAssistant
 from ..const import DOMAIN
 
 _URL_PATH = f"/api/{DOMAIN}/ha_crack.js"
-_VERSION = "20260501-toggle-v18"
+_VERSION = "20260503-statusbar-v28"
 _MODULE_URL = f"{_URL_PATH}?v={_VERSION}"
 _DATA_KEY = "frontend_loader"
 
