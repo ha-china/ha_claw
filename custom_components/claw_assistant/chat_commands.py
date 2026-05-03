@@ -728,7 +728,25 @@ def consume_stop_request(hass, conversation_id: str | None) -> bool:
     return False
 
 
+def _purge_native_chat_log(hass, conversation_id: str | None) -> None:
+    if not conversation_id:
+        return
+    try:
+        from homeassistant.components.conversation.chat_log import DATA_CHAT_LOGS
+        all_logs = hass.data.get(DATA_CHAT_LOGS)
+        if isinstance(all_logs, dict) and conversation_id in all_logs:
+            all_logs.pop(conversation_id, None)
+    except Exception:
+        pass
+
+
 def _clear_conversation_runtime(hass, conversation_id: str | None) -> None:
+    old_conv_id = get_active_conversation_state(hass).get("id")
+    if old_conv_id and old_conv_id != conversation_id:
+        _purge_native_chat_log(hass, old_conv_id)
+        get_conversation_history().clear(old_conv_id)
+    _purge_native_chat_log(hass, conversation_id)
+
     token = set_active_conversation(conversation_id)
     try:
         get_conversation_history().clear(conversation_id)
@@ -745,12 +763,15 @@ def _clear_conversation_runtime(hass, conversation_id: str | None) -> None:
         reset_active_conversation(token)
 
     active_conv = get_active_conversation_state(hass)
+    active_conv.clear()
     active_conv["id"] = conversation_id
 
     status = get_conversation_status(hass)
+    preserve_keys = {"hook_installed", "llm_api_id", "user_language"}
+    preserved = {k: status[k] for k in preserve_keys if k in status}
+    status.clear()
+    status.update(preserved)
     status["last_conversation_id"] = conversation_id
-    status.pop("last_tool", None)
-    status.pop("tool_called", None)
 
     get_should_end_flag(hass)["value"] = False
 

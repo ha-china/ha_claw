@@ -8,7 +8,6 @@ import os
 import re
 import shutil
 import sys
-import tempfile
 import venv
 from pathlib import Path
 from typing import Any
@@ -262,11 +261,12 @@ async def run_in_sandbox(
 
     script = _build_runner_script(code)
 
-    with tempfile.NamedTemporaryFile(
-        "w", suffix=".py", delete=False, encoding="utf-8"
-    ) as fh:
-        fh.write(script)
-        tmp_path = fh.name
+    from .data_path import get_tmp_dir
+    import uuid as _uuid
+    _sandbox_tmp = get_tmp_dir(hass)
+    _script_file = _sandbox_tmp / f"sandbox_{_uuid.uuid4().hex[:12]}.py"
+    _script_file.write_text(script, encoding="utf-8")
+    tmp_path = str(_script_file)
 
     try:
         rc, stdout, stderr = await _run_subprocess(
