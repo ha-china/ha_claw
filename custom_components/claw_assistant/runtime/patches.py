@@ -961,3 +961,113 @@ def unpatch_websocket_binary_handler_noise() -> None:
     except AttributeError:
         pass
     LOGGER.debug("Restored websocket binary handler logging")
+
+
+_AIHUB_TIMEOUT_PATCHED = "_claw_aihub_timeout_patched"
+_AIHUB_TIMEOUT_ORIGINAL = 60.0
+
+
+_AIHUB_TIMEOUT_TARGET = 180.0
+
+
+def patch_aihub_provider_timeout(hass: HomeAssistant) -> None:
+    try:
+        from custom_components.ai_hub.providers.base import BaseProviderConfig
+        if getattr(BaseProviderConfig, _AIHUB_TIMEOUT_PATCHED, False):
+            return
+        global _AIHUB_TIMEOUT_ORIGINAL
+        _AIHUB_TIMEOUT_ORIGINAL = BaseProviderConfig.__dataclass_fields__["timeout"].default
+        BaseProviderConfig.__dataclass_fields__["timeout"].default = _AIHUB_TIMEOUT_TARGET
+        original_init = BaseProviderConfig.__init__
+
+        def _patched_init(self, *args, **kwargs):
+            original_init(self, *args, **kwargs)
+            if self.timeout == _AIHUB_TIMEOUT_ORIGINAL:
+                self.timeout = _AIHUB_TIMEOUT_TARGET
+
+        BaseProviderConfig.__init__ = _patched_init
+        BaseProviderConfig._claw_original_init = original_init
+
+        _bump_existing_providers(hass)
+        setattr(BaseProviderConfig, _AIHUB_TIMEOUT_PATCHED, True)
+        LOGGER.debug("Patched ai_hub provider timeout: %s -> %ss", _AIHUB_TIMEOUT_ORIGINAL, _AIHUB_TIMEOUT_TARGET)
+    except Exception as exc:
+        LOGGER.debug("ai_hub provider timeout patch skipped: %s", exc)
+
+
+def _bump_existing_providers(hass: HomeAssistant) -> None:
+    try:
+        data = hass.data.get("ai_hub")
+        if not data:
+            return
+        entities = data if isinstance(data, list) else ([data] if hasattr(data, "_providers") else [])
+        for obj in entities:
+            providers = getattr(obj, "_providers", None) or {}
+            if isinstance(providers, dict):
+                providers = providers.values()
+            for provider in providers:
+                cfg = getattr(provider, "config", None)
+                if cfg and getattr(cfg, "timeout", None) == _AIHUB_TIMEOUT_ORIGINAL:
+                    cfg.timeout = _AIHUB_TIMEOUT_TARGET
+    except Exception:
+        pass
+
+
+def unpatch_aihub_provider_timeout() -> None:
+    try:
+        from custom_components.ai_hub.providers.base import BaseProviderConfig
+        if not getattr(BaseProviderConfig, _AIHUB_TIMEOUT_PATCHED, False):
+            return
+        original_init = getattr(BaseProviderConfig, "_claw_original_init", None)
+        if original_init:
+            BaseProviderConfig.__init__ = original_init
+            delattr(BaseProviderConfig, "_claw_original_init")
+        BaseProviderConfig.__dataclass_fields__["timeout"].default = _AIHUB_TIMEOUT_ORIGINAL
+        delattr(BaseProviderConfig, _AIHUB_TIMEOUT_PATCHED)
+        LOGGER.debug("Restored ai_hub provider timeout to %s", _AIHUB_TIMEOUT_ORIGINAL)
+    except Exception as exc:
+        LOGGER.debug("ai_hub provider timeout unpatch skipped: %s", exc)
+
+
+_AIHUB_MD_FILTER_PATCHED = "_claw_aihub_md_filter_patched"
+
+
+def _rich_markdown_enabled(hass: HomeAssistant) -> bool:
+    from .const import CONF_ENABLE_RICH_MARKDOWN, DOMAIN
+    for entry in hass.config_entries.async_entries(DOMAIN):
+        return entry.options.get(CONF_ENABLE_RICH_MARKDOWN, True)
+    return True
+
+
+def patch_aihub_markdown_filter(hass: HomeAssistant) -> None:
+    try:
+        import custom_components.ai_hub.markdown_filter as md_mod
+        if not getattr(md_mod, _AIHUB_MD_FILTER_PATCHED, False):
+            md_mod._claw_original_filter_content = md_mod.filter_markdown_content
+            md_mod._claw_original_filter_streaming = md_mod.filter_markdown_streaming
+            setattr(md_mod, _AIHUB_MD_FILTER_PATCHED, True)
+        if _rich_markdown_enabled(hass):
+            md_mod.filter_markdown_content = lambda content: content
+            md_mod.filter_markdown_streaming = lambda content: content
+            LOGGER.debug("Patched ai_hub markdown_filter to passthrough (rich_markdown ON)")
+        else:
+            md_mod.filter_markdown_content = md_mod._claw_original_filter_content
+            md_mod.filter_markdown_streaming = md_mod._claw_original_filter_streaming
+            LOGGER.debug("Restored ai_hub markdown_filter (rich_markdown OFF)")
+    except Exception as exc:
+        LOGGER.debug("ai_hub markdown_filter patch skipped: %s", exc)
+
+
+def unpatch_aihub_markdown_filter() -> None:
+    try:
+        import custom_components.ai_hub.markdown_filter as md_mod
+        if not getattr(md_mod, _AIHUB_MD_FILTER_PATCHED, False):
+            return
+        md_mod.filter_markdown_content = md_mod._claw_original_filter_content
+        md_mod.filter_markdown_streaming = md_mod._claw_original_filter_streaming
+        delattr(md_mod, "_claw_original_filter_content")
+        delattr(md_mod, "_claw_original_filter_streaming")
+        delattr(md_mod, _AIHUB_MD_FILTER_PATCHED)
+        LOGGER.debug("Restored ai_hub markdown_filter")
+    except Exception as exc:
+        LOGGER.debug("ai_hub markdown_filter unpatch skipped: %s", exc)

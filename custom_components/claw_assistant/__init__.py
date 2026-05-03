@@ -50,9 +50,10 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
 
 async def _async_update_listener(hass: HomeAssistant, entry: ConfigEntry) -> None:
-    from .runtime.patches import patch_pipeline_timeout
+    from .runtime.patches import patch_pipeline_timeout, patch_aihub_markdown_filter
     from .runtime.continuous_conversation import continuous_conversation_enabled
     patch_pipeline_timeout(hass)
+    patch_aihub_markdown_filter(hass)
     hass.bus.async_fire(
         "ha_crack_settings_changed",
         {"continuous_conversation": continuous_conversation_enabled(hass)},

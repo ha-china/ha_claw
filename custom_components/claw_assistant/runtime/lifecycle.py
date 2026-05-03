@@ -42,9 +42,14 @@ from .patches import (
     unpatch_strip_thinking_content_serialization,
     unpatch_tool_progress,
     unpatch_websocket_binary_handler_noise,
+    patch_aihub_provider_timeout,
+    unpatch_aihub_provider_timeout,
+    patch_aihub_markdown_filter,
+    unpatch_aihub_markdown_filter,
 )
 from .skill_store import async_setup_prompt_store
 from .tmp_cleanup import async_setup_tmp_cleanup, async_unload_tmp_cleanup
+from .curator import async_setup_curator, async_unload_curator
 from .workspace_store import async_setup_workspace_store
 
 LOGGER = logging.getLogger(__name__)
@@ -64,6 +69,7 @@ async def async_setup_runtime(hass: HomeAssistant, entry: ConfigEntry) -> None:
     await async_setup_internal_llm(hass)
     await async_setup_output_cleanup(hass)
     await async_setup_tmp_cleanup(hass)
+    await async_setup_curator(hass)
     await async_setup_frontend_loader(hass)
     patch_local_intents(hass)
     patch_websocket_binary_handler_noise(hass)
@@ -74,6 +80,8 @@ async def async_setup_runtime(hass: HomeAssistant, entry: ConfigEntry) -> None:
     patch_apiinstance_tool_fallback(hass)
     patch_global_response_format(hass)
     patch_pipeline_timeout(hass)
+    patch_aihub_provider_timeout(hass)
+    patch_aihub_markdown_filter(hass)
     install_official_websocket_process_hook(hass)
     setup_ai_coordinator(hass, entry)
     install_conversation_hook(hass, entry)
@@ -113,6 +121,7 @@ async def async_unload_runtime(hass: HomeAssistant) -> None:
     await async_unload_graph_store(hass)
     await async_unload_output_cleanup(hass)
     await async_unload_tmp_cleanup(hass)
+    await async_unload_curator(hass)
     async_unload_frontend_loader(hass)
     uninstall_conversation_hook(hass)
     uninstall_official_websocket_process_hook(hass)
@@ -125,4 +134,6 @@ async def async_unload_runtime(hass: HomeAssistant) -> None:
     unpatch_local_intents()
     unpatch_websocket_binary_handler_noise()
     unpatch_pipeline_timeout()
+    unpatch_aihub_provider_timeout()
+    unpatch_aihub_markdown_filter()
     async_unload_internal_llm(hass)

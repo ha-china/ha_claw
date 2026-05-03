@@ -92,11 +92,13 @@
           "save_and_exit": "保存并完成",
           "next_step": "下一步",
           "enable_streaming_effect": "流式显示",
-          "continuous_conversation": "连续聊天窗口"
+          "continuous_conversation": "连续聊天窗口",
+          "enable_rich_markdown": "富文本增强"
         },
         "data_description": {
           "enable_streaming_effect": "启用后，工具调用进度等消息将以逐字打字机效果呈现；关闭则一次性显示",
-          "continuous_conversation": "启用后，前端聊天框重新打开或激活仍沿用同一个对话，直到发送 /new 才切换新窗口；关闭则保持当前每个窗口独立上下文。"
+          "continuous_conversation": "启用后，前端聊天框重新打开或激活仍沿用同一个对话，直到发送 /new 才切换新窗口；关闭则保持当前每个窗口独立上下文。",
+          "enable_rich_markdown": "启用后保留 Markdown 格式（加粗、表格、代码块等）并转为富文本显示；关闭则剥离所有格式标记，回退为纯文本。"
         }
       },
       "conv_runtime": {
