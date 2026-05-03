@@ -85,14 +85,13 @@ async def _run_shell(hass: HomeAssistant, params: dict) -> JsonObjectType:
     tmp_script = None
     try:
         if "\n" in command or "<<" in command:
-            import tempfile
-            tmp_script = tempfile.NamedTemporaryFile(
-                mode="w", suffix=".sh", dir=cwd, delete=False, encoding="utf-8"
-            )
-            tmp_script.write(command)
-            tmp_script.flush()
-            tmp_script.close()
-            exec_cmd = f"/bin/sh {tmp_script.name}"
+            import uuid as _uuid
+            from ..runtime.data_path import get_tmp_dir
+            _sh_tmp = get_tmp_dir(hass)
+            _sh_file = _sh_tmp / f"shell_{_uuid.uuid4().hex[:12]}.sh"
+            _sh_file.write_text(command, encoding="utf-8")
+            tmp_script = _sh_file
+            exec_cmd = f"/bin/sh {tmp_script}"
         else:
             exec_cmd = command
         import os as _os
@@ -110,8 +109,10 @@ async def _run_shell(hass: HomeAssistant, params: dict) -> JsonObjectType:
         )
     except Exception as err:
         if tmp_script:
-            import os
-            os.unlink(tmp_script.name)
+            try:
+                tmp_script.unlink()
+            except OSError:
+                pass
         return {"success": False, "error": f"spawn failed: {err}"}
 
     try:
@@ -127,9 +128,8 @@ async def _run_shell(hass: HomeAssistant, params: dict) -> JsonObjectType:
         }
     finally:
         if tmp_script:
-            import os
             try:
-                os.unlink(tmp_script.name)
+                tmp_script.unlink()
             except OSError:
                 pass
 
