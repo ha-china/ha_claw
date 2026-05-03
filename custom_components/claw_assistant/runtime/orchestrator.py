@@ -422,16 +422,18 @@ async def _execute_conversation_turn_inner(
     is_first_turn = bool(task_loop.get("is_first_turn", False))
 
     if is_first_turn:
-        base_prompt = build_base_prompt(
-            hass,
-            text=text,
-            conversation_id=conversation_id,
-            runtime_config=runtime_config,
-        )
-        extra_system_prompt = _fit_base_prompt(
-            base_prompt,
-            [extra_system_prompt] if extra_system_prompt else [],
-        )
+        def _build_prompt():
+            bp = build_base_prompt(
+                hass,
+                text=text,
+                conversation_id=conversation_id,
+                runtime_config=runtime_config,
+            )
+            return _fit_base_prompt(
+                bp,
+                [extra_system_prompt] if extra_system_prompt else [],
+            )
+        extra_system_prompt = await hass.async_add_executor_job(_build_prompt)
 
     if not fallback_agents:
         continuation_index = 0
