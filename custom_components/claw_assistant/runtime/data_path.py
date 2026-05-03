@@ -85,7 +85,7 @@ def get_ha_base_url(hass: HomeAssistant) -> str | None:
             allow_cloud=True,
             prefer_external=True,
         )
-    except Exception:  # noqa: BLE001
+    except Exception:
         return None
     return base.rstrip("/") if base else None
 
@@ -123,7 +123,7 @@ def _migrate_from_kadermanager(config_dir: Path) -> None:
         try:
             old_dir.rename(new_dir)
             LOGGER.info("Migrated .storage/kadermanager -> %s", _STORAGE_SUBDIR)
-        except Exception:  # noqa: BLE001
+        except Exception:
             LOGGER.warning("Failed to migrate .storage/kadermanager, will retry next restart")
     old_mem = storage / "kadermanager.adaptive_memory"
     new_mem = storage / f"{_STORAGE_SUBDIR}.adaptive_memory"
@@ -131,7 +131,7 @@ def _migrate_from_kadermanager(config_dir: Path) -> None:
         try:
             old_mem.rename(new_mem)
             LOGGER.info("Migrated kadermanager.adaptive_memory -> %s.adaptive_memory", _STORAGE_SUBDIR)
-        except Exception:  # noqa: BLE001
+        except Exception:
             LOGGER.warning("Failed to migrate adaptive_memory, will retry next restart")
 
 
@@ -162,7 +162,7 @@ def _import_legacy_skill_dir(source_dir: Path, target_root: Path, *, label: str)
                 continue
             shutil.copy2(source, destination)
             migrated += 1
-        except Exception:  # noqa: BLE001
+        except Exception:
             LOGGER.warning("Failed to import legacy %s skill: %s", label, source)
 
     for source_dir_entry in sorted(path for path in source_dir.iterdir() if path.is_dir()):
@@ -176,7 +176,7 @@ def _import_legacy_skill_dir(source_dir: Path, target_root: Path, *, label: str)
                 continue
             shutil.copytree(source_dir_entry, destination_dir)
             migrated += 1
-        except Exception:  # noqa: BLE001
+        except Exception:
             LOGGER.warning("Failed to import legacy %s skill directory: %s", label, source_dir_entry)
 
     if migrated or skipped:

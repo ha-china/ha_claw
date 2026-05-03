@@ -103,7 +103,7 @@ def _get_agent_options(hass: HomeAssistant) -> list[dict[str, str]]:
                 continue
             label = (state.attributes.get("friendly_name") if state else None) or entity_id.split('.')[-1]
             agents.append({"value": entity_id, "label": str(label)})
-        except Exception:  # noqa: BLE001
+        except Exception:
             continue
     return agents
 
@@ -407,7 +407,7 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
                         actor="options_flow",
                         reason="user edited via options",
                     )
-                except Exception as err:  # noqa: BLE001
+                except Exception as err:
                     LOGGER.warning("Skill save failed: %s", err)
             self._skill_editor_target = ""
             return await self.async_step_skill_editor()

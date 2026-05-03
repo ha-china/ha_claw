@@ -96,5 +96,5 @@ async def async_unload_tmp_cleanup(hass: HomeAssistant) -> None:
     if unsub is not None:
         try:
             unsub()
-        except Exception as err:  # noqa: BLE001
+        except Exception as err:
             LOGGER.debug("tmp_cleanup unload error: %s", err)

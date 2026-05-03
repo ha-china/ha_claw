@@ -169,7 +169,7 @@ async def _run_evolution_review(
             None,
             _REVIEW_SYSTEM_PROMPT,
         )
-    except Exception as err:  # noqa: BLE001
+    except Exception as err:
         LOGGER.debug("Background evolution review failed: %s", err)
 
 

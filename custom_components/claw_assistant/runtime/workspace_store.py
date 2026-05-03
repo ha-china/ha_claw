@@ -351,7 +351,7 @@ async def async_save_workspace_doc(
         from .graph_service import async_reindex_doc  # noqa: PLC0415
 
         await async_reindex_doc(hass, _normalize_doc_name(name), markdown)
-    except Exception:  # noqa: BLE001 - never block save on indexer
+    except Exception:
         LOGGER.exception("Graph reindex after save of %s failed", name)
     return saved_path
 

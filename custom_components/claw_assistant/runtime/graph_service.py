@@ -74,7 +74,7 @@ async def async_setup_graph_store(hass: HomeAssistant) -> GraphStore:
             totals["updated"],
             await hass.async_add_executor_job(store.stats),
         )
-    except Exception:  # noqa: BLE001 - never block integration setup on reindex
+    except Exception:
         LOGGER.exception("Graph bootstrap reindex failed; store is still usable")
 
     return store
@@ -111,7 +111,7 @@ def recall_memory_lines_sync(
         hits = store.recall(
             user_text, kinds=list(kinds) if kinds else None, limit=limit
         )
-    except Exception:  # noqa: BLE001
+    except Exception:
         LOGGER.exception("Sync graph recall failed")
         return []
 
@@ -175,7 +175,7 @@ async def async_reindex_doc(
 
     try:
         return await hass.async_add_executor_job(_do)
-    except Exception:  # noqa: BLE001
+    except Exception:
         LOGGER.exception("Graph reindex of %s failed", doc_name)
         return {"inserted": 0, "updated": 0}
 
@@ -202,7 +202,7 @@ async def async_recall(
 
     try:
         return await hass.async_add_executor_job(_do)
-    except Exception:  # noqa: BLE001
+    except Exception:
         LOGGER.exception("Graph recall for %r failed", query)
         return []
 
@@ -233,7 +233,7 @@ async def async_remember(
 
     try:
         return await hass.async_add_executor_job(_do)
-    except Exception:  # noqa: BLE001
+    except Exception:
         LOGGER.exception("Graph upsert failed for %r", title)
         return None
 
@@ -256,7 +256,7 @@ async def async_link(
     try:
         await hass.async_add_executor_job(_do)
         return True
-    except Exception:  # noqa: BLE001
+    except Exception:
         LOGGER.exception("Graph link failed (%s -[%s]-> %s)", src_id, relation, dst_id)
         return False
 
