@@ -415,7 +415,7 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
             return await self.async_step_skill_editor()
 
         try:
-            meta = get_installed_skill(slug)
+            meta = await self.hass.async_add_executor_job(get_installed_skill, slug)
         except ValueError:
             meta = {"name": slug, "slug": slug}
         raw_content = await async_read_skill_markdown(self.hass, slug)

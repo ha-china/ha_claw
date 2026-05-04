@@ -1179,7 +1179,10 @@ class GetInstalledSkillTool(llm.Tool):
         self, hass: HomeAssistant, tool_input: llm.ToolInput, llm_context: llm.LLMContext
     ) -> JsonObjectType:
         try:
-            return {"success": True, **get_installed_skill(tool_input.tool_args.get("name", ""))}
+            result = await hass.async_add_executor_job(
+                get_installed_skill, tool_input.tool_args.get("name", "")
+            )
+            return {"success": True, **result}
         except ValueError as err:
             return {"success": False, "error": str(err)}
 

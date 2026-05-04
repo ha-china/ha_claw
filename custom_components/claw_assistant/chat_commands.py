@@ -865,7 +865,9 @@ async def async_handle_chat_command(
         return _handle_history_command(hass, user_input, command.args)
 
     if command.name == "skill":
-        return _handle_skill_query_command(user_input, command.args)
+        return await hass.async_add_executor_job(
+            _handle_skill_query_command, user_input, command.args
+        )
 
     if command.name == "skill_invoke":
         skill_meta = _skill_command_registry().get(command.raw_name)
@@ -879,15 +881,17 @@ async def async_handle_chat_command(
             or skill_meta.get("file")
             or command.raw_name
         )
-        try:
-            skill = get_installed_skill(identifier)
-        except ValueError:
+        def _invoke():
+            try:
+                sk = get_installed_skill(identifier)
+            except ValueError:
+                return ChatCommandOutcome(
+                    result=_build_result(user_input, f"Skill command not found: /{command.raw_name}")
+                )
             return ChatCommandOutcome(
-                result=_build_result(user_input, f"Skill command not found: /{command.raw_name}")
+                rewritten_text=_build_skill_invocation_message(sk, command.args)
             )
-        return ChatCommandOutcome(
-            rewritten_text=_build_skill_invocation_message(skill, command.args)
-        )
+        return await hass.async_add_executor_job(_invoke)
 
     if command.name == "model":
         return await _handle_model_command(hass, user_input, command.args)
