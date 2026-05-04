@@ -2,17 +2,25 @@
 
 ---
 
-## Did We Build This?
+## Why Did I Build This?
 
-Honestly, we never set out to "hack" Home Assistant.
+Honestly, I never set out to "hack" Home Assistant.
 
 HA's native conversation system has a fatal flaw: **the single-shot mechanism**. One AI Agent, one tool call, one result. In real-world scenarios this is practically useless — when you say "set the living room to movie mode," the AI needs to dim the lights, adjust brightness, turn on the TV, switch the input source, and close the curtains. A single tool call simply can't handle that.
 
-So Claw Assistant was born. It **deeply transforms HA's official conversation pipeline via a Hook mechanism**, injecting multi-turn tool call loops, Agent cascading, adaptive memory, streaming output, and other modern AI Agent architectures — all without breaking existing functionality.
+So Claw Assistant was born. I **deeply transformed HA's official conversation pipeline via a Hook mechanism**, injecting multi-turn tool call loops, Agent cascading, adaptive memory, streaming output, and other modern AI Agent architectures — all without breaking existing functionality.
 
-> **Important Disclaimer: This integration is NOT officially supported or endorsed by Home Assistant.** This is a community-driven third-party project. The Hook mechanism means it has deep intrusion into HA's internal pipeline — this is both the reason for its power and a risk you need to understand. The entire codebase is 100% open source; every line can be audited. If it's not for you, you can uninstall it at any time from `Settings → Integrations` with one click, leaving no residue behind.
+> **Important Disclaimer: This integration is NOT officially supported or endorsed by Home Assistant.** This is a community-driven, independently developed third-party project. The Hook mechanism means it has deep intrusion into HA's internal pipeline — this is both the reason for its power and a risk you need to understand. The entire codebase is 100% open source; every line can be audited. If it's not for you, you can uninstall it at any time from `Settings → Integrations` with one click, leaving no residue behind.
 
 ---
+
+
+
+<p align="center">
+  <a href="https://buymeacoffee.com/knoop7"><img src="https://img.shields.io/badge/Buy%20Me%20a%20Coffee-ffdd00?style=for-the-badge&logo=buy-me-a-coffee&logoColor=black" alt="Buy Me a Coffee" /></a>
+  <img src="https://img.shields.io/badge/Python-3.12+-3776AB?style=for-the-badge&logo=python&logoColor=white" alt="Python" />
+  <img src="https://img.shields.io/badge/Home%20Assistant-2025.12+-41BDF5?style=for-the-badge&logo=home-assistant&logoColor=white" alt="Home Assistant" />
+</p>
 
 ## What Can It Do?
 
@@ -33,7 +41,7 @@ This means the AI can accomplish truly complex task chains: query state → anal
 | Second tier | Fallback Agent | Primary timeout / error / unavailable |
 | Third tier | Tertiary fallback (optional) | Last resort for extreme cases |
 
-The system includes built-in Adaptive Memory that automatically tracks each Agent's success/failure rate and intelligently skips known-incompatible models. After extensive testing, the following models have been verified to work effectively: OpenAI, Claude, Google Gemini, DeepSeek, Qwen, local Ollama (to be further verified).
+The system includes a built-in Adaptive Memory module that automatically tracks each Agent's success/failure rate and intelligently skips known-incompatible models. After extensive testing, the following models have been verified to work effectively: OpenAI, Claude, Google Gemini, DeepSeek, Qwen, local Ollama (to be further verified).
 
 ### 50+ Built-in Tools
 
@@ -134,11 +142,10 @@ Different models vary in capability (smaller local models may not be able to com
 
 ### HACS (Recommended)
 
-1. Add custom repository in HACS: `https://github.com/ha-china/ha_claw`
-2. Search for **Claw Assistant** and install
-3. Restart Home Assistant
-4. `Settings → Integrations → Add Integration → Claw Assistant`
-5. Select your Primary Agent and Fallback Agent, done
+<a href="https://my.home-assistant.io/redirect/hacs_repository/?owner=ha-china&repository=ha_claw&category=integration"><img src="https://my.home-assistant.io/badges/hacs_repository.svg" alt="Open in HACS" /></a>
+
+Click the button above to install directly via HACS, then restart Home Assistant.
+
 
 ### Manual Installation
 
@@ -156,7 +163,7 @@ Different models vary in capability (smaller local models may not be able to com
 
 ## Configuration Guide
 
-### 2. Conversation Settings
+###  Conversation Settings
 
 Split into three sub-pages:
 
@@ -176,11 +183,11 @@ Split into three sub-pages:
 - Tool loop limit: 3–50 times (default 15)
 - Pipeline timeout: 5–360 minutes (default 15)
 
-### 3. Workspace Editor
+###  Workspace Editor
 
 Edit the AI's identity, memory, personality, and other Markdown documents directly in the interface.
 
-### 4. Skill Editor
+###  Skill Editor
 
 Manage installed skills with support for online editing and deletion.
 
@@ -220,7 +227,7 @@ User Input
 
 ## Security & Permissions
 
-Let's be upfront: **Claw Assistant has elevated system privileges.**
+I'll be upfront: **Claw Assistant has elevated system privileges.**
 
 It transforms HA's conversation pipeline via the Hook mechanism, enabling Shell command execution, configuration file read/write, integration management, and arbitrary service calls. This is the root cause of its power — but it also means you need to understand these risks:
 
@@ -228,7 +235,7 @@ It transforms HA's conversation pipeline via the Hook mechanism, enabling Shell 
 - **Shell access**: The `HAControl` tool supports executing host Shell commands. The AI will ask for confirmation before destructive operations, but you still need to trust the AI model you've configured
 - **File read/write**: The `ConfigFile` tool can read/write the HA configuration directory. It includes a built-in staging + confirmation mechanism, and delete operations require secondary confirmation
 
-**Design Philosophy**: Opening up these permissions is primarily about fully unleashing the host machine's performance and capabilities — letting AI truly become the "butler" of your home, rather than a chatbot limited to simple operations. We've seen others recreate bridge layers inside add-ons or separate containers, wasting all the super-powers that HA already natively supports.
+**Design Philosophy**: Opening up these permissions is primarily about fully unleashing the host machine's performance and capabilities — letting AI truly become the "butler" of your home, rather than a chatbot limited to simple operations. I've seen others recreate bridge layers inside add-ons or separate containers, wasting all the super-powers that HA already natively supports.
 
 **Security Guarantees**:
 - The entire codebase is 100% open source; every line of logic can be audited on [GitHub](https://github.com/ha-china/ha_claw)
@@ -263,6 +270,5 @@ No. After removing the integration, all Hooks automatically revert and HA return
 ---
 
 ## Source Code & Feedback
-
-- **Issues**: [Bug Reports & Feature Requests](https://github.com/ha-china/ha_claw/issues)
 - **Maintainer**: [@knoop7](https://github.com/knoop7)
+
