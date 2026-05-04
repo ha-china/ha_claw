@@ -499,8 +499,8 @@ class ReviewSelfSkillsTool(llm.Tool):
         llm_context: llm.LLMContext,
     ) -> JsonObjectType:
         limit = int(tool_input.tool_args.get("limit") or 10)
-        skills = list_installed_skills()
-        guide_docs = list_homeassistant_guide_docs()
+        skills = await hass.async_add_executor_job(list_installed_skills)
+        guide_docs = await hass.async_add_executor_job(list_homeassistant_guide_docs)
         recent_changes = await async_read_changelog(hass, limit=limit)
         pending = await async_list_proposals(hass)
         memory_entries = await async_list_memory_entries(hass)

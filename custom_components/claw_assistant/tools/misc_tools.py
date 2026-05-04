@@ -1162,7 +1162,7 @@ class ListInstalledSkillsTool(llm.Tool):
     async def async_call(
         self, hass: HomeAssistant, tool_input: llm.ToolInput, llm_context: llm.LLMContext
     ) -> JsonObjectType:
-        skills = list_installed_skills()
+        skills = await hass.async_add_executor_job(list_installed_skills)
         return {
             "success": True,
             "count": len(skills),
