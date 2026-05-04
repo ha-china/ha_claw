@@ -94,12 +94,14 @@
           "enable_streaming_effect": "Streaming Display",
           "continuous_conversation": "Continuous Chat Window",
           "enable_context_status_bar": "Context Status Bar",
+          "enable_file_upload": "File Upload",
           "enable_rich_markdown": "Rich Markdown"
         },
         "data_description": {
           "enable_streaming_effect": "When enabled, tool progress messages appear with a typewriter effect; when disabled, they appear instantly",
           "continuous_conversation": "When enabled, reopening or activating the frontend chat keeps using the same conversation until /new is sent. Disabled keeps the current per-window behavior.",
-          "enable_context_status_bar": "When enabled, shows context tokens, window age, and current reply elapsed time above the chat input. Disabled by default.",
+          "enable_context_status_bar": "When enabled, shows context tokens, window age, and current reply elapsed time above the chat input.",
+          "enable_file_upload": "When enabled, shows an attach button in the chat input for uploading images, videos, and documents via drag, paste, or click.",
           "enable_rich_markdown": "When enabled, Markdown formatting (bold, tables, code blocks, etc.) is preserved and rendered as rich text; when disabled, all formatting is stripped back to plain text."
         }
       },

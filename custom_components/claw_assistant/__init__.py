@@ -52,7 +52,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 async def _async_update_listener(hass: HomeAssistant, entry: ConfigEntry) -> None:
     from .runtime.patches import patch_pipeline_timeout, patch_aihub_markdown_filter
     from .runtime.continuous_conversation import continuous_conversation_enabled
-    from .runtime.official_websocket_hook import context_status_bar_enabled
+    from .runtime.official_websocket_hook import context_status_bar_enabled, file_upload_enabled
     patch_pipeline_timeout(hass)
     patch_aihub_markdown_filter(hass)
     hass.bus.async_fire(
@@ -60,6 +60,7 @@ async def _async_update_listener(hass: HomeAssistant, entry: ConfigEntry) -> Non
         {
             "continuous_conversation": continuous_conversation_enabled(hass),
             "enable_context_status_bar": context_status_bar_enabled(hass),
+            "enable_file_upload": file_upload_enabled(hass),
         },
     )
 

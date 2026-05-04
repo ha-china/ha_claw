@@ -19,7 +19,7 @@ from homeassistant.components.conversation.const import ChatLogEventType
 from homeassistant.core import callback
 from homeassistant.helpers.chat_session import async_get_chat_session
 
-from ..const import CONF_ENABLE_CONTEXT_STATUS_BAR, DOMAIN
+from ..const import CONF_ENABLE_CONTEXT_STATUS_BAR, CONF_ENABLE_FILE_UPLOAD, DOMAIN
 from .continuous_conversation import (
     continuous_conversation_enabled,
     get_effective_conversation_id,
@@ -106,6 +106,13 @@ def context_status_bar_enabled(hass) -> bool:
     return False
 
 
+def file_upload_enabled(hass) -> bool:
+    for entry in hass.config_entries.async_entries(DOMAIN):
+        if entry.options.get(CONF_ENABLE_FILE_UPLOAD, False):
+            return True
+    return False
+
+
 def queue_frontend_js(hass, js_code: str) -> None:
     if not js_code:
         return
@@ -161,6 +168,7 @@ async def websocket_get_settings(
         {
             "continuous_conversation": continuous_conversation_enabled(hass),
             "enable_context_status_bar": context_status_bar_enabled(hass),
+            "enable_file_upload": file_upload_enabled(hass),
         },
     )
 

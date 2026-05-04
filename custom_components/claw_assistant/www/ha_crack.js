@@ -320,6 +320,28 @@
         if (window.__clawFileUploadInstalled) return;
         window.__clawFileUploadInstalled = true;
 
+        let fileUploadEnabled = false;
+        const refreshUploadSetting = async () => {
+            try {
+                const r = await hass.connection.sendMessagePromise({ type: 'ha_crack/get_settings' });
+                fileUploadEnabled = !!r?.enable_file_upload;
+            } catch(e) {}
+            const sr = deepQuery('ha-assist-chat')?.shadowRoot;
+            if (!sr) return;
+            const slot = sr.querySelector('#claw-attach-slot');
+            if (slot) slot.style.display = fileUploadEnabled ? '' : 'none';
+            if (!fileUploadEnabled) {
+                const zone = sr.querySelector('.claw-upload-zone');
+                if (zone) zone.classList.remove('active');
+                const popup = sr.querySelector('.claw-upload-popup');
+                if (popup) { popup.innerHTML = ''; popup.style.display = 'none'; }
+                pendingFiles.length = 0;
+                updateAttachBtn(sr);
+            }
+        };
+        refreshUploadSetting();
+        hass.connection.subscribeEvents(() => refreshUploadSetting(), 'ha_crack_settings_changed').catch(() => {});
+
         const MAX_FILE_SIZE = 50 * 1024 * 1024;
         const pendingFiles = [];
 
@@ -600,6 +622,7 @@
             } else {
                 haInput.appendChild(attachSlot);
             }
+            attachSlot.style.display = fileUploadEnabled ? '' : 'none';
 
             const dropZone = document.createElement('div');
             dropZone.className = 'claw-upload-zone';
@@ -608,11 +631,12 @@
 
             let dragCounter = 0;
             const host = sr.host || chat;
-            host.addEventListener('dragenter', (e) => { e.preventDefault(); dragCounter++; dropZone.classList.add('active'); });
+            host.addEventListener('dragenter', (e) => { e.preventDefault(); if(!fileUploadEnabled) return; dragCounter++; dropZone.classList.add('active'); });
             host.addEventListener('dragleave', (e) => { e.preventDefault(); dragCounter--; if(dragCounter<=0){dragCounter=0;dropZone.classList.remove('active');} });
             host.addEventListener('dragover', (e) => e.preventDefault());
-            host.addEventListener('drop', (e) => { e.preventDefault(); dragCounter=0; dropZone.classList.remove('active'); if(e.dataTransfer?.files?.length) addFiles(e.dataTransfer.files); });
+            host.addEventListener('drop', (e) => { e.preventDefault(); dragCounter=0; dropZone.classList.remove('active'); if(fileUploadEnabled && e.dataTransfer?.files?.length) addFiles(e.dataTransfer.files); });
             host.addEventListener('paste', (e) => {
+                if(!fileUploadEnabled) return;
                 const items = e.clipboardData?.items; if(!items) return;
                 const files = [];
                 for(const item of items) { if(item.kind==='file'){const f=item.getAsFile();if(f)files.push(f);} }
