@@ -37,7 +37,7 @@ This means the AI can accomplish truly complex task chains: query state → anal
 
 | Tier | Role | Scenario |
 |------|------|----------|
-| First tier | Primary Agent | All daily requests |
+| First tier | Primary Agent | All AI |
 | Second tier | Fallback Agent | Primary timeout / error / unavailable |
 | Third tier | Tertiary fallback (optional) | Last resort for extreme cases |
 
