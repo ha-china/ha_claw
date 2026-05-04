@@ -1,64 +1,268 @@
-
-AI Sidecar (Claw) is a Home Assistant custom integration that provides a **unified multi-AI conversation dispatch center** for smart homes. It is not yet another conversation agent—it is the **coordination layer** for all conversation agents, responsible for routing, fallback, and summarization between multiple AIs, and empowering AIs to truly understand and operate your home environment.
-
-Developed and maintained independently by [@knoop7](https://github.com/knoop7).
+<img width="2004" height="362" alt="Mac_2026-05-05 01 07 01" src="https://github.com/user-attachments/assets/65292c6e-8f15-423b-8c44-26e3a0c22527" />
 
 ---
 
-## Core Architecture
+## Did We Build This?
 
-### Multi-AI Dispatch Engine
+Honestly, we never set out to "hack" Home Assistant.
 
-The system adopts a **three-tier agent chain** architecture:
+HA's native conversation system has a fatal flaw: **the single-shot mechanism**. One AI Agent, one tool call, one result. In real-world scenarios this is practically useless — when you say "set the living room to movie mode," the AI needs to dim the lights, adjust brightness, turn on the TV, switch the input source, and close the curtains. A single tool call simply can't handle that.
 
-- **Primary AI** — Handles all conversation requests by default
-- **Backup AI** — Automatically takes over when the primary AI fails, seamless switching
-- **Summary AI** (optional) — After the first two AIs answer separately, a third AI summarizes them into one final reply
+So Claw Assistant was born. It **deeply transforms HA's official conversation pipeline via a Hook mechanism**, injecting multi-turn tool call loops, Agent cascading, adaptive memory, streaming output, and other modern AI Agent architectures — all without breaking existing functionality.
 
-The dispatch core is driven by `orchestrator.py`, working with `agent_fallback.py` for fault tolerance, `loop_controller.py` to prevent infinite recursion, and `turn_kernel.py` to manage the complete lifecycle of a single conversation turn.
-
-### Workspace Personality System
-
-The AI's identity, memory, and behavioral rules are not hardcoded—they are all stored in **8 Markdown workspace documents** that users can edit directly through the configuration interface:
-
-| Document | Responsibility |
-|----------|----------------|
-| `AGENTS.md` | File role division and operation constraints |
-| `BOOTSTRAP.md` | First-run bootstrap process |
-| `HEARTBEAT.md` | Scheduled follow-up task rules |
-| `IDENTITY.md` | Assistant name, personality, Emoji |
-| `MEMORY.md` | User preference long-term memory |
-| `SOUL.md` | Tone style and personality base |
-| `TOOLS.md` | Environment device information notes |
-| `USER.md` | User basic information |
-
-All changes are **saved and take effect immediately**, no need to restart Home Assistant. `workspace_store.py` handles hot reload and signature verification.
-
-### Tool System
-
-The integration includes a complete LLM toolchain, enabling AIs to not just chat but also **truly operate**:
-
-- **ha_tools** — Call Home Assistant services, control devices
-- **ha_core_tools** — Read/write config files, Shell execution, system checks
-- **helper_tools** — Create and manage input_boolean / template and other auxiliary entities
-- **custom_entity_tools** — Dynamically create sensors, switches, buttons
-- **search_tools** — Web search, trafilatura extracts webpage body text
-- **self_edit_tools** — AI autonomously edits workspace documents (self-evolution)
-- **skill_tools** — Skill library management, reusable operation templates
-- **misc_tools** — Stock quotes, heartbeat management and other misc items
-
-### Intelligent Runtime
-
-- **adaptive_memory** — Adaptive memory, dynamically matches relevant memory entries based on conversation context
-- **heartbeat_ticker** — Heartbeat scheduler, AI automatically executes follow-up tasks on a periodic basis
-- **signal_capture** — Intercept Home Assistant events, trigger AI proactive response
-- **internal_llm** — Built-in lightweight LLM invocation layer, supports local models
-- **patches** — Pipeline patch system, controls frontend visibility of tool call information by conversation mode
+> **Important Disclaimer: This integration is NOT officially supported or endorsed by Home Assistant.** This is a community-driven third-party project. The Hook mechanism means it has deep intrusion into HA's internal pipeline — this is both the reason for its power and a risk you need to understand. The entire codebase is 100% open source; every line can be audited. If it's not for you, you can uninstall it at any time from `Settings → Integrations` with one click, leaving no residue behind.
 
 ---
 
-## Dependencies
+## What Can It Do?
 
-- Home Assistant 2025.1+
-- Python 3.12+
-- trafilatura 2.0.0 (webpage body text extraction)
+### Multi-Turn Tool Call Loop
+
+This is the fundamental difference between Claw Assistant and other solutions.
+
+HA native: User speaks → AI calls one tool → Done.
+Claw Assistant: User speaks → AI calls a tool → Examines result → Decides whether to continue → Calls another tool → … → Until the task is complete.
+
+This means the AI can accomplish truly complex task chains: query state → analyze data → create automation → verify results → notify user.
+
+### Multi-Agent Cascading Failover
+
+| Tier | Role | Scenario |
+|------|------|----------|
+| First tier | Primary Agent | All daily requests |
+| Second tier | Fallback Agent | Primary timeout / error / unavailable |
+| Third tier | Tertiary fallback (optional) | Last resort for extreme cases |
+
+The system includes built-in Adaptive Memory that automatically tracks each Agent's success/failure rate and intelligently skips known-incompatible models. After extensive testing, the following models have been verified to work effectively: OpenAI, Claude, Google Gemini, DeepSeek, Qwen, local Ollama (to be further verified).
+
+### 50+ Built-in Tools
+
+This is the most comprehensive AI tool coverage in the HA ecosystem. Every tool is designed for real-world scenarios:
+
+**Device & Control**
+- **ServiceCall** — Call any HA service (lights, HVAC, curtains, locks, valves… all categories)
+- **BatchControl** — Control multiple devices in a single command
+- **CameraCapture** — Camera snapshot / live frame analysis (supports vision AI)
+- **MediaAnalyze** — Upload images/GIFs/videos for direct AI analysis
+- **IntentCall** — Invoke third-party intent handlers
+
+**Automation & Scripts**
+- **Automation** — Full automation CRUD (create / read / update / delete / trigger / enable / disable)
+- **Script** — Script management and execution
+- **HelperManager** — Create/delete native HA Helpers (input_boolean, timer, counter, etc.)
+
+**Dashboard**
+- **DashboardCard** — Dynamically create/edit Lovelace dashboard views and cards
+
+**System Management**
+- **HAControl** — Advanced control: Shell commands, integration reload, system logs, diagnostics
+- **ConfigEntries** — Full integration install / configure / delete workflow
+- **HACS** — Directly manage the HACS store (search / install / update / uninstall)
+- **ConfigFile** — Read/write HA configuration files (with staging + confirmation to prevent accidents)
+- **Registry** — Area / floor / label / category / entity registry management
+- **ExecutePython** — Execute Python code online (with sandbox isolation support)
+
+**Information & Search**
+- **WebSearch + UrlFetch** — Web search and webpage content extraction
+- **StockQuery** — Real-time stock/fund quotes
+- **HistoryQuery** — Entity history data queries
+- **SmartDiscovery** — Intelligent entity discovery (by person name / area / state / device type)
+
+**AI Self-Governance**
+- **InstallSkill / DeleteSkill** — Skill installation and removal
+- **ProposeSelfEdit** — AI proposes modifications to its own skills/guides (requires human approval)
+- **MemoryGraph** — Long-term graph memory network based on SQLite + FTS5
+- **ConversationMemory** — Conversation-level memory
+- **AgentHandoff / NextAgentHandoff** — Inter-AI consultation and collaboration
+- **ParallelToolCall** — Parallel multi-tool execution
+
+### Workspace Persona System
+
+Define all AI behavior through 8 Markdown documents:
+
+| Document | Purpose |
+|----------|---------|
+| `IDENTITY.md` | Identity definition (name, role) |
+| `SOUL.md` | Personality and response style |
+| `USER.md` | User profile (family members, habits, preferences) |
+| `MEMORY.md` | Persistent memory (everything the AI learns about you) |
+| `TOOLS.md` | Tool usage preferences and constraints |
+| `AGENTS.md` | Multi-Agent collaboration rules |
+| `BOOTSTRAP.md` | First-install bootstrap instructions |
+| `HEARTBEAT.md` | Scheduled tasks and reminders |
+
+All editable directly in the HA interface (`Configure → Workspace Editor`), no SSH or file editing required.
+
+### Skill System
+
+Skills are Markdown-formatted instruction files that the AI automatically matches and loads based on user intent.
+
+- Install anytime via conversation: *"Install a weather briefing skill for me"*
+- Manage in the configuration interface: `Configure → Skill Editor`
+- AI can write new skills on its own — but modifications must go through human approval (ProposeSelfEdit mechanism)
+
+### Slash Commands
+
+| Command | Description |
+|---------|-------------|
+| `/new` | Start a new conversation |
+| `/reset` | Clear history and state |
+| `/stop` | Abort the current task |
+| `/history` | Manage conversation history |
+| `/skill` | View/invoke skills |
+| `/model` | List/switch Agents |
+| `/help` | Help |
+| `/commands` | List all commands |
+
+### Scheduled Tasks (Heartbeat)
+
+The AI can create scheduled check tasks and proactively notify you:
+
+- *"Tell me the weather every morning at 8 AM"*
+- *"Check the server status every hour"*
+- *"Alert me when the stock price drops below XX"*
+
+---
+
+## Compatibility
+
+Different models vary in capability (smaller local models may not be able to complete complex multi-step tasks), but basic conversation and device control work across the board.
+
+---
+
+## Installation
+
+### HACS (Recommended)
+
+1. Add custom repository in HACS: `https://github.com/ha-china/ha_claw`
+2. Search for **Claw Assistant** and install
+3. Restart Home Assistant
+4. `Settings → Integrations → Add Integration → Claw Assistant`
+5. Select your Primary Agent and Fallback Agent, done
+
+### Manual Installation
+
+1. Download the code and place the `claw_assistant` directory into `config/custom_components/`
+2. Restart Home Assistant
+3. Add the integration
+
+### Prerequisites
+
+- Home Assistant 2025.12+
+- At least one AI Conversation Agent integration (OpenAI / Google AI / Claude / Ollama, etc.)
+- Python dependencies install automatically: `trafilatura` (web extraction), `asyncssh` (remote operations)
+
+---
+
+## Configuration Guide
+
+### 2. Conversation Settings
+
+Split into three sub-pages:
+
+**Conversation Mode** (controls the level of context detail sent to the AI)
+- `no_name` — Most concise, saves tokens
+- `add_name` — Recommended, balances accuracy and cost
+- `detailed` — Most complete, suitable for complex scenarios
+
+**Display Options**
+- Streaming output (typewriter effect)
+- Continuous conversation (no need to re-trigger; seamless multi-turn dialogue that never forgets)
+- Context status bar (view AI work progress)
+- File upload
+- Rich Markdown rendering
+
+**Runtime Parameters**
+- Tool loop limit: 3–50 times (default 15)
+- Pipeline timeout: 5–360 minutes (default 15)
+
+### 3. Workspace Editor
+
+Edit the AI's identity, memory, personality, and other Markdown documents directly in the interface.
+
+### 4. Skill Editor
+
+Manage installed skills with support for online editing and deletion.
+
+---
+
+## Architecture
+
+```
+User Input
+  |
+  +-- Slash command? --> Handle directly (/new /stop /skill ...)
+  |
+  +-- Simple intent? --> HA native engine ("turn on light", "close door", etc.)
+  |
+  +-- Complex request --> Orchestrator
+                           |
+                           +-- Build System Prompt (Workspace + Skill + Memory + Entity context)
+                           |
+                           +-- Agent cascading execution
+                           |   +-- Primary Agent --> Success? Return
+                           |   +-- Fail -> Fallback Agent --> Success? Return
+                           |   +-- Fail -> Tertiary fallback --> Return
+                           |
+                           +-- Multi-turn tool loop (up to 50 rounds)
+                           |   +-- AI decides to call a tool
+                           |   +-- Execute tool, return result
+                           |   +-- AI analyzes result, decides next step
+                           |   +-- Repeat until task complete or limit reached
+                           |
+                           +-- Response processing
+                               +-- Text cleanup & formatting
+                               +-- Markdown rendering
+                               +-- Streaming output
+```
+
+---
+
+## Security & Permissions
+
+Let's be upfront: **Claw Assistant has elevated system privileges.**
+
+It transforms HA's conversation pipeline via the Hook mechanism, enabling Shell command execution, configuration file read/write, integration management, and arbitrary service calls. This is the root cause of its power — but it also means you need to understand these risks:
+
+- **Hook transformation**: The integration modifies HA core's conversation processing flow through runtime patches (pipeline event filtering, tool result extraction, streaming output, thinking content handling, etc.). This is not standard practice, and the official team does not recommend it
+- **Shell access**: The `HAControl` tool supports executing host Shell commands. The AI will ask for confirmation before destructive operations, but you still need to trust the AI model you've configured
+- **File read/write**: The `ConfigFile` tool can read/write the HA configuration directory. It includes a built-in staging + confirmation mechanism, and delete operations require secondary confirmation
+
+**Design Philosophy**: Opening up these permissions is primarily about fully unleashing the host machine's performance and capabilities — letting AI truly become the "butler" of your home, rather than a chatbot limited to simple operations. We've seen others recreate bridge layers inside add-ons or separate containers, wasting all the super-powers that HA already natively supports.
+
+**Security Guarantees**:
+- The entire codebase is 100% open source; every line of logic can be audited on [GitHub](https://github.com/ha-china/ha_claw)
+- All user data (Workspace, Skill, Memory) is stored in HA's `.storage/claw_assistant/` directory, covered by your backup strategy, and will not be lost
+- No dependency on any third-party cloud services (except your AI model); no data is uploaded
+- The self-edit mechanism (ProposeSelfEdit) requires human approval; the AI cannot silently modify itself
+
+**If you don't need these capabilities, or have concerns about the permission scope — that's perfectly fine.** Simply remove Claw Assistant from `Settings → Integrations` and all Hooks will automatically revert. Your HA system will not be affected in any way.
+
+---
+
+## FAQ
+
+**Q: How is it different from HA's built-in Assist?**
+HA Assist can only handle predefined intents (turn on light, turn off light, check temperature — fixed patterns). Claw Assistant builds on top of this by connecting to an LLM, supporting arbitrary natural language understanding, and completing complex tasks through multi-turn tool calls — for example, "Create an automation: when I arrive home, if it's nighttime, set the living room to warm light mode."
+
+**Q: Does it support voice?**
+Yes. Set Claw Assistant as the conversation engine in Assist Pipeline and you're good to go.
+
+**Q: What are some previously unsolvable scenarios?**
+- Create complex automations with multiple conditions and actions in a single sentence
+- Trigger actions based on camera feed content
+- Have the AI automatically diagnose system error logs and suggest fixes
+- Dynamically generate Lovelace dashboard cards
+- Manage HACS plugins via natural language
+- Batch scene control across devices and areas
+- AI automatically learns and remembers your preferences
+
+**Q: Will uninstalling affect my HA?**
+No. After removing the integration, all Hooks automatically revert and HA returns to its original state.
+
+---
+
+## Source Code & Feedback
+
+- **Issues**: [Bug Reports & Feature Requests](https://github.com/ha-china/ha_claw/issues)
+- **Maintainer**: [@knoop7](https://github.com/knoop7)
