@@ -2,9 +2,17 @@
 
 from __future__ import annotations
 
+import base64
+import logging
+import subprocess
+import uuid
+from pathlib import Path
+
+from aiohttp import web
 import voluptuous as vol
 
 from homeassistant.components import conversation, websocket_api
+from homeassistant.components.http import HomeAssistantView
 from homeassistant.components.conversation.agent_manager import agent_id_validator
 from homeassistant.components.conversation.chat_log import async_subscribe_chat_logs
 from homeassistant.components.conversation.const import ChatLogEventType
@@ -16,6 +24,69 @@ from .continuous_conversation import (
     continuous_conversation_enabled,
     get_effective_conversation_id,
 )
+from .data_path import get_tmp_dir
+
+_LOGGER = logging.getLogger(__name__)
+
+_UPLOAD_MAX_BYTES = 50 * 1024 * 1024
+_VIDEO_TRIM_SECONDS = 30
+_VIDEO_EXTENSIONS = frozenset({".mp4", ".mov", ".avi", ".mkv", ".webm", ".flv", ".m4v", ".ts", ".3gp"})
+
+
+def _get_duration(file_path: str) -> float:
+    try:
+        r = subprocess.run(
+            ["ffprobe", "-v", "error", "-show_entries", "format=duration",
+             "-of", "default=noprint_wrappers=1:nokey=1", file_path],
+            capture_output=True, timeout=10,
+        )
+        return float(r.stdout.strip())
+    except Exception:
+        return 0.0
+
+
+def _trim_video_if_needed(file_path: str, seg: int = 10) -> str:
+    p = Path(file_path)
+    if p.suffix.lower() not in _VIDEO_EXTENSIONS:
+        return file_path
+    dur = _get_duration(file_path)
+    if dur <= seg * 3:
+        return file_path
+    mid = (dur - seg) / 2
+    end = max(0, dur - seg)
+    parts = []
+    tmp_dir = p.parent
+    try:
+        for i, ss in enumerate([0, mid, end]):
+            part = tmp_dir / f"{p.stem}_seg{i}{p.suffix}"
+            proc = subprocess.run(
+                ["ffmpeg", "-y", "-ss", f"{ss:.2f}", "-i", str(p),
+                 "-t", str(seg), "-c", "copy",
+                 "-avoid_negative_ts", "make_zero", str(part)],
+                capture_output=True, timeout=30,
+            )
+            if proc.returncode == 0 and part.is_file() and part.stat().st_size > 0:
+                parts.append(part)
+        if len(parts) >= 2:
+            concat_list = tmp_dir / f"{p.stem}_concat.txt"
+            concat_list.write_text("\n".join(f"file '{pt}'" for pt in parts))
+            out = p.with_stem(p.stem + "_trim")
+            subprocess.run(
+                ["ffmpeg", "-y", "-f", "concat", "-safe", "0",
+                 "-i", str(concat_list), "-c", "copy", str(out)],
+                capture_output=True, timeout=30,
+            )
+            concat_list.unlink(missing_ok=True)
+            if out.is_file() and out.stat().st_size > 0:
+                p.unlink(missing_ok=True)
+                out.rename(p)
+                _LOGGER.info("Trimmed video (front+mid+end %ds each): %s", seg, p.name)
+    except Exception as err:
+        _LOGGER.debug("Video trim skipped: %s", err)
+    finally:
+        for pt in parts:
+            pt.unlink(missing_ok=True)
+    return file_path
 
 _PATCH_KEY = "_claw_assistant_streaming_conversation_process"
 _NO_HANDLER = object()
@@ -228,6 +299,139 @@ async def websocket_get_context_status(
     })
 
 
+@websocket_api.websocket_command(
+    {
+        vol.Required("type"): "ha_crack/upload_file",
+        vol.Required("filename"): str,
+        vol.Required("data"): str,
+        vol.Optional("mime_type", default=""): str,
+    }
+)
+@websocket_api.async_response
+async def websocket_upload_file(
+    hass,
+    connection: websocket_api.ActiveConnection,
+    msg: dict,
+) -> None:
+    filename = msg["filename"].strip()
+    if not filename or "/" in filename or "\\" in filename or filename.startswith("."):
+        connection.send_error(msg["id"], "invalid_filename", "Invalid filename")
+        return
+
+    try:
+        raw = base64.b64decode(msg["data"])
+    except Exception:
+        connection.send_error(msg["id"], "decode_error", "Invalid base64 data")
+        return
+
+    if len(raw) > _UPLOAD_MAX_BYTES:
+        connection.send_error(
+            msg["id"], "too_large",
+            f"File too large: {len(raw)} bytes (max {_UPLOAD_MAX_BYTES})",
+        )
+        return
+
+    ext = Path(filename).suffix.lower() or ".bin"
+    safe_name = f"upload_{uuid.uuid4().hex[:12]}{ext}"
+
+    def _write():
+        tmp = get_tmp_dir(hass)
+        dest = tmp / safe_name
+        dest.write_bytes(raw)
+        return str(dest)
+
+    try:
+        file_path = await hass.async_add_executor_job(_write)
+    except Exception as err:
+        _LOGGER.warning("Upload write failed: %s", err)
+        connection.send_error(msg["id"], "write_error", str(err))
+        return
+
+    mime = msg.get("mime_type") or _guess_mime(filename)
+    _LOGGER.info("File uploaded: %s (%d bytes) -> %s", filename, len(raw), file_path)
+    connection.send_result(msg["id"], {
+        "path": file_path,
+        "mime_type": mime,
+        "size": len(raw),
+        "filename": filename,
+    })
+
+
+def _guess_mime(filename: str) -> str:
+    ext = Path(filename).suffix.lower()
+    _MIME_MAP = {
+        ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".png": "image/png",
+        ".gif": "image/gif", ".webp": "image/webp", ".bmp": "image/bmp",
+        ".svg": "image/svg+xml", ".ico": "image/x-icon",
+        ".mp4": "video/mp4", ".webm": "video/webm", ".mov": "video/quicktime",
+        ".avi": "video/x-msvideo", ".mkv": "video/x-matroska",
+        ".mp3": "audio/mpeg", ".wav": "audio/wav", ".ogg": "audio/ogg",
+        ".pdf": "application/pdf",
+        ".doc": "application/msword",
+        ".docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        ".xls": "application/vnd.ms-excel",
+        ".xlsx": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        ".ppt": "application/vnd.ms-powerpoint",
+        ".pptx": "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+        ".txt": "text/plain", ".md": "text/markdown", ".csv": "text/csv",
+        ".json": "application/json", ".xml": "application/xml",
+        ".yaml": "text/yaml", ".yml": "text/yaml",
+        ".zip": "application/zip", ".gz": "application/gzip",
+        ".tar": "application/x-tar",
+    }
+    return _MIME_MAP.get(ext, "application/octet-stream")
+
+
+class ClawUploadView(HomeAssistantView):
+    url = "/api/claw_assistant/upload"
+    name = "api:claw_assistant:upload"
+    requires_auth = True
+
+    async def post(self, request: web.Request) -> web.Response:
+        hass = request.app["hass"]
+        reader = await request.multipart()
+        field = await reader.next()
+        if not field or field.name != "file":
+            return web.json_response({"error": "no file field"}, status=400)
+        filename = (field.filename or "upload").strip()
+        if not filename or "/" in filename or "\\" in filename or filename.startswith("."):
+            return web.json_response({"error": "invalid filename"}, status=400)
+        chunks = []
+        size = 0
+        while True:
+            chunk = await field.read_chunk()
+            if not chunk:
+                break
+            size += len(chunk)
+            if size > _UPLOAD_MAX_BYTES:
+                return web.json_response({"error": "too large"}, status=413)
+            chunks.append(chunk)
+        raw = b"".join(chunks)
+        ext = Path(filename).suffix.lower() or ".bin"
+        safe_name = f"upload_{uuid.uuid4().hex[:12]}{ext}"
+        mime = _guess_mime(filename)
+
+        def _write():
+            tmp = get_tmp_dir(hass)
+            dest = tmp / safe_name
+            dest.write_bytes(raw)
+            return str(dest)
+
+        try:
+            file_path = await hass.async_add_executor_job(_write)
+        except Exception as err:
+            return web.json_response({"error": str(err)}, status=500)
+
+        if mime.startswith("video/"):
+            await hass.async_add_executor_job(_trim_video_if_needed, file_path)
+
+        final_size = Path(file_path).stat().st_size if Path(file_path).is_file() else len(raw)
+        return web.json_response({
+            "path": file_path, "mime_type": mime,
+            "size": final_size, "filename": filename,
+        })
+
+
 def install_official_websocket_process_hook(hass) -> None:
 
     domain_data = hass.data.setdefault("claw_assistant", {})
@@ -240,6 +444,8 @@ def install_official_websocket_process_hook(hass) -> None:
     websocket_api.async_register_command(hass, websocket_report_state)
     websocket_api.async_register_command(hass, websocket_get_settings)
     websocket_api.async_register_command(hass, websocket_get_context_status)
+    websocket_api.async_register_command(hass, websocket_upload_file)
+    hass.http.register_view(ClawUploadView())
 
 
 def uninstall_official_websocket_process_hook(hass) -> None:

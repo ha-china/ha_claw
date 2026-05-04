@@ -367,15 +367,16 @@ async def _execute_conversation_turn_inner(
             media_atts = [(m, p) for m, p in sanitized if any(m.startswith(pfx) for pfx in _MEDIA_MIMES)]
             other_atts = [(m, p) for m, p in sanitized if not any(m.startswith(pfx) for pfx in _MEDIA_MIMES)]
             if media_atts:
-                hints = []
+                calls = []
                 for _mime, fpath in media_atts:
-                    hints.append(
-                        f"[User sent media: {fpath} — "
-                        f"call MediaAnalyze(file_path=\"{fpath}\") to see it, "
-                        f"then respond naturally based on the content/mood/intent. "
-                        f"Do NOT just describe what you see — react to it like a human would.]"
-                    )
-                hint_block = "\n".join(hints)
+                    calls.append(f'MediaAnalyze(file_path="{fpath}")')
+                call_list = ", ".join(calls)
+                hint_block = (
+                    f"[SYSTEM MANDATORY] User attached {len(media_atts)} media file(s). "
+                    f"You MUST call {call_list} IMMEDIATELY as your FIRST action before generating ANY text response. "
+                    f"Do NOT reply, comment, or acknowledge until you have the analysis result. "
+                    f"After analysis, respond naturally based on content — react like a human, do not just describe."
+                )
                 text = f"{text}\n{hint_block}" if text else hint_block
                 LOGGER.info(
                     "Routed %d media file(s) to MediaAnalyze tool path", len(media_atts)

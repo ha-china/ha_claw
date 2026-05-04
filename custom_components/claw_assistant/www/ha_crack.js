@@ -1,7 +1,7 @@
 (function() {
     'use strict';
     
-    const HACRACK_VERSION = '20260503-statusbar-v28';
+    const HACRACK_VERSION = '20260504-upload-v29';
     let initialized = false;
     let pollInterval = null;
     let hassRef = null;
@@ -105,6 +105,7 @@
         exposeGlobalAPI();
         setupContinuousConversation(hass);
         setupContextStatusBar(hass);
+        setupFileUpload(hass);
         setTimeout(() => {
             if (window.HACrack?.preventAssistDialogClose) {
                 window.HACrack.preventAssistDialogClose();
@@ -314,6 +315,381 @@
         }).catch(() => {});
     }
 
+    function setupFileUpload(hass) {
+        if (!hass?.connection) return;
+        if (window.__clawFileUploadInstalled) return;
+        window.__clawFileUploadInstalled = true;
+
+        const MAX_FILE_SIZE = 50 * 1024 * 1024;
+        const pendingFiles = [];
+
+        const FILE_ICONS = {
+            'image/': '🖼️', 'video/': '🎬', 'audio/': '🎵',
+            'application/pdf': '📄', 'text/': '📝',
+            'application/msword': '📃', 'application/vnd.openxmlformats-officedocument.wordprocessingml': '📃',
+            'application/vnd.ms-excel': '📊', 'application/vnd.openxmlformats-officedocument.spreadsheetml': '📊',
+            'application/vnd.ms-powerpoint': '📊', 'application/vnd.openxmlformats-officedocument.presentationml': '📊',
+            'application/zip': '📦', 'application/gzip': '📦', 'application/x-tar': '📦',
+        };
+
+        const getIcon = (mime) => {
+            for (const [k, v] of Object.entries(FILE_ICONS)) {
+                if (mime.startsWith(k)) return v;
+            }
+            return '📎';
+        };
+
+        const fmtSize = (n) => {
+            if (n >= 1048576) return (n / 1048576).toFixed(1) + ' MB';
+            if (n >= 1024) return Math.round(n / 1024) + ' KB';
+            return n + ' B';
+        };
+
+        const CSS_ID = 'claw-upload-css';
+        const injectUploadCSS = (sr) => {
+            if (!sr || sr.getElementById(CSS_ID)) return;
+            const s = document.createElement('style');
+            s.id = CSS_ID;
+            s.textContent = `
+                .claw-upload-zone {
+                    position: fixed; inset: 0; z-index: 9999;
+                    display: flex; align-items: center; justify-content: center;
+                    background: rgba(220,220,220,0.2);
+                    backdrop-filter: blur(3px); -webkit-backdrop-filter: blur(3px);
+                    border: 2px dashed var(--divider-color, rgba(0,0,0,0.2));
+                    border-radius: 16px; margin: 8px;
+                    pointer-events: none;
+                    opacity: 0; transition: opacity 0.2s;
+                }
+                .claw-upload-zone.active { opacity: 1; }
+                .claw-upload-zone-text {
+                    font: 600 15px/1.4 system-ui, sans-serif;
+                    color: var(--secondary-text-color, #666);
+                    text-align: center; pointer-events: none;
+                }
+                .claw-upload-zone-text span { display: block; font-size: 36px; margin-bottom: 6px; }
+
+                .claw-upload-popup {
+                    position: absolute; bottom: 100%; left: 0; right: 0;
+                    z-index: 50;
+                    display: flex; align-items: center; gap: 5px;
+                    padding: 5px 5px 0px 15px;
+                    overflow-x: auto;
+                    scrollbar-width: none;
+                    background: var(--card-background-color, #fff);
+                }
+                .claw-upload-popup::-webkit-scrollbar { display: none; }
+                .claw-upload-popup:empty { display: none; }
+
+                .claw-upload-item {
+                    position: relative; flex-shrink: 0;
+                    display: flex; align-items: center; gap: 5px;
+                    padding: 3px 8px 3px 3px;
+                    background: var(--secondary-background-color, #f5f5f5);
+                    border-radius: 8px;
+                    font: 400 11px/1.3 system-ui, sans-serif;
+                    color: var(--primary-text-color);
+                    max-width: 80px;
+                    animation: clawUploadIn 0.2s ease;
+                }
+                @keyframes clawUploadIn {
+                    from { opacity: 0; transform: translateY(4px); }
+                    to { opacity: 1; transform: none; }
+                }
+                .claw-upload-item .claw-thumb {
+                    width: 28px; height: 28px; border-radius: 5px;
+                    object-fit: cover; flex-shrink: 0;
+                }
+                .claw-upload-item .claw-icon-thumb {
+                    width: 28px; height: 28px; border-radius: 5px;
+                    display: flex; align-items: center; justify-content: center;
+                    font-size: 15px; flex-shrink: 0;
+                    background: var(--divider-color, #e8e8e8);
+                }
+                .claw-upload-item .claw-file-info { overflow: hidden; min-width: 0; }
+                .claw-upload-item .claw-file-name {
+                    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+                    font-weight: 500; font-size: 11px;
+                }
+                .claw-upload-item .claw-file-size { font-size: 10px; opacity: 0.45; }
+                .claw-upload-item .claw-file-status { font-size: 10px; font-weight: 500; }
+                .claw-upload-item .claw-file-status.uploading { color: var(--primary-color, #03a9f4); }
+                .claw-upload-item .claw-file-status.error { color: var(--error-color, #db4437); }
+                .claw-upload-item .claw-remove {
+                    position: absolute; top: -4px; right: -4px;
+                    width: 15px; height: 15px; border-radius: 50%;
+                    background: var(--secondary-text-color, #888); color: #fff;
+                    border: none; cursor: pointer; font-size: 10px; line-height: 15px;
+                    text-align: center; padding: 0;
+                    opacity: 0; transition: opacity 0.15s;
+                }
+                .claw-upload-item:hover .claw-remove { opacity: 1; }
+                .claw-upload-progress {
+                    position: absolute; bottom: 0; left: 0; right: 0; height: 2px;
+                    border-radius: 0 0 8px 8px; overflow: hidden;
+                    background: var(--divider-color, #e0e0e0);
+                }
+                .claw-upload-progress-fill {
+                    height: 100%; background: var(--primary-color, #03a9f4);
+                    transition: width 0.3s ease;
+                }
+                .claw-attach-btn {
+                    position: relative; isolation: isolate;
+                    display: inline-flex; align-items: center; justify-content: center;
+                    width: 48px;
+                    height: 48px;
+                    border: none; border-radius: 50%;
+                    background: transparent; cursor: pointer;
+                    color: var(--secondary-text-color, #727272);
+                    flex-shrink: 0; padding: 0; margin: 0 -20px 0 0; vertical-align: middle;
+                    box-sizing: border-box;
+                    -webkit-tap-highlight-color: transparent;
+                }
+                .claw-attach-btn::after {
+                    content: ""; position: absolute; inset: 0; z-index: -1;
+                    border-radius: 50%;
+                    background-color: currentColor;
+                    opacity: 0; pointer-events: none;
+                    transition: opacity 0.15s;
+                }
+                @media (hover:hover) {
+                    .claw-attach-btn:hover::after { opacity: 0.08; }
+                }
+                .claw-attach-btn:active::after { opacity: 0.12; }
+                .claw-attach-btn.has-files { color: var(--primary-color, #03a9f4); }
+            `;
+            sr.appendChild(s);
+        };
+
+        const renderPreviewBar = (sr) => {
+            let popup = sr.querySelector('.claw-upload-popup');
+            if (!popup) {
+                const inputDiv = sr.querySelector('div.input[slot="primaryAction"]');
+                if (!inputDiv) return;
+                inputDiv.style.position = 'relative';
+                popup = document.createElement('div');
+                popup.className = 'claw-upload-popup';
+                inputDiv.appendChild(popup);
+            }
+            if (!popup) return;
+            popup.innerHTML = '';
+            if (!pendingFiles.length) { popup.style.display = 'none'; return; }
+            popup.style.display = '';
+            pendingFiles.forEach((f, i) => {
+                const item = document.createElement('div');
+                item.className = 'claw-upload-item';
+                const thumbHTML = f.previewUrl
+                    ? `<img class="claw-thumb" src="${f.previewUrl}" alt="">`
+                    : `<div class="claw-icon-thumb">${getIcon(f.mime)}</div>`;
+                let statusHTML = '';
+                if (f.status === 'uploading') {
+                    statusHTML = `<div class="claw-upload-progress"><div class="claw-upload-progress-fill" style="width:${f.progress||0}%"></div></div>`;
+                } else if (f.status === 'done') {
+                    statusHTML = '';
+                } else if (f.status === 'error') {
+                    statusHTML = '';
+                }
+                item.innerHTML = `${thumbHTML}<div class="claw-file-info"><div class="claw-file-name" title="${f.name}">${f.name}</div><div class="claw-file-size">${fmtSize(f.size)}</div>${statusHTML}</div>`;
+                const rm = document.createElement('button');
+                rm.className = 'claw-remove'; rm.textContent = '×';
+                rm.onclick = (e) => { e.stopPropagation(); pendingFiles.splice(i,1); renderPreviewBar(sr); updateAttachBtn(sr); };
+                item.appendChild(rm);
+                popup.appendChild(item);
+            });
+        };
+
+        const updateAttachBtn = (sr) => {
+            const btn = sr.querySelector('.claw-attach-btn');
+            if (btn) btn.classList.toggle('has-files', pendingFiles.length > 0);
+        };
+
+        const uploadFile = async (fileObj) => {
+            const sr = deepQuery('ha-assist-chat')?.shadowRoot;
+            fileObj.status = 'uploading'; fileObj.progress = 0;
+            if (sr) renderPreviewBar(sr);
+            try {
+                const form = new FormData();
+                form.append('file', fileObj.file, fileObj.name);
+                const token = hass.auth?.data?.access_token || '';
+                const xhr = new XMLHttpRequest();
+                const result = await new Promise((resolve, reject) => {
+                    xhr.open('POST', '/api/claw_assistant/upload');
+                    xhr.setRequestHeader('Authorization', 'Bearer ' + token);
+                    xhr.upload.onprogress = (e) => {
+                        if (e.lengthComputable) {
+                            fileObj.progress = Math.round((e.loaded / e.total) * 90);
+                            if (sr) renderPreviewBar(sr);
+                        }
+                    };
+                    xhr.onload = () => {
+                        if (xhr.status >= 200 && xhr.status < 300) {
+                            resolve(JSON.parse(xhr.responseText));
+                        } else { reject(new Error(xhr.statusText)); }
+                    };
+                    xhr.onerror = () => reject(new Error('network error'));
+                    xhr.send(form);
+                });
+                fileObj.status = 'done'; fileObj.progress = 100;
+                fileObj.serverPath = result.path; fileObj.serverMime = result.mime_type;
+            } catch (err) {
+                fileObj.status = 'error';
+                pendingFiles.splice(pendingFiles.indexOf(fileObj), 1);
+            }
+            if (sr) { renderPreviewBar(sr); updateAttachBtn(sr); }
+        };
+
+        const MAX_ATTACHMENTS = 5;
+        const addFiles = (files) => {
+            for (const file of files) {
+                if (pendingFiles.length >= MAX_ATTACHMENTS) break;
+                if (file.size > MAX_FILE_SIZE) continue;
+                if (pendingFiles.some(f => f.name === file.name && f.size === file.size)) continue;
+                const entry = {
+                    file, name: file.name, size: file.size,
+                    mime: file.type || 'application/octet-stream',
+                    status: 'pending', progress: 0,
+                    previewUrl: null, serverPath: null, serverMime: null, error: null,
+                };
+                if (file.type.startsWith('image/') && file.size < 10*1024*1024) {
+                    entry.previewUrl = URL.createObjectURL(file);
+                }
+                pendingFiles.push(entry);
+                uploadFile(entry);
+            }
+            const sr = deepQuery('ha-assist-chat')?.shadowRoot;
+            if (sr) { renderPreviewBar(sr); updateAttachBtn(sr); }
+        };
+
+        const buildAttachmentTags = () => {
+            return pendingFiles.filter(f => f.status==='done'&&f.serverPath).map(f => `[ATTACHMENT:${f.serverMime}:${f.serverPath}]`).join('');
+        };
+        const clearPending = () => {
+            pendingFiles.forEach(f => { if(f.previewUrl) URL.revokeObjectURL(f.previewUrl); });
+            pendingFiles.length = 0;
+        };
+
+        const installUploadUI = () => {
+            const chat = deepQuery('ha-assist-chat');
+            if (!chat?.shadowRoot) return;
+            const sr = chat.shadowRoot;
+            if (sr.querySelector('.claw-attach-btn')) return;
+            injectUploadCSS(sr);
+
+            const haInput = sr.querySelector('ha-input#message-input');
+            if (!haInput) return;
+
+            const fileInput = document.createElement('input');
+            fileInput.type = 'file'; fileInput.multiple = true;
+            fileInput.style.display = 'none';
+            fileInput.accept = 'image/*,video/*,audio/*,.pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.txt,.md,.csv,.json,.yaml,.yml,.xml,.zip,.gz,.tar';
+            fileInput.onchange = () => { if(fileInput.files.length) addFiles(fileInput.files); fileInput.value=''; };
+            sr.appendChild(fileInput);
+
+            const attachSlot = document.createElement('div');
+            attachSlot.setAttribute('slot', 'end');
+            attachSlot.id = 'claw-attach-slot';
+            const attachBtn = document.createElement('button');
+            attachBtn.className = 'claw-attach-btn';
+            attachBtn.title = 'Attach files';
+            attachBtn.innerHTML = '<svg width="24" height="24" viewBox="0 0 24 24" fill="currentColor"><path d="M13,2.03C17.73,2.5 21.5,6.25 21.95,11C22.5,16.5 18.5,21.38 13,21.93V19.93C16.64,19.5 19.5,16.61 19.96,12.97C20.5,8.58 17.39,4.59 13,4.05V2.05L13,2.03M11,2.06V4.06C9.57,4.26 8.22,4.84 7.1,5.74L5.67,4.26C7.19,3 9.05,2.25 11,2.06M4.26,5.67L5.69,7.1C4.8,8.23 4.24,9.58 4.05,11H2.05C2.25,9.04 3,7.19 4.26,5.67M2.06,13H4.06C4.24,14.42 4.81,15.77 5.69,16.9L4.27,18.33C3.03,16.81 2.26,14.96 2.06,13M7.1,18.37C8.23,19.25 9.58,19.82 11,20V22C9.04,21.79 7.18,21 5.67,19.74L7.1,18.37M12,7.5L7.5,12H11V16H13V12H16.5L12,7.5Z"/></svg>';
+            attachBtn.onclick = () => fileInput.click();
+            attachSlot.appendChild(attachBtn);
+            const litEndSlot = haInput.querySelector('div[slot="end"]');
+            if (litEndSlot) {
+                haInput.insertBefore(attachSlot, litEndSlot);
+            } else {
+                haInput.appendChild(attachSlot);
+            }
+
+            const dropZone = document.createElement('div');
+            dropZone.className = 'claw-upload-zone';
+            dropZone.innerHTML = '<div class="claw-upload-zone-text"><span><svg width="36" height="36" viewBox="0 0 24 24" fill="currentColor"><path d="M16.5,6V17.5A4,4 0 0,1 12.5,21.5A4,4 0 0,1 8.5,17.5V5A2.5,2.5 0 0,1 11,2.5A2.5,2.5 0 0,1 13.5,5V15.5A1,1 0 0,1 12.5,16.5A1,1 0 0,1 11.5,15.5V6H10V15.5A2.5,2.5 0 0,1 12.5,18A2.5,2.5 0 0,1 15,15.5V5A4,4 0 0,1 11,1A4,4 0 0,1 7,5V17.5A5.5,5.5 0 0,0 12.5,23A5.5,5.5 0 0,0 18,17.5V6H16.5Z"/></svg></span>Drop files here</div>';
+            sr.appendChild(dropZone);
+
+            let dragCounter = 0;
+            const host = sr.host || chat;
+            host.addEventListener('dragenter', (e) => { e.preventDefault(); dragCounter++; dropZone.classList.add('active'); });
+            host.addEventListener('dragleave', (e) => { e.preventDefault(); dragCounter--; if(dragCounter<=0){dragCounter=0;dropZone.classList.remove('active');} });
+            host.addEventListener('dragover', (e) => e.preventDefault());
+            host.addEventListener('drop', (e) => { e.preventDefault(); dragCounter=0; dropZone.classList.remove('active'); if(e.dataTransfer?.files?.length) addFiles(e.dataTransfer.files); });
+            host.addEventListener('paste', (e) => {
+                const items = e.clipboardData?.items; if(!items) return;
+                const files = [];
+                for(const item of items) { if(item.kind==='file'){const f=item.getAsFile();if(f)files.push(f);} }
+                if(files.length){ e.preventDefault(); addFiles(files); }
+            });
+        };
+
+        customElements.whenDefined('ha-assist-chat').then(() => {
+            const ctor = customElements.get('ha-assist-chat');
+            const proto = ctor?.prototype;
+            if (!proto || proto.__clawUploadPatched) return;
+            proto.__clawUploadPatched = true;
+            const ATTACH_RE = /\[ATTACHMENT:[^\]]+\]/g;
+            const origAddMessage = proto._addMessage;
+            if (typeof origAddMessage === 'function') {
+                proto._addMessage = function(msg) {
+                    if (msg && msg.who === 'user' && typeof msg.text === 'string' && ATTACH_RE.test(msg.text)) {
+                        const realLen = msg.text.length;
+                        const count = (msg.text.match(ATTACH_RE) || []).length;
+                        const clean = msg.text.replace(ATTACH_RE, '').trim();
+                        const badge = '+' + count + ' file' + (count > 1 ? 's' : '');
+                        msg = {...msg, text: clean ? clean + ' `' + badge + '`' : '`' + badge + '`', _realChars: realLen};
+                    }
+                    return origAddMessage.call(this, msg);
+                };
+            }
+            const origHandleSend = proto._handleSendMessage;
+            if (typeof origHandleSend === 'function') {
+                proto._handleSendMessage = function() {
+                    if (pendingFiles.length > 0) {
+                        if (pendingFiles.some(f => f.status === 'uploading')) return;
+                        const tags = buildAttachmentTags();
+                        const inp = this._messageInput || this.shadowRoot?.querySelector('ha-input#message-input');
+                        const userText = (inp?.value || '').trim();
+                        const fullText = (userText ? userText + ' ' : '') + tags;
+                        clearPending();
+                        const sr = this.shadowRoot;
+                        if (sr) { renderPreviewBar(sr); updateAttachBtn(sr); }
+                        if (inp) { inp.value = ''; this._showSendButton = false; }
+                        if (fullText && typeof this._processText === 'function') {
+                            window.__clawLastSendChars = fullText.length;
+                            this._processText(fullText);
+                            return;
+                        }
+                    }
+                    return origHandleSend.call(this);
+                };
+            }
+            const origKeyUp = proto._handleKeyUp;
+            if (typeof origKeyUp === 'function') {
+                proto._handleKeyUp = function(e) {
+                    if (pendingFiles.length > 0 && e.key === 'Enter') {
+                        if (pendingFiles.some(f => f.status === 'uploading')) return;
+                        const tags = buildAttachmentTags();
+                        const t = e.target;
+                        const userText = (t?.value || '').trim();
+                        const fullText = (userText ? userText + ' ' : '') + tags;
+                        clearPending();
+                        const sr = this.shadowRoot;
+                        if (sr) { renderPreviewBar(sr); updateAttachBtn(sr); }
+                        if (t) { t.value = ''; this._showSendButton = false; }
+                        if (fullText && typeof this._processText === 'function') {
+                            window.__clawLastSendChars = fullText.length;
+                            this._processText(fullText);
+                            return;
+                        }
+                    }
+                    return origKeyUp.call(this, e);
+                };
+            }
+        }).catch(() => {});
+
+        setInterval(() => {
+            if (deepQuery('ha-assist-chat')?.shadowRoot) installUploadUI();
+        }, 1500);
+    }
+
     function setupContextStatusBar(hass) {
         if (window.__clawStatusBarInstalled) return;
         window.__clawStatusBarInstalled = true;
@@ -403,7 +779,8 @@
                 for (const m of conv) {
                     const txt = m.text||'';
                     if (m.who==='hass' && /^(how can i help|what would you like|请问需要什么帮助|有什么可以帮)/i.test(txt.trim())) continue;
-                    c += txt.length;
+                    c += m._realChars || txt.length;
+                    if (m.thinking) c += m.thinking.length;
                     if (m.tool_calls) try { c += JSON.stringify(m.tool_calls).length; } catch(e){}
                 }
             }
@@ -411,7 +788,9 @@
         };
 
         const startTurn = (userText) => {
-            totalChars = calcCurrentChars() + (userText||'').length;
+            const extraChars = window.__clawLastSendChars || 0;
+            window.__clawLastSendChars = 0;
+            totalChars = calcCurrentChars() + Math.max(extraChars, (userText||'').length);
             hasTurn = true;
             windowTimeLabel = fwindow(Math.round((Date.now()-windowStart)/1000));
             turnStart = Date.now();
@@ -422,11 +801,23 @@
             render();
         };
 
+        let backendTokens = 0;
+        let backendCtx = 0;
+
+        const fetchBackendTokens = async () => {
+            try {
+                const r = await hass.connection.sendMessagePromise({ type: 'ha_crack/get_context_status' });
+                if (r?.tokens_used) backendTokens = r.tokens_used;
+                if (r?.context_window) backendCtx = r.context_window;
+            } catch(e) {}
+        };
+
         const endTurn = () => {
             if (phase === S_IDLE) return;
             turnEnd = Date.now();
             phase = S_IDLE;
             if (tickTimer) { clearInterval(tickTimer); tickTimer = null; }
+            fetchBackendTokens().then(render);
             render();
         };
 
@@ -505,8 +896,10 @@
             }
 
             if (hasTurn) totalChars = calcCurrentChars();
-            const tk = Math.round(totalChars/CPT) + (hasTurn ? BASE_PROMPT_TOKENS : 0);
-            const pct = Math.min(100, Math.round(tk/CTX*100));
+            const localTk = Math.round(totalChars/CPT) + (hasTurn ? BASE_PROMPT_TOKENS : 0);
+            const tk = backendTokens > localTk ? backendTokens : localTk;
+            const ctxW = backendCtx || CTX;
+            const pct = Math.min(100, Math.round(tk/ctxW*100));
             const pc = pctColor(pct);
             const active = phase !== S_IDLE;
             let timer = '--';
@@ -519,7 +912,7 @@
             const barStr = hasTurn ? '█'.repeat(filled)+'░'.repeat(barW-filled) : '░'.repeat(barW);
             const barColor = hasTurn ? pc : 'var(--secondary-text-color)';
             bar.innerHTML =
-                `<span class="sb-tok">${tkLabel} / ${fmtR(CTX)}</span>` +
+                `<span class="sb-tok">${tkLabel} / ${fmtR(ctxW)}</span>` +
                 '<span class="sb-sep">│</span>' +
                 `<span class="sb-bar" style="color:${barColor}">${barStr}</span> <span class="sb-pct" style="color:${barColor}">${pctLabel}</span>` +
                 '<span class="sb-sep">│</span>' +
