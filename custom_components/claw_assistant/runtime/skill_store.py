@@ -654,22 +654,7 @@ def _set_prompt_store(snapshot: PromptStoreSnapshot) -> None:
 
 def _ensure_prompt_store_fresh() -> PromptStoreSnapshot:
 
-    snapshot = _PROMPT_STORE["snapshot"]
-    if (
-        snapshot.signature
-        or snapshot.master_prompt
-        or snapshot.skills
-        or snapshot.runtime_prompt_docs
-        or snapshot.installed_skill_metadata
-    ):
-        return snapshot
-
-    if not (_master_prompt_path().exists() or _skills_dir().exists() or _prompts_dir().exists()):
-        return snapshot
-
-    snapshot = _read_prompt_store_from_disk()
-    _set_prompt_store(snapshot)
-    return snapshot
+    return _PROMPT_STORE["snapshot"]
 
 
 def _write_master_prompt(markdown: str) -> Path:

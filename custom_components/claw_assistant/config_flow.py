@@ -342,7 +342,7 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
 
         from .runtime.skill_store import _INTERNAL_SKILL_SLUGS
 
-        skills = list_installed_skills()
+        skills = await self.hass.async_add_executor_job(list_installed_skills)
         options = []
         for skill in skills:
             value = str(skill.get("slug") or skill.get("file") or skill.get("name") or "")
