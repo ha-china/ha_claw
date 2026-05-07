@@ -90,23 +90,16 @@ def patch_local_intents(hass: HomeAssistant) -> None:
                 )
 
                 speech_text = result.speech.get("plain", {}).get("speech", "")
-                if speech_text and conversation_mode != CONVERSATION_MODE_NO_NAME:
-                    from .response_format import reply_labels
-
-                    agent_name = "Home Assistant"
-                    reply = reply_labels(
-                        getattr(user_input, "language", None)
-                    )["reply"]
-                    if conversation_mode in (
-                        CONVERSATION_MODE_ADD_NAME,
-                        CONVERSATION_MODE_DETAILED,
-                    ):
-                        result.speech["plain"]["speech"] = (
-                            f"({agent_name}) {reply}: {speech_text}"
-                        )
-
-                    result.speech["plain"]["original_speech"] = speech_text
-                    result.speech["plain"]["agent_name"] = agent_name
+                if speech_text:
+                    from .reply_formatter import stamp_plain
+                    stamp_plain(
+                        result.speech.setdefault("plain", {}),
+                        agent_name="Home Assistant",
+                        agent_id="conversation.home_assistant",
+                        text=speech_text,
+                        language=getattr(user_input, "language", None),
+                        add_prefix=conversation_mode != CONVERSATION_MODE_NO_NAME,
+                    )
 
         return result
 
@@ -189,6 +182,11 @@ def patch_chat_log_stream_closure(hass: HomeAssistant) -> None:
     )
 
     async def patched_async_add_delta_content_stream(self, agent_id, stream):
+        if not getattr(self, "_claw_listener_wrapped", False):
+            orig = getattr(self, "delta_listener", None)
+            if orig:
+                self.delta_listener = _wrap_listener_for_tracking(self, orig)
+
         async for content in original_async_add_delta_content_stream(
             self, agent_id, stream
         ):
@@ -466,6 +464,36 @@ def _is_streaming_enabled(hass: HomeAssistant) -> bool:
     return entries[0].options.get(CONF_ENABLE_STREAMING_EFFECT, True)
 
 
+_HEADING_STRIP_RE = re.compile(r"^#{1,6}\s+")
+
+
+def _wrap_listener_for_tracking(chat_log, original_listener):
+    """Wrap delta_listener to track the last emitted character and strip headings."""
+    if getattr(chat_log, "_claw_listener_wrapped", False):
+        return original_listener
+
+    def tracked_listener(log, delta):
+        content = delta.get("content") if isinstance(delta, dict) else None
+        if content:
+            last = getattr(chat_log, "_claw_last_char", "\n")
+            if last == "\n":
+                stripped = content.lstrip("#")
+                if stripped != content:
+                    content = stripped.lstrip(" ") if stripped else None
+                    if not content:
+                        return
+                    delta = {**delta, "content": content}
+            chat_log._claw_last_char = content[-1]
+        return original_listener(log, delta)
+
+    chat_log._claw_listener_wrapped = True
+    chat_log._claw_last_char = "\n"
+    return tracked_listener
+
+
+_PROGRESS_CHUNK_RE = re.compile(r"(\*[^*]*\*|[^\s*]+|\s+)")
+
+
 async def _emit_frontend_progress(hass: HomeAssistant, chat_log, text: str) -> None:
     listener = getattr(chat_log, "delta_listener", None)
     if not listener or not text:
@@ -476,16 +504,34 @@ async def _emit_frontend_progress(hass: HomeAssistant, chat_log, text: str) -> N
     if get_channel_type(getattr(chat_log, "conversation_id", None)) != "ha":
         return
 
-    listener(chat_log, {"role": "assistant"})
+    if not getattr(chat_log, "_claw_listener_wrapped", False):
+        wrapped = _wrap_listener_for_tracking(chat_log, listener)
+        chat_log.delta_listener = wrapped
+        listener = wrapped
+
+    if not getattr(chat_log, "_claw_progress_active", False):
+        listener(chat_log, {"role": "assistant"})
+        chat_log._claw_progress_active = True
+    else:
+        listener(chat_log, {"content": "\n"})
+
+    full = text
+
     if not _is_streaming_enabled(hass):
-        listener(chat_log, {"content": text})
+        listener(chat_log, {"content": full})
+        listener(chat_log, {"content": "\n"})
+        return
+
+    chunks = _PROGRESS_CHUNK_RE.findall(full)
+    if not chunks:
+        listener(chat_log, {"content": full})
         listener(chat_log, {"content": "\n"})
         return
 
     await asyncio.sleep(0)
-    for ch in text:
-        listener(chat_log, {"content": ch})
-        await asyncio.sleep(0.01)
+    for chunk in chunks:
+        listener(chat_log, {"content": chunk})
+        await asyncio.sleep(0.02)
     listener(chat_log, {"content": "\n"})
 
 
@@ -508,8 +554,18 @@ def patch_tool_progress(hass: HomeAssistant) -> None:
         self, content, /, tool_call_tasks=None
     ):
         from dataclasses import replace as _replace
+
+        if not getattr(self, "_claw_listener_wrapped", False):
+            orig = getattr(self, "delta_listener", None)
+            if orig:
+                self.delta_listener = _wrap_listener_for_tracking(self, orig)
+
         thinking_text = ""
         raw_text = getattr(content, "content", None) or ""
+
+        if raw_text and raw_text.strip():
+            self._claw_has_content = True
+
         think_match = _THINK_RE.search(raw_text)
         if think_match:
             thinking_text = think_match.group(1).strip()
@@ -518,10 +574,12 @@ def patch_tool_progress(hass: HomeAssistant) -> None:
         if native_thinking and native_thinking.strip():
             thinking_text = native_thinking.strip()
         if thinking_text:
-            truncated = thinking_text[:120]
+            truncated = thinking_text[:120].replace("#", "").replace(">", "").replace("<", "").replace("|", "")
+            lines = [l.strip() for l in truncated.splitlines() if l.strip()]
+            display = " ".join(lines)
             from .state import get_conversation_status
             lang = get_conversation_status(hass).get("user_language") or hass.config.language or "en"
-            await _emit_frontend_progress(hass, self, f"┊ {truncated}")
+            await _emit_frontend_progress(hass, self, f"\n┊ *💭 {display}*")
             fire_live_progress(
                 hass,
                 conversation_id=getattr(self, "conversation_id", None),
@@ -544,7 +602,7 @@ def patch_tool_progress(hass: HomeAssistant) -> None:
                     others = [p for p in peers if not p.get("is_you")]
                     if others:
                         args["agent_name"] = others[0].get("agent_name", "")
-                line = tool_progress_line(tc.tool_name, args, lang)
+                line = tool_progress_line(tc.tool_name, args, lang, hass=hass)
                 await _emit_frontend_progress(hass, self, line.strip())
                 fire_live_progress(
                     hass,
@@ -554,6 +612,13 @@ def patch_tool_progress(hass: HomeAssistant) -> None:
                     tool_name=tc.tool_name,
                     display_text=line.strip(),
                 )
+
+        _had_progress = bool(thinking_text) or bool(
+            tool_calls and any(not getattr(tc, "external", False) for tc in tool_calls)
+        )
+        if _had_progress:
+            self._claw_progress_active = False
+            self._claw_has_content = False
 
         async for result in original_async_add_assistant_content(
             self, content, tool_call_tasks=tool_call_tasks
@@ -568,8 +633,33 @@ def patch_tool_progress(hass: HomeAssistant) -> None:
         _TOOL_PROGRESS_ORIGINAL,
         original_async_add_assistant_content,
     )
+
+    original_delta_stream = chat_log_module.ChatLog.async_add_delta_content_stream
+
+    _STREAM_HEADING_RE = re.compile(r"^#{1,6}\s+", re.MULTILINE)
+
+    async def patched_delta_stream(self, agent_id, stream):
+        if not getattr(self, "_claw_listener_wrapped", False):
+            orig = getattr(self, "delta_listener", None)
+            if orig:
+                self.delta_listener = _wrap_listener_for_tracking(self, orig)
+
+        async def _filtered_stream(src):
+            async for delta in src:
+                if isinstance(delta, dict) and "content" in delta and delta["content"]:
+                    c = _STREAM_HEADING_RE.sub("", delta["content"])
+                    if c != delta["content"]:
+                        delta = {**delta, "content": c}
+                yield delta
+
+        async for item in original_delta_stream(self, agent_id, _filtered_stream(stream)):
+            yield item
+
+    chat_log_module.ChatLog.async_add_delta_content_stream = patched_delta_stream
+    setattr(chat_log_module.ChatLog, "_claw_original_delta_stream", original_delta_stream)
+
     setattr(chat_log_module.ChatLog, _TOOL_PROGRESS_PATCHED, True)
-    LOGGER.debug("Patched ChatLog.async_add_assistant_content for tool progress + typewriter")
+    LOGGER.debug("Patched ChatLog.async_add_assistant_content + async_add_delta_content_stream")
 
 
 def unpatch_tool_progress() -> None:
@@ -584,9 +674,13 @@ def unpatch_tool_progress() -> None:
 
     chat_log_module.ChatLog.async_add_assistant_content = original
     delattr(chat_log_module.ChatLog, _TOOL_PROGRESS_ORIGINAL)
+    orig_delta = getattr(chat_log_module.ChatLog, "_claw_original_delta_stream", None)
+    if orig_delta:
+        chat_log_module.ChatLog.async_add_delta_content_stream = orig_delta
+        delattr(chat_log_module.ChatLog, "_claw_original_delta_stream")
     if hasattr(chat_log_module.ChatLog, _TOOL_PROGRESS_PATCHED):
         delattr(chat_log_module.ChatLog, _TOOL_PROGRESS_PATCHED)
-    LOGGER.debug("Restored ChatLog.async_add_assistant_content after claw_assistant unload")
+    LOGGER.debug("Restored ChatLog.async_add_assistant_content + delta_stream after unload")
 
 
 def patch_pipeline_timeout(hass: HomeAssistant) -> None:
@@ -1047,8 +1141,15 @@ def patch_aihub_markdown_filter(hass: HomeAssistant) -> None:
             md_mod._claw_original_filter_streaming = md_mod.filter_markdown_streaming
             setattr(md_mod, _AIHUB_MD_FILTER_PATCHED, True)
         if _rich_markdown_enabled(hass):
-            md_mod.filter_markdown_content = lambda content: content
-            md_mod.filter_markdown_streaming = lambda content: content
+            _heading_re = re.compile(r"^(#{1,6})\s+", re.MULTILINE)
+            def _rich_filter_content(content: str) -> str:
+                return _heading_re.sub(lambda m: "**" if len(m.group(1)) <= 3 else "", content)
+            def _rich_filter_streaming(content: str) -> str:
+                if content.startswith("#"):
+                    return content.lstrip("#").lstrip()
+                return content
+            md_mod.filter_markdown_content = _rich_filter_content
+            md_mod.filter_markdown_streaming = _rich_filter_streaming
             LOGGER.debug("Patched ai_hub markdown_filter to passthrough (rich_markdown ON)")
         else:
             md_mod.filter_markdown_content = md_mod._claw_original_filter_content
@@ -1193,3 +1294,74 @@ def unpatch_aihub_dynamic_max_tokens() -> None:
         except Exception:
             pass
     LOGGER.debug("Restored ai_hub _build_request")
+
+
+_OPENAI_API_KEY_PATCHED = "_claw_openai_apikey_patched"
+
+
+def patch_openai_allow_empty_key(hass: HomeAssistant) -> None:
+    try:
+        import homeassistant.components.openai_conversation.config_flow as oai_cf
+        import homeassistant.components.openai_conversation as oai_init
+        import voluptuous as vol
+        from homeassistant.const import CONF_API_KEY
+
+        if not getattr(oai_cf, _OPENAI_API_KEY_PATCHED, False):
+            oai_cf._claw_orig_validate_input = oai_cf.validate_input
+            oai_cf._claw_orig_schema = oai_cf.STEP_USER_DATA_SCHEMA
+            setattr(oai_cf, _OPENAI_API_KEY_PATCHED, True)
+
+        oai_cf.STEP_USER_DATA_SCHEMA = vol.Schema(
+            {vol.Optional(CONF_API_KEY, default=""): str}
+        )
+
+        orig_validate = oai_cf._claw_orig_validate_input
+
+        async def _patched_validate(ha, data):
+            key = data.get(CONF_API_KEY, "").strip()
+            if not key:
+                data[CONF_API_KEY] = "sk-no-key"
+                return
+            return await orig_validate(ha, data)
+
+        oai_cf.validate_input = _patched_validate
+
+        orig_setup = getattr(oai_init, "_claw_orig_setup_entry", None) or oai_init.async_setup_entry
+
+        if not getattr(oai_init, "_claw_setup_patched", False):
+            oai_init._claw_orig_setup_entry = orig_setup
+
+            async def _patched_setup(ha, entry):
+                if not entry.data.get(CONF_API_KEY, "").strip():
+                    hass.config_entries.async_update_entry(
+                        entry, data={**entry.data, CONF_API_KEY: "sk-no-key"}
+                    )
+                return await orig_setup(ha, entry)
+
+            oai_init.async_setup_entry = _patched_setup
+            oai_init._claw_setup_patched = True
+
+        LOGGER.debug("Patched openai_conversation to allow empty API key")
+    except Exception as exc:
+        LOGGER.debug("openai_conversation api_key patch skipped: %s", exc)
+
+
+def unpatch_openai_allow_empty_key() -> None:
+    try:
+        import homeassistant.components.openai_conversation.config_flow as oai_cf
+        import homeassistant.components.openai_conversation as oai_init
+
+        if not getattr(oai_cf, _OPENAI_API_KEY_PATCHED, False):
+            return
+        oai_cf.validate_input = oai_cf._claw_orig_validate_input
+        oai_cf.STEP_USER_DATA_SCHEMA = oai_cf._claw_orig_schema
+        delattr(oai_cf, "_claw_orig_validate_input")
+        delattr(oai_cf, "_claw_orig_schema")
+        delattr(oai_cf, _OPENAI_API_KEY_PATCHED)
+        if getattr(oai_init, "_claw_setup_patched", False):
+            oai_init.async_setup_entry = oai_init._claw_orig_setup_entry
+            delattr(oai_init, "_claw_orig_setup_entry")
+            delattr(oai_init, "_claw_setup_patched")
+        LOGGER.debug("Restored openai_conversation api_key validation")
+    except Exception as exc:
+        LOGGER.debug("openai_conversation unpatch skipped: %s", exc)
