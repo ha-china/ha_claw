@@ -1301,9 +1301,10 @@ _OPENAI_API_KEY_PATCHED = "_claw_openai_apikey_patched"
 
 def patch_openai_allow_empty_key(hass: HomeAssistant) -> None:
     try:
-        import homeassistant.components.openai_conversation.config_flow as oai_cf
-        import homeassistant.components.openai_conversation as oai_init
+        import importlib
         import voluptuous as vol
+        oai_cf = importlib.import_module("homeassistant.components.openai_conversation.config_flow")
+        oai_init = importlib.import_module("homeassistant.components.openai_conversation")
         from homeassistant.const import CONF_API_KEY
 
         if not getattr(oai_cf, _OPENAI_API_KEY_PATCHED, False):
@@ -1348,8 +1349,9 @@ def patch_openai_allow_empty_key(hass: HomeAssistant) -> None:
 
 def unpatch_openai_allow_empty_key() -> None:
     try:
-        import homeassistant.components.openai_conversation.config_flow as oai_cf
-        import homeassistant.components.openai_conversation as oai_init
+        import importlib
+        oai_cf = importlib.import_module("homeassistant.components.openai_conversation.config_flow")
+        oai_init = importlib.import_module("homeassistant.components.openai_conversation")
 
         if not getattr(oai_cf, _OPENAI_API_KEY_PATCHED, False):
             return
