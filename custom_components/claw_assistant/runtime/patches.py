@@ -61,6 +61,18 @@ def _pop_empty_trailing_assistant(chat_log) -> None:
         content.pop()
 
 
+def _chat_log_turn_has_assistant_content(chat_log) -> bool:
+    content = getattr(chat_log, "content", None)
+    if not content:
+        return False
+    for item in reversed(content):
+        if getattr(item, "role", None) == "user":
+            return False
+        if isinstance(item, AssistantContent) and item.content:
+            return True
+    return False
+
+
 def patch_local_intents(hass: HomeAssistant) -> None:
 
     from homeassistant.components import conversation as conv_module
@@ -138,6 +150,8 @@ def patch_chat_log_result_extraction(hass: HomeAssistant) -> None:
     def patched_async_get_result_from_chat_log(user_input, chat_log):
         synthesized_content = build_synthesized_assistant_from_chat_log(chat_log)
         if synthesized_content is not None:
+            if _chat_log_turn_has_assistant_content(chat_log):
+                return original_async_get_result_from_chat_log(user_input, chat_log)
             _pop_empty_trailing_assistant(chat_log)
             chat_log.async_add_assistant_content_without_tools(synthesized_content)
             LOGGER.debug(
@@ -196,6 +210,8 @@ def patch_chat_log_stream_closure(hass: HomeAssistant) -> None:
         if synthesized_content is None:
             return
 
+        if _chat_log_turn_has_assistant_content(self):
+            return
         _pop_empty_trailing_assistant(self)
         self.async_add_assistant_content_without_tools(synthesized_content)
         LOGGER.debug(
@@ -1299,13 +1315,18 @@ def unpatch_aihub_dynamic_max_tokens() -> None:
 _OPENAI_API_KEY_PATCHED = "_claw_openai_apikey_patched"
 
 
-def patch_openai_allow_empty_key(hass: HomeAssistant) -> None:
+async def async_patch_openai_allow_empty_key(hass: HomeAssistant) -> None:
     try:
         import importlib
         import voluptuous as vol
-        oai_cf = importlib.import_module("homeassistant.components.openai_conversation.config_flow")
-        oai_init = importlib.import_module("homeassistant.components.openai_conversation")
         from homeassistant.const import CONF_API_KEY
+
+        def _import_modules():
+            cf = importlib.import_module("homeassistant.components.openai_conversation.config_flow")
+            init = importlib.import_module("homeassistant.components.openai_conversation")
+            return cf, init
+
+        oai_cf, oai_init = await hass.async_add_executor_job(_import_modules)
 
         if not getattr(oai_cf, _OPENAI_API_KEY_PATCHED, False):
             oai_cf._claw_orig_validate_input = oai_cf.validate_input
