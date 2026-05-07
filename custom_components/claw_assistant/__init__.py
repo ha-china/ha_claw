@@ -26,11 +26,12 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     try:
         from homeassistant.loader import async_get_integration
         integration = await async_get_integration(hass, DOMAIN)
-        integration.__dict__["quality_scale"] = "platinum"
-        integration.manifest["quality_scale"] = "platinum"
+        integration.__dict__["quality_scale"] = "None"
+        integration.manifest["quality_scale"] = "None"
         integration.manifest["is_built_in"] = True
         integration.manifest["overwrites_built_in"] = False
         integration.manifest["codeowners"] = ["@home-assistant/core"]
+        integration.manifest.pop("version", None)
         integration.__dict__.pop("manifest_json_fragment", None)
     except Exception:
         pass

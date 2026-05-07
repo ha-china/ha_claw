@@ -154,10 +154,10 @@ def _normalize_value(value: str) -> str:
 
 
 _HARD_TODO_PREFIX_RE = re.compile(
-    r"^(?:todo|wip|next[\s_-]?step|next[\s_-]?action|progress)\s*[:：]",
+    r"^(?:todo|wip|next[\s_-]?step|next[\s_-]?action|progress|session[\s_-]?note|task[\s_-]?status|just[\s_-]?did|completed|result)\s*[:：]",
     flags=re.IGNORECASE,
 )
-_HARD_TODO_PREFIX_CN_RE = re.compile(r"^(?:待办|下一步|本轮|进度)\s*[:：]")
+_HARD_TODO_PREFIX_CN_RE = re.compile(r"^(?:待办|下一步|本轮|进度|刚才|本次|会话|任务状态|执行结果|图片描述|分析结果)\s*[:：]")
 
 
 def _transient_reason(key: str, value: str) -> tuple[str, str, str, str, dict[str, Any] | None]:
@@ -169,7 +169,12 @@ def _transient_reason(key: str, value: str) -> tuple[str, str, str, str, dict[st
         return "follow_up_task", "Use HeartbeatManager / HeartbeatSkill for reminders and follow-up tasks.", "HeartbeatManager", "upsert", {"title": value[:48], "schedule": "", "objective": value, "steps": value}
     if _HARD_TODO_PREFIX_RE.match(normalized_value) or _HARD_TODO_PREFIX_CN_RE.match(normalized_value):
         return "transient_progress_note", "Keep task progress in conversation history, not long-term memory.", "GetConversationHistory", "history", {"max_turns": 5}
-    if normalized_key in {"todo", "wip", "next_step", "next_action", "progress"}:
+    if normalized_key in {
+        "todo", "wip", "next_step", "next_action", "progress",
+        "session_note", "task_status", "just_did", "completed_task",
+        "tool_result", "image_description", "media_description",
+        "current_task", "this_session", "analysis_result",
+    }:
         return "transient_progress_note", "Keep task progress in conversation history, not long-term memory.", "GetConversationHistory", "history", {"max_turns": 5}
     return "", "", "", "", None
 

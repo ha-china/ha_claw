@@ -24,7 +24,6 @@ from .agent_fallback import (
 from .config import DEFAULT_FALLBACK_AGENT_ID, DEFAULT_THRESHOLDS
 from .data_path import get_tmp_dir
 from .i18n import t
-from .ha_guide_store import async_refresh_homeassistant_guide_store
 from .internal_llm import _MAX_SYSTEM_PROMPT_CHARS, _fit_head_section_to_required_suffix
 from .loop_controller import (
     record_continuation,
@@ -37,7 +36,6 @@ from .options import build_conversation_runtime_config_for_hass
 from .prompting import _fit_base_prompt, build_base_prompt
 from .response_format import is_marshaled_tool_payload, sanitize_response_text
 from .response_policy import analyze_response_state
-from .skill_store import async_refresh_prompt_store
 from .state import (
     consume_tool_called,
     get_active_conversation_state,
@@ -51,12 +49,24 @@ from .state import (
 from .summary import process_ai_summary
 from .tool_result_summary import extract_successful_tool_response
 from .turn_kernel import execute_kernel_turn
-from .workspace_store import async_refresh_workspace_store, get_user_context_prefix
+from .workspace_store import get_user_context_prefix
 
 LOGGER = logging.getLogger(__name__)
 
-
 _ATTACHMENT_RE = re.compile(r"\[ATTACHMENT:([\w/]+):(.+?)\]")
+
+_MD_HEADING_RE = re.compile(r"^(#{1,6})\s", re.MULTILINE)
+_MD_HR_RE = re.compile(r"^(\s*[-*_]\s*){3,}$", re.MULTILINE)
+_MD_BLOCKQUOTE_RE = re.compile(r"^(>\s*)+", re.MULTILINE)
+
+
+def _neutralize_user_markdown(text: str) -> str:
+    if not text:
+        return text
+    out = _MD_HEADING_RE.sub(lambda m: m.group(1).replace("#", "\uff03") + " ", text)
+    out = _MD_HR_RE.sub("———", out)
+    out = _MD_BLOCKQUOTE_RE.sub("", out)
+    return out
 _PENDING_ATTACHMENTS: ContextVar[list[tuple[str, str]] | None] = ContextVar(
     "claw_pending_attachments",
     default=None,
@@ -390,6 +400,7 @@ async def _execute_conversation_turn_inner(
                 "All %d attachment(s) dropped after sanitization",
                 len(pending_attachments),
             )
+    text = _neutralize_user_markdown(text)
     task_loop = record_user_turn(hass, text=text)
     LOGGER.info("Task loop turn %s: %s...", task_loop["turn_count"], text[:50])
 
@@ -398,9 +409,6 @@ async def _execute_conversation_turn_inner(
         LOGGER.info("New conversation detected: %s...", conversation_id[:20])
         task_loop["waiting_choice"] = False
         active_conv["id"] = conversation_id
-        await async_refresh_workspace_store(hass)
-        await async_refresh_homeassistant_guide_store(hass)
-        await async_refresh_prompt_store(hass)
 
     if int(task_loop.get("turn_count", 0) or 0) > 1:
         user_prefix = get_user_context_prefix()

@@ -15,10 +15,25 @@ _SKILL_INDEX_GUIDANCE = (
     "`GetInstalledSkill(name=\"<slug>\")`; do not assume contents."
 )
 
+_CACHED_MASTER_SECTIONS: tuple[str, ...] | None = None
+_CACHED_MASTER_SIGNATURE: tuple[str, ...] | None = None
+
+
+def invalidate_master_prompt_cache() -> None:
+    global _CACHED_MASTER_SECTIONS, _CACHED_MASTER_SIGNATURE
+    _CACHED_MASTER_SECTIONS = None
+    _CACHED_MASTER_SIGNATURE = None
+
 
 def build_master_prompt_sections(*, user_text: str = "") -> tuple[str, ...]:
 
-    del user_text  # skills now always ship as an index, never keyword-matched bodies
+    del user_text
+
+    global _CACHED_MASTER_SECTIONS, _CACHED_MASTER_SIGNATURE
+    from .skill_store import _ensure_prompt_store_fresh
+    current_sig = _ensure_prompt_store_fresh().signature
+    if _CACHED_MASTER_SECTIONS is not None and _CACHED_MASTER_SIGNATURE == current_sig:
+        return _CACHED_MASTER_SECTIONS
 
     sections: list[str] = []
 
@@ -40,7 +55,10 @@ def build_master_prompt_sections(*, user_text: str = "") -> tuple[str, ...]:
             f"## Installed Skill Index\n{skill_catalog}\n\n{_SKILL_INDEX_GUIDANCE}"
         )
 
-    return tuple(section for section in sections if section.strip())
+    result = tuple(section for section in sections if section.strip())
+    _CACHED_MASTER_SECTIONS = result
+    _CACHED_MASTER_SIGNATURE = current_sig
+    return result
 
 
 def apply_master_prompt_layers(base_prompt: str, *, user_text: str = "") -> str:

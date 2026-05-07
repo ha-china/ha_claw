@@ -310,7 +310,31 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
         return await self._workspace_edit("AGENTS", user_input)
 
     async def async_step_ws_bootstrap(self, user_input: dict[str, Any] | None = None) -> FlowResult:
-        return await self._workspace_edit("BOOTSTRAP", user_input)
+        from .runtime.workspace_store import (
+            async_save_workspace_doc,
+            async_set_bootstrap_active,
+            get_workspace_doc,
+        )
+
+        if user_input is not None:
+            active = user_input.get("bootstrap_active", False)
+            content = user_input.get("content", "")
+            await async_set_bootstrap_active(self.hass, active)
+            await async_save_workspace_doc(self.hass, "BOOTSTRAP", content)
+            return await self.async_step_workspace_editor()
+
+        doc = get_workspace_doc("BOOTSTRAP")
+        current_content = doc.get("markdown", "")
+        current_active = doc.get("active", False)
+
+        return self.async_show_form(
+            step_id="ws_bootstrap",
+            data_schema=vol.Schema({
+                vol.Required("bootstrap_active", default=current_active): BooleanSelector(),
+                vol.Required("content", default=current_content): TemplateSelector(),
+            }),
+            description_placeholders={"doc_name": "BOOTSTRAP.md"},
+        )
 
     async def async_step_ws_heartbeat(self, user_input: dict[str, Any] | None = None) -> FlowResult:
         return await self._workspace_edit("HEARTBEAT", user_input)

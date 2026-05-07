@@ -151,6 +151,8 @@ class PromptStoreSnapshot:
     runtime_prompt_docs: tuple[PromptDocument, ...] = ()
     installed_skill_metadata: tuple[dict[str, Any], ...] = ()
     signature: tuple[str, ...] = ()
+    cached_skill_catalog: str = ""
+    cached_priority_skill_block: str = ""
 
 
 _PROMPT_STORE: dict[str, PromptStoreSnapshot] = {"snapshot": PromptStoreSnapshot()}
@@ -630,12 +632,16 @@ def _read_prompt_store_from_disk() -> PromptStoreSnapshot:
         runtime_prompt_docs.append(_prompt_document_from_path(path, content))
 
     skill_tuple = tuple(skills)
+    catalog = _build_skill_catalog_text(skill_tuple)
+    priority_block = _build_priority_skill_block_text(skill_tuple)
     return PromptStoreSnapshot(
         master_prompt=master_prompt,
         skills=skill_tuple,
         runtime_prompt_docs=tuple(runtime_prompt_docs),
         installed_skill_metadata=_build_installed_skill_catalog(skill_tuple),
         signature=_prompt_store_signature(),
+        cached_skill_catalog=catalog,
+        cached_priority_skill_block=priority_block,
     )
 
 
@@ -695,11 +701,6 @@ async def async_setup_prompt_store(hass: HomeAssistant) -> None:
 
 async def async_refresh_prompt_store(hass: HomeAssistant) -> None:
 
-    await hass.async_add_executor_job(
-        sync_legacy_skill_sources,
-        Path(hass.config.config_dir),
-        get_data_dir(),
-    )
     new_signature = await hass.async_add_executor_job(_prompt_store_signature)
     current = _PROMPT_STORE.get("snapshot")
     if (
@@ -708,8 +709,15 @@ async def async_refresh_prompt_store(hass: HomeAssistant) -> None:
         and current.signature == new_signature
     ):
         return
+    await hass.async_add_executor_job(
+        sync_legacy_skill_sources,
+        Path(hass.config.config_dir),
+        get_data_dir(),
+    )
     snapshot = await hass.async_add_executor_job(_read_prompt_store_from_disk)
     _set_prompt_store(snapshot)
+    from .master_prompt import invalidate_master_prompt_cache
+    invalidate_master_prompt_cache()
     await async_reload_concept_aliases(hass)
 
 
@@ -1072,9 +1080,8 @@ def _is_homeassistant_priority_skill(skill: SkillDocument) -> bool:
     )
 
 
-def load_homeassistant_priority_skill_block() -> str:
-
-    for skill in _ensure_prompt_store_fresh().skills:
+def _build_priority_skill_block_text(skills: tuple[SkillDocument, ...]) -> str:
+    for skill in skills:
         if not _is_prompt_eligible_skill(skill):
             continue
         if not _is_homeassistant_priority_skill(skill):
@@ -1087,6 +1094,11 @@ def load_homeassistant_priority_skill_block() -> str:
             "Details: GetInstalledSkill(homeassistant_runtime_guide) or HomeAssistantGuide."
         )
     return ""
+
+
+def load_homeassistant_priority_skill_block() -> str:
+
+    return _ensure_prompt_store_fresh().cached_priority_skill_block
 
 
 def _score_skill_match(skill: SkillDocument, query: str, query_tokens: tuple[str, ...]) -> int:
@@ -1240,17 +1252,35 @@ def load_relevant_skill_prompt_blocks(
     return "\n\n".join(blocks)
 
 
+def _build_skill_catalog_text(
+    skills: tuple[SkillDocument, ...],
+    *,
+    max_items: int = MAX_SKILL_CATALOG_ITEMS,
+) -> str:
+    items: list[str] = []
+    for skill in skills:
+        if not _is_prompt_eligible_skill(skill):
+            continue
+        if _is_homeassistant_priority_skill(skill):
+            continue
+        description = skill.description or skill.title
+        items.append(f"- {skill.slug}: {description}")
+        if len(items) >= max_items:
+            break
+    return "\n".join(items)
+
+
 def load_skill_catalog_prompt(
     *,
     max_items: int = MAX_SKILL_CATALOG_ITEMS,
     exclude_homeassistant_priority: bool = False,
 ) -> str:
 
+    if exclude_homeassistant_priority:
+        return _ensure_prompt_store_fresh().cached_skill_catalog
     items: list[str] = []
     for skill in _ensure_prompt_store_fresh().skills:
         if not _is_prompt_eligible_skill(skill):
-            continue
-        if exclude_homeassistant_priority and _is_homeassistant_priority_skill(skill):
             continue
         description = skill.description or skill.title
         items.append(f"- {skill.slug}: {description}")
