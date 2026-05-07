@@ -145,9 +145,10 @@ def install_conversation_hook(hass: HomeAssistant, entry: ConfigEntry) -> None:
 
     get_active_conversation_state(hass)
     runtime_store = get_runtime_store(hass)
-    runtime_store["original_async_converse"] = agent_manager.async_converse
+    from .patches import _GLOBAL_FORMAT_ORIGINAL
+    original_async_converse = getattr(agent_manager, _GLOBAL_FORMAT_ORIGINAL, None) or agent_manager.async_converse
+    runtime_store["original_async_converse"] = original_async_converse
     runtime_store["config_entry"] = entry
-    original_async_converse = agent_manager.async_converse
 
     async def hooked_async_converse(
         hass: HomeAssistant,

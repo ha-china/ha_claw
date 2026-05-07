@@ -251,17 +251,7 @@ def _find_turn_start(content: list[Any]) -> int:
     return 0
 
 
-def _find_earlier_assistant_text(content: list[Any]) -> tuple[str, str] | None:
 
-    start = _find_turn_start(content)
-    for item in reversed(content[start:]):
-        if (
-            isinstance(item, AssistantContent)
-            and item.content
-            and not is_step_agent_id(getattr(item, "agent_id", None))
-        ):
-            return item.agent_id, item.content
-    return None
 
 
 def _collect_trailing_tool_results(content: list[Any]) -> list[Any]:
@@ -303,14 +293,6 @@ def build_synthesized_assistant_from_chat_log(chat_log: Any) -> AssistantContent
 
 
     if isinstance(last, AssistantContent) and not last.content:
-
-        earlier = _find_earlier_assistant_text(content[:-1])
-        if earlier is not None:
-            earlier_agent_id, earlier_text = earlier
-            return AssistantContent(
-                agent_id=earlier_agent_id or agent_id,
-                content=earlier_text,
-            )
         return _synthesize_from_tool_results(content, agent_id)
 
     return None
