@@ -213,7 +213,8 @@ def _conflicting_skill_commands() -> list[dict[str, Any]]:
 
 
 def _spec_desc(spec: CommandSpec, lang: str | None) -> str:
-    if lang and lang.startswith("zh") and spec.description_zh:
+    from .runtime.reply_formatter import is_chinese
+    if is_chinese(lang) and spec.description_zh:
         return spec.description_zh
     return spec.description
 

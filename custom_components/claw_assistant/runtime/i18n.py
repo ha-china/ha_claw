@@ -192,5 +192,6 @@ def t(key: str, language: str | None = None) -> str:
     entry = _MESSAGES.get(key)
     if not entry:
         return key
-    lang = "zh" if language and language.startswith("zh") else "en"
+    from .reply_formatter import is_chinese
+    lang = "zh" if is_chinese(language) else "en"
     return entry.get(lang, entry.get("en", key))

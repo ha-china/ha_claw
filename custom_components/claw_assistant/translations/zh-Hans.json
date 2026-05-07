@@ -3,9 +3,9 @@
   "selector": {
     "conversation_mode": {
       "options": {
-        "no_name": "不显示名称",
-        "add_name": "显示 AI 名称",
-        "detailed": "完整显示"
+        "no_name": "精简模式",
+        "add_name": "标注来源",
+        "detailed": "多模型对比"
       }
     }
   },
@@ -80,7 +80,7 @@
           "enable_web_search": "联网搜索"
         },
         "data_description": {
-          "conversation_mode": "• **不显示名称** — 精简模式，只显示回复内容\n• **显示 AI 名称** — 推荐，回复前标注响应的 AI 名称\n• **完整显示** — 显示完整调用过程，包含工具调用详情",
+          "conversation_mode": "• **精简模式** — 只显示最终回复内容，不标注 AI 来源\n• **标注来源** — 推荐，回复前标注是哪个 AI 在回答，如 (deepseek) 回复:\n• **多模型对比** — 所有配置的 AI 同时回答同一问题，各自标注名称并分隔显示",
           "enable_web_search": "启用后，AI 可在需要时自动补充联网搜索结果以提升回答质量"
         }
       },
@@ -142,7 +142,13 @@
       "ws_bootstrap": {
         "title": "编辑 BOOTSTRAP.md",
         "description": "**首次引导流程**\n仅在首次启动时生效，引导 AI 完成初始化对话（如收集用户名、偏好等）。\n当 IDENTITY 和 USER 信息填写完成后，引导流程自动结束。\n\n使用 Markdown 格式，保存后立即生效。",
-        "data": { "content": "Markdown 编辑器" }
+        "data": {
+          "bootstrap_active": "启用引导流程",
+          "content": "Markdown 编辑器"
+        },
+        "data_description": {
+          "bootstrap_active": "开启后，AI 下次对话时会重新执行引导流程；关闭则跳过引导，直接正常对话"
+        }
       },
       "ws_heartbeat": {
         "title": "编辑 HEARTBEAT.md",

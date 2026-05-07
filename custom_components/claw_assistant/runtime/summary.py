@@ -147,8 +147,11 @@ async def process_ai_summary(
                 and proc_result.response.speech
                 and "plain" in proc_result.response.speech
             ):
+                from .reply_formatter import strip_reply_prefix
                 resp_text = sanitize_response_text(
-                    proc_result.response.speech["plain"].get("speech", "").strip()
+                    strip_reply_prefix(
+                        proc_result.response.speech["plain"].get("speech", "").strip()
+                    )
                 )
                 if resp_text and not is_error_response(hass, proc_result):
                     if base_result is None:
@@ -171,8 +174,9 @@ async def process_ai_summary(
 
         labels = reply_labels(language_of(base_result))
         reply_word = labels["reply"]
-        combined_responses = "\n".join(
-            f"({response['agent_name']}) {reply_word}: {response['response']}"
+        from .reply_formatter import format_reply_speech
+        combined_responses = "\n\n\u200b---\n\n".join(
+            format_reply_speech(response['agent_name'], response['response'], language_of(base_result))
             for response in primary_responses
         )
         if (
@@ -239,24 +243,28 @@ async def process_ai_summary(
                 if multi_agent_summary:
                     for response in primary_responses:
                         combined_responses += (
-                            f"({response['agent_name']}) {reply_word}: {response['response']}\n\n---\n\n"
+                            format_reply_speech(response['agent_name'], response['response'], language_of(base_result))
+                            + "\n\n---\n\n"
                         )
                     if analysis_part:
                         combined_responses += f"{analysis_part}\n\n---\n\n"
-                    combined_responses += (
-                        f"({summary_agent_name}) {summary_word}: {summary_part}"
+                    from .reply_formatter import format_labeled_speech
+                    combined_responses += format_labeled_speech(
+                        summary_agent_name, summary_part, summary_word
                     )
 
                 if conversation_mode == CONVERSATION_MODE_DETAILED:
-                    detailed = combined_responses or (
-                        f"({summary_agent_name}) {summary_word}: {summary_part}"
+                    detailed = combined_responses or format_labeled_speech(
+                        summary_agent_name, summary_part, summary_word
                     )
                     summary_result.response.speech["plain"]["speech"] = detailed
                 elif conversation_mode == CONVERSATION_MODE_ADD_NAME:
                     summary_result.response.speech["plain"]["speech"] = (
                         combined_responses
                         if multi_agent_summary
-                        else f"({summary_agent_name}) {summary_word}: {summary_part}"
+                        else format_labeled_speech(
+                            summary_agent_name, summary_part, summary_word
+                        )
                     )
                 else:
                     summary_result.response.speech["plain"]["speech"] = summary_part

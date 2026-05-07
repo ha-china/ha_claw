@@ -132,9 +132,8 @@ async def _finalize_completed_response(
 ) -> str:
 
     plain = response.speech.get("plain", {}) if isinstance(response.speech, dict) else {}
-    final_text = sanitize_response_text(
-        plain.get("original_speech", plain.get("speech", ""))
-    )
+    raw = plain.get("original_speech", plain.get("speech", ""))
+    final_text = sanitize_response_text(raw)
     if not final_text:
         return ""
 
@@ -252,6 +251,7 @@ async def _finalize_agent_success(
     language: str | None,
     original_async_converse,
     tool_results: list[dict[str, Any]],
+    handoff_replies: list[tuple[str, str]] | None = None,
 ) -> Any:
 
     if getattr(result, "response", None) and getattr(result.response, "speech", None):
@@ -291,6 +291,7 @@ async def _finalize_agent_success(
         agent_id=agent_id,
         conversation_mode=conversation_mode,
         response_text=final_text or response_text,
+        handoff_replies=handoff_replies,
     )
     LOGGER.info("AI response: %s...", (final_text or response_text)[:100])
     set_current_thought(hass, None)
@@ -671,6 +672,7 @@ async def run_agent_fallback_chain(
     task_loop = get_task_loop_state(hass)
     agent_errors: list[str] = []
     previous_tool_results: list[dict[str, Any]] = []
+    handoff_replies: list[tuple[str, str]] = []
     base_extra_prompt = extra_system_prompt
     pending_handoff_context = ""
 
@@ -756,6 +758,7 @@ async def run_agent_fallback_chain(
                 if response_text:
                     handoff_request = consume_next_agent_handoff(hass)
                     if handoff_request["requested"] and fallback_agents:
+                        handoff_replies.append(("Home Assistant", response_text))
                         pending_handoff_context = _build_next_agent_handoff_prompt(
                             previous_agent_name="Home Assistant",
                             previous_response_text=(
@@ -788,17 +791,15 @@ async def run_agent_fallback_chain(
                             original_async_converse=original_async_converse,
                             tool_results=_snapshot_tool_results(tool_results),
                         )
-                        reply = reply_labels(language_of(internal_result))["reply"]
-                        if conversation_mode in (
-                            CONVERSATION_MODE_ADD_NAME,
-                            CONVERSATION_MODE_DETAILED,
-                        ):
-                            internal_result.response.speech["plain"]["speech"] = (
-                                f"({agent_name}) {reply}: {response_text}"
-                            )
-                        internal_result.response.speech["plain"]["original_speech"] = response_text
-                        internal_result.response.speech["plain"]["agent_name"] = agent_name
-                        internal_result.response.speech["plain"]["agent_id"] = ha_internal_agent
+                        from .reply_formatter import stamp_plain
+                        stamp_plain(
+                            internal_result.response.speech.setdefault("plain", {}),
+                            agent_name=agent_name,
+                            agent_id=ha_internal_agent,
+                            text=response_text,
+                            language=language,
+                            add_prefix=conversation_mode != CONVERSATION_MODE_NO_NAME,
+                        )
                         LOGGER.info(
                             "HA internal LLM handled the request successfully: %s...",
                             response_text[:50],
@@ -1159,6 +1160,7 @@ async def run_agent_fallback_chain(
                         task_loop=task_loop,
                     )
                 if target_agent_id:
+                    handoff_replies.append((agent_name, response_text))
                     pending_handoff_context = _build_next_agent_handoff_prompt(
                         previous_agent_name=agent_name,
                         previous_response_text=(
@@ -1198,6 +1200,7 @@ async def run_agent_fallback_chain(
                     language=language,
                     original_async_converse=original_async_converse,
                     tool_results=_snapshot_tool_results(get_tool_results_state(hass)),
+                    handoff_replies=handoff_replies or None,
                 )
                 LOGGER.info("Agent %s succeeded", current_agent_id)
                 await async_record_agent_success(

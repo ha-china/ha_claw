@@ -1,17 +1,18 @@
-def tool_progress_line(name: str, args: dict | None, lang: str = "en") -> str:
+def tool_progress_line(name: str, args: dict | None, lang: str = "en", hass=None) -> str:
     args = args or {}
-    desc = _tool_desc(name, args, lang)
+    desc = _tool_desc(name, args, lang, hass)
     return f"┊ *{desc}*\n"
 
 
 def _esc(text: str) -> str:
-    for ch in ("*", "_", "`", "{", "}", "[", "]", "(", ")", "#", "~", "|", "\\"):
+    for ch in ("*", "_", "`", "{", "}", "[", "]", "(", ")", "#", "~", "|", "\\", ">", "<"):
         text = text.replace(ch, "")
     return text
 
 
-def _tool_desc(name: str, a: dict, lang: str) -> str:
-    zh = lang.startswith("zh")
+def _tool_desc(name: str, a: dict, lang: str, hass=None) -> str:
+    from .reply_formatter import is_chinese
+    zh = is_chinese(lang)
     e = _esc
 
     if name == "GetLiveContext":
@@ -31,27 +32,51 @@ def _tool_desc(name: str, a: dict, lang: str) -> str:
             return f"🔗 正在调用 {d}.{s}..." if d else "🔗 正在调用服务..."
         return f"🔗 Calling {d}.{s}..." if d else "🔗 Calling service..."
     if name == "EntityQuery":
-        eid = e(str(a.get("entity_id", "")))[:25]
+        eid = e(str(a.get("entity_id", "")))[:50]
         if zh:
             return f"💫 正在查询 {eid}..." if eid else "💫 正在查询设备..."
         return f"💫 Querying {eid}..." if eid else "💫 Querying entity..."
     if name == "WebSearch":
-        q = e(str(a.get("query", "")))[:20]
+        q = e(str(a.get("query", "")))[:50]
+        eng = a.get("engine", "")
+        _engine_zh = {"google": "谷歌", "bing": "必应", "baidu": "百度", "bing_cn": "必应"}
+        _engine_en = {"google": "Google", "bing": "Bing", "baidu": "Baidu", "bing_cn": "Bing CN"}
         if zh:
-            return f"🌎 正在搜索: {q}..." if q else "🌎 正在联网搜索..."
-        return f"🌎 Searching: {q}..." if q else "🌎 Web search..."
+            label = _engine_zh.get(eng, "聚合")
+            return f"🌎 正在{label}搜索: {q}..." if q else f"🌎 正在{label}搜索..."
+        label = _engine_en.get(eng, "Web")
+        return f"🌎 {label} search: {q}..." if q else f"🌎 {label} search..."
     if name == "StockQuery":
-        c = e(str(a.get("codes", "")))[:15]
+        c = e(str(a.get("codes", "")))[:40]
         if zh:
             return f"🪙 正在查询行情: {c}..." if c else "🪙 正在查询行情..."
         return f"🪙 {c}..." if c else "🪙 Stock query..."
     if name == "UrlFetch":
-        u = e(str(a.get("url", "")))[:30]
+        from urllib.parse import urlparse
+        u = a.get("url", "")
+        host = urlparse(u).netloc if u else ""
         if zh:
-            return f"💫 正在抓取: {u}..." if u else "💫 正在抓取网页..."
-        return f"💫 Fetching: {u}..." if u else "💫 Fetching URL..."
+            return f"🌎 正在读取 {host}..." if host else "🌎 正在读取网页..."
+        return f"🌎 Reading {host}..." if host else "🌎 Reading page..."
+    if name == "WebReadChunk":
+        pos = a.get("position", 0)
+        did = a.get("doc_id", "")
+        preview = ""
+        try:
+            if hass:
+                doc = hass.data.get("claw_web_chunks", {}).get(did, {})
+                chunks = doc.get("chunks", [])
+                if pos < len(chunks):
+                    preview = e(chunks[pos][:25]).strip()
+        except Exception:
+            pass
+        if zh:
+            tag = f"「{preview}...」" if preview else ""
+            return f"🌎 正在阅读第{pos + 1}段{tag}"
+        tag = f"'{preview}...'" if preview else ""
+        return f"🌎 Reading chunk {pos + 1} {tag}"
     if name == "HistoryQuery":
-        eid = e(str(a.get("entity_id", "")))[:20]
+        eid = e(str(a.get("entity_id", "")))[:50]
         h = a.get("hours", 24)
         if zh:
             return f"💫 正在查询 {eid} 近{h}小时历史..." if eid else "💫 正在查询历史数据..."
@@ -59,14 +84,14 @@ def _tool_desc(name: str, a: dict, lang: str) -> str:
     if name == "ExecutePython":
         return "🪐 正在执行代码..." if zh else "🪐 Executing code..."
     if name == "CameraCapture":
-        cam = e(str(a.get("camera_entity", "")))[:20]
+        cam = e(str(a.get("camera_entity", "")))[:50]
         mode = str(a.get("mode", "snapshot")).lower()
         if mode == "analyze":
             return (f"📷 正在分析摄像头: {cam}..." if cam else "📷 正在分析摄像头...") if zh else (f"📷 Analyzing: {cam}..." if cam else "📷 Analyzing camera...")
         return (f"📷 正在获取摄像头: {cam}..." if cam else "📷 正在查询摄像头...") if zh else (f"📷 Camera: {cam}..." if cam else "📷 Camera query...")
     if name == "MediaAnalyze":
         fpath = str(a.get("file_path", "")).strip()
-        fname = e(fpath.rsplit("/", 1)[-1])[:20] if fpath else ""
+        fname = e(fpath.rsplit("/", 1)[-1])[:50] if fpath else ""
         ext = fpath.rsplit(".", 1)[-1].lower() if "." in fpath else ""
         if ext in ("mp4", "avi", "mov", "mkv", "webm", "flv"):
             return (f"🎬 正在分析视频: {fname}..." if fname else "🎬 正在分析视频...") if zh else (f"🎬 Analyzing video: {fname}..." if fname else "🎬 Analyzing video...")
@@ -80,12 +105,12 @@ def _tool_desc(name: str, a: dict, lang: str) -> str:
         cnt = len(tools) if isinstance(tools, list) else "?"
         return f"⚡️ 正在并行执行 {cnt} 个任务..." if zh else f"⚡️ Parallel x{cnt}..."
     if name == "SmartDiscovery":
-        hint = e(str(a.get("area", "") or a.get("domain", "")))[:15]
+        hint = e(str(a.get("area", "") or a.get("domain", "")))[:40]
         if zh:
             return f"💫 正在搜索: {hint}..." if hint else "💫 正在智能搜索..."
         return f"💫 Discovering: {hint}..." if hint else "💫 Smart discovery..."
     if name == "AreaDevices":
-        area = e(str(a.get("area", "")))[:15]
+        area = e(str(a.get("area", "")))[:40]
         if zh:
             return f"💫 正在获取{area}的设备..." if area else "💫 正在获取区域设备..."
         return f"💫 Area devices: {area}..." if area else "💫 Listing area devices..."
@@ -96,7 +121,7 @@ def _tool_desc(name: str, a: dict, lang: str) -> str:
         return f"🔗 Automation: {act}..." if act else "🔗 Managing automation..."
     if name == "Script":
         act = e(str(a.get("action", "")))
-        sid = e(str(a.get("script_id", "") or a.get("entity_id", "")))[:20]
+        sid = e(str(a.get("script_id", "") or a.get("entity_id", "")))[:50]
         if zh:
             _SC_ZH = {
                 "list": "列举", "get": "查询", "create": "创建",
@@ -121,19 +146,19 @@ def _tool_desc(name: str, a: dict, lang: str) -> str:
             return f"💫 正在列举 {d} 服务..." if d else "💫 正在列举可用服务..."
         return f"💫 Services: {d}..." if d else "💫 Listing services..."
     if name == "ScriptExecute":
-        sid = e(str(a.get("script_id", "")))[:20]
+        sid = e(str(a.get("script_id", "")))[:50]
         if zh:
             return f"🔗 正在执行脚本: {sid}..." if sid else "🔗 正在执行脚本..."
         return f"🔗 Running script: {sid}..." if sid else "🔗 Running script..."
     if name == "Notify":
-        t = e(str(a.get("target", "")))[:20]
+        t = e(str(a.get("target", "")))[:50]
         if zh:
             return f"✉️ 正在发送通知: {t}..." if t else "✉️ 正在发送通知..."
         return f"✉️ Sending notification: {t}..." if t else "✉️ Sending notification..."
     if name == "ConfigEntries":
         act = str(a.get("action", "")).strip()
         params = a.get("params", {}) if isinstance(a.get("params"), dict) else {}
-        handler = e(str(params.get("handler", "")))[:15]
+        handler = e(str(params.get("handler", "")))[:40]
         _CE_ZH = {
             "config_entries/flow/init": f"正在安装集成 {handler}" if handler else "正在初始化安装流程",
             "config_entries/flow/configure": "正在提交配置",
@@ -194,19 +219,19 @@ def _tool_desc(name: str, a: dict, lang: str) -> str:
     if name == "GetConversationHistory":
         return "💫 正在获取对话历史..." if zh else "💫 Loading conversation history..."
     if name == "InstallSkill":
-        n = e(str(a.get("name", "")))[:20]
+        n = e(str(a.get("name", "")))[:50]
         if zh:
             return f"📦 正在安装技能: {n}..." if n else "📦 正在安装技能..."
         return f"📦 Installing skill: {n}..." if n else "📦 Installing skill..."
     if name == "ListInstalledSkills":
         return "📦 正在列举已安装技能..." if zh else "📦 Listing installed skills..."
     if name == "GetSkillIndex":
-        kw = e(str(a.get("keyword", "")))[:20]
+        kw = e(str(a.get("keyword", "")))[:50]
         if zh:
             return f"💫 正在检索技能: {kw}..." if kw else "💫 正在列举技能索引..."
         return f"💫 Skill index: {kw}..." if kw else "💫 Listing skill index..."
     if name == "GetInstalledSkill":
-        n = e(str(a.get("name", "")))[:20]
+        n = e(str(a.get("name", "")))[:50]
         if zh:
             return f"📦 正在读取技能: {n}..." if n else "📦 正在读取技能..."
         return f"📦 Reading skill: {n}..." if n else "📦 Reading skill..."
@@ -222,12 +247,12 @@ def _tool_desc(name: str, a: dict, lang: str) -> str:
     if name == "ListWorkspaceDocs":
         return "💫 正在列举工作区文档..." if zh else "💫 Listing workspace docs..."
     if name == "GetWorkspaceDoc":
-        n = e(str(a.get("name", "")))[:20]
+        n = e(str(a.get("name", "")))[:50]
         if zh:
             return f"💫 正在读取文档: {n}..." if n else "💫 正在读取文档..."
         return f"💫 Reading doc: {n}..." if n else "💫 Reading document..."
     if name == "SetWorkspaceDoc":
-        n = e(str(a.get("name", "")))[:20]
+        n = e(str(a.get("name", "")))[:50]
         if zh:
             return f"🔗 正在写入文档: {n}..." if n else "🔗 正在写入文档..."
         return f"🔗 Writing doc: {n}..." if n else "🔗 Writing document..."
@@ -249,14 +274,14 @@ def _tool_desc(name: str, a: dict, lang: str) -> str:
     if name == "GetSystemIndex":
         return "💫 正在获取系统概况..." if zh else "💫 Loading system index..."
     if name == "SetConversationState":
-        reason = e(str(a.get("reason", "")))[:20]
+        reason = e(str(a.get("reason", "")))[:50]
         if zh:
             return f"🔗 准备反馈中: {reason}..." if reason else "🔗 准备对话状态..."
         return f"🔗 Setting state: {reason}..." if reason else "🔗 Setting conversation state..."
     if name == "AgentHandoff":
         raw_target = str(a.get("agent_id", "")).strip()
-        target = e(raw_target.replace("conversation.", ""))[:15]
-        q = e(str(a.get("question", "")))[:20]
+        target = e(raw_target.replace("conversation.", ""))[:40]
+        q = e(str(a.get("question", "")))[:50]
         intent = str(a.get("intent", "consult"))
         verb_zh = {"consult": "请教", "request": "委托", "review": "请审阅"}.get(intent, "请教")
         verb_en = {"consult": "Asking", "request": "Delegating to", "review": "Review by"}.get(intent, "Asking")
@@ -266,8 +291,8 @@ def _tool_desc(name: str, a: dict, lang: str) -> str:
         who = target or "peer AI"
         return f"🤝 {verb_en} {who}: {q}..." if q else f"🤝 {verb_en} {who}..."
     if name == "NextAgentHandoff":
-        q = e(str(a.get("question", "")))[:20]
-        peer = e(str(a.get("agent_name", "")))[:15] or ("下一个 AI" if zh else "next AI")
+        q = e(str(a.get("question", "")))[:50]
+        peer = e(str(a.get("agent_name", "")))[:40] or ("下一个 AI" if zh else "next AI")
         if zh:
             return f"🤝 交棒给 {peer}: {q}..." if q else f"🤝 交棒给 {peer}..."
         return f"🤝 Handing off to {peer}: {q}..." if q else f"🤝 Handing off to {peer}..."
@@ -284,12 +309,12 @@ def _tool_desc(name: str, a: dict, lang: str) -> str:
         return f"💫 Help: {d}..." if d else "💫 Service help..."
     if name == "ConfigFile":
         act = e(str(a.get("action", "")))
-        p = e(str(a.get("path", "")))[:20]
+        p = e(str(a.get("path", "")))[:50]
         if zh:
             return f"🔗 配置文件: {act} {p}..." if act else "🔗 正在操作配置文件..."
         return f"🔗 Config: {act} {p}..." if act else "🔗 Config file..."
     if name == "DeleteSkill":
-        n = e(str(a.get("name", "")))[:20]
+        n = e(str(a.get("name", "")))[:50]
         if zh:
             return f"🔗 正在删除技能: {n}..." if n else "🔗 正在删除技能..."
         return f"🔗 Deleting skill: {n}..." if n else "🔗 Deleting skill..."
@@ -313,7 +338,7 @@ def _tool_desc(name: str, a: dict, lang: str) -> str:
         return "🔗 正在应用提案..." if zh else "🔗 Applying proposal..."
     if name == "IntentCall":
         act = e(str(a.get("action", "")))
-        it = e(str(a.get("intent_type", "")))[:20]
+        it = e(str(a.get("intent_type", "")))[:50]
         if zh:
             if act == "list":
                 return "💫 正在列举意图处理器..."
@@ -426,3 +451,27 @@ def _short_hint(args: dict) -> str:
             v = _esc(v)
             return v[:20] if len(v) <= 20 else v[:17] + "..."
     return ""
+
+
+def _args_hint(args: dict | None) -> str:
+    if not args:
+        return ""
+    parts: list[str] = []
+    for k in ("action", "entity_id", "entity_ids", "domain", "service",
+              "query", "name", "area", "path", "url", "script_id",
+              "camera_entity", "target", "intent_type", "registry",
+              "keyword", "codes", "reason", "agent_id", "question"):
+        v = args.get(k)
+        if v is None:
+            continue
+        if isinstance(v, list):
+            sv = ",".join(str(i) for i in v[:3])
+            if len(v) > 3:
+                sv += f"+{len(v)-3}"
+            parts.append(f"{k}={sv}")
+        elif isinstance(v, str) and v:
+            sv = _esc(v)
+            if len(sv) > 60:
+                sv = sv[:57] + "..."
+            parts.append(f"{k}={sv}")
+    return " ".join(parts[:4])

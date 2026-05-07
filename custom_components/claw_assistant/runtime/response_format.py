@@ -275,8 +275,9 @@ def _render_ha_frontend_video(url: str, label: str) -> str:
 
 
 def reply_labels(language: str | None) -> dict[str, str]:
+    from .reply_formatter import is_chinese
 
-    if isinstance(language, str) and language.lower().startswith("zh"):
+    if is_chinese(language):
         return {
             "reply": "回复",
             "failed_reply": "失败回复",
@@ -358,6 +359,8 @@ _HR_RE = re.compile(r"^\s*([-*_])\s*\1\s*\1[\s\-*_]*$")
 _TABLE_PIPE_RE = re.compile(r"^\s*\|")
 _TABLE_SEP_RE = re.compile(r"^\|?[\s:]*-[-|:\s]*\|")
 _BLOCKQUOTE_RE = re.compile(r"^>\s")
+_TABLE_HEADER_RE = re.compile(r"^\s*\|(.+\|)\s*$")
+_TABLE_EMPTY_SEP_RE = re.compile(r"^\s*\|[\s|]*\|\s*$")
 
 _INLINE_HEADING_RE = re.compile(r"(?<=[^\s#])(#{1,6}\s+)")
 _INLINE_LIST_RE = re.compile(r"(?<=\S)(- (?:\[.\] )?\S)")
@@ -381,6 +384,10 @@ def _presplit_inline_markdown(text: str) -> str:
             result.append(line)
             continue
         if in_fence:
+            result.append(line)
+            continue
+
+        if _TABLE_PIPE_RE.match(line):
             result.append(line)
             continue
 
@@ -411,9 +418,60 @@ def _presplit_inline_markdown(text: str) -> str:
     return "\n".join(result)
 
 
+def _fix_markdown_tables(text: str) -> str:
+    lines = text.splitlines()
+    out: list[str] = []
+    in_table = False
+    i = 0
+    while i < len(lines):
+        line = lines[i]
+        if in_table:
+            if _TABLE_PIPE_RE.match(line):
+                out.append(line)
+                i += 1
+                continue
+            in_table = False
+            out.append(line)
+            i += 1
+            continue
+        if _TABLE_HEADER_RE.match(line):
+            col_count = len([c for c in line.strip().strip("|").split("|")])
+            out.append(line)
+            if i + 1 < len(lines):
+                next_line = lines[i + 1].strip()
+                if _TABLE_SEP_RE.match(next_line):
+                    out.append(lines[i + 1])
+                    i += 2
+                    in_table = True
+                    continue
+                if _TABLE_EMPTY_SEP_RE.match(next_line) or (
+                    next_line.replace("|", "").replace(" ", "") == ""
+                    and "|" in next_line
+                ):
+                    out.append("| " + " | ".join(["---"] * col_count) + " |")
+                    i += 2
+                    in_table = True
+                    continue
+                if _TABLE_PIPE_RE.match(next_line):
+                    out.append("| " + " | ".join(["---"] * col_count) + " |")
+                    i += 1
+                    in_table = True
+                    continue
+            else:
+                out.append("| " + " | ".join(["---"] * col_count) + " |")
+                i += 1
+                continue
+            i += 1
+            continue
+        out.append(line)
+        i += 1
+    return "\n".join(out)
+
+
 def _normalize_markdown(text: str) -> str:
     if len(text) > _LARGE_TEXT_THRESHOLD:
         return text
+    text = _fix_markdown_tables(text)
     text = _presplit_inline_markdown(text)
     lines = text.splitlines()
     out: list[str] = []
@@ -796,9 +854,11 @@ def get_response_text(result: Any, *, language: str | None = None) -> str:
 
     if not result or not result.response or not result.response.speech:
         return ""
+    from .reply_formatter import strip_reply_prefix
     plain = result.response.speech.get("plain", {})
+    raw = plain.get("original_speech", plain.get("speech", ""))
     return sanitize_response_text(
-        plain.get("original_speech", plain.get("speech", "")),
+        strip_reply_prefix(raw),
         language=language or language_of(result),
     )
 
@@ -823,6 +883,7 @@ def apply_agent_response_format(
     response_text: str | None = None,
     previous_result: Any = None,
     search_results: str | None = None,
+    handoff_replies: list[tuple[str, str]] | None = None,
 ) -> Any:
 
     if not result or not result.response or not result.response.speech:
@@ -869,25 +930,31 @@ def apply_agent_response_format(
             response_text, _stashed_html, _prefix_a
         )
         response_text = _normalize_ha_frontend_html_media(response_text)
-    plain["original_speech"] = response_text
     plain["agent_name"] = agent_name
     plain["agent_id"] = agent_id
     labels = reply_labels(frontend_lang or language_of(result))
     reply = labels["reply"]
+
+    from .reply_formatter import strip_reply_prefix, format_reply_speech, format_detailed_speech
+    response_text = strip_reply_prefix(response_text)
+    plain["original_speech"] = response_text
 
     if conversation_mode == CONVERSATION_MODE_NO_NAME:
         plain["speech"] = response_text
         return result
 
     if conversation_mode == CONVERSATION_MODE_ADD_NAME:
-        plain["speech"] = f"({agent_name}) {reply}: {response_text}"
+        plain["speech"] = format_reply_speech(agent_name, response_text, frontend_lang or language_of(result))
         return result
 
     if conversation_mode == CONVERSATION_MODE_DETAILED:
         failed_reply = labels["failed_reply"]
         then_word = labels["then"]
         web_summary_label = labels["web_search_summary"]
+        lang = frontend_lang or language_of(result)
 
+        prev_name: str | None = None
+        prev_text: str | None = None
         if (
             previous_result is not None
             and previous_result.response.response_type != "action_done"
@@ -895,35 +962,25 @@ def apply_agent_response_format(
             prev_plain = previous_result.response.speech.get("plain", {})
             prev_name = prev_plain.get("agent_name", "UNKNOWN")
             prev_text = prev_plain.get("original_speech", prev_plain.get("speech", ""))
-            if search_results:
-                search_summary = (
-                    search_results[:500] + "..."
-                    if len(search_results) > 500
-                    else search_results
-                )
-                plain["speech"] = (
-                    f"{web_summary_label}:\n{search_summary}\n\n"
-                    f"({prev_name}) {failed_reply}: {prev_text}\n"
-                    f"{then_word} ({agent_name}) {reply}: {response_text}"
-                )
-            else:
-                plain["speech"] = (
-                    f"({prev_name}) {failed_reply}: {prev_text}\n"
-                    f"{then_word} ({agent_name}) {reply}: {response_text}"
-                )
-            return result
 
+        trunc_search = None
         if search_results:
-            search_summary = (
-                search_results[:500] + "..." if len(search_results) > 500 else search_results
-            )
-            plain["speech"] = (
-                f"{web_summary_label}:\n{search_summary}\n\n"
-                f"({agent_name}) {reply}: {response_text}"
-            )
+            trunc_search = search_results[:500] + "..." if len(search_results) > 500 else search_results
             plain["search_results"] = search_results
-            return result
 
-        plain["speech"] = f"({agent_name}) {reply}: {response_text}"
+        plain["speech"] = format_detailed_speech(
+            agent_name=agent_name,
+            response_text=response_text,
+            language=lang,
+            prev_agent_name=prev_name,
+            prev_text=prev_text,
+            prev_label_word=failed_reply if prev_name else None,
+            search_summary=trunc_search,
+            search_label=web_summary_label if trunc_search else None,
+            then_word=then_word if prev_name else None,
+            handoff_replies=handoff_replies,
+        )
+        return result
 
+    plain["speech"] = format_reply_speech(agent_name, response_text, frontend_lang or language_of(result))
     return result

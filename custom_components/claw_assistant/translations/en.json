@@ -3,9 +3,9 @@
   "selector": {
     "conversation_mode": {
       "options": {
-        "no_name": "No name",
-        "add_name": "Show AI name",
-        "detailed": "Full display"
+        "no_name": "Simple",
+        "add_name": "Show source",
+        "detailed": "Multi-model"
       }
     }
   },
@@ -80,7 +80,7 @@
           "enable_web_search": "Web Search"
         },
         "data_description": {
-          "conversation_mode": "• **No name** — Minimal mode, reply content only\n• **Show AI name** — Recommended, prefixes reply with the responding AI's name\n• **Full display** — Shows the complete process including tool calls and details",
+          "conversation_mode": "• **Simple** — Show only the final reply, no AI attribution\n• **Show source** — Recommended. Prefixes each reply with the responding AI's name, e.g. (deepseek) Reply:\n• **Multi-model** — All configured AIs answer the same question simultaneously, each labeled and separated",
           "enable_web_search": "When enabled, the AI can automatically supplement replies with online search results"
         }
       },
@@ -145,7 +145,11 @@
         "title": "Edit BOOTSTRAP.md",
         "description": "**First-run bootstrap**\nOnly active on first launch. Guides the AI through initial setup (collecting user name, preferences, etc.).\nAutomatically deactivates once IDENTITY and USER are complete.\n\nMarkdown format. Saved immediately.",
         "data": {
+          "bootstrap_active": "Enable Bootstrap",
           "content": "Markdown Editor"
+        },
+        "data_description": {
+          "bootstrap_active": "When enabled, the AI will re-run the bootstrap flow on the next conversation; when disabled, bootstrap is skipped"
         }
       },
       "ws_heartbeat": {
