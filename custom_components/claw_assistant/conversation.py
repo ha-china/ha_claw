@@ -58,16 +58,11 @@ class FallbackConversationAgent(
         self._attr_name = None
         self._attr_unique_id = entry.entry_id
         self._attr_supported_features = conversation.ConversationEntityFeature.CONTROL
-        import json, pathlib
-        _manifest = json.loads(
-            (pathlib.Path(__file__).parent / "manifest.json").read_text()
-        )
-        _ver = _manifest.get("version", "")
         self._attr_device_info = DeviceInfo(
             identifiers={(DOMAIN, entry.entry_id)},
             name=entry.title or DOMAIN,
             manufacturer="Claw Assistant",
-            model=f"AI Agent v{_ver}" if _ver else "AI Agent",
+            model="AI Agent",
         )
         self._last_active = datetime.now(UTC)
 
