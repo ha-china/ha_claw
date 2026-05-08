@@ -33,6 +33,7 @@ _PATCH_KEY = "_ha_crack_patched"
 _TOOL_TRACK_KEY = "_ha_crack_tool_tracking"
 _ASSIST_PROMPT_ORIGINAL_KEY = "_ha_crack_original_assist_api_prompt"
 _ASSIST_TOOLS_ORIGINAL_KEY = "_ha_crack_original_assist_api_tools"
+_ASSIST_INSTANCE_ORIGINAL_KEY = "_ha_crack_original_async_get_api_instance"
 _TOOL_TRACK_ORIGINAL_KEY = "_ha_crack_original_tool_tracking"
 _CHATLOG_TOOLS_ORIGINAL_KEY = "_ha_crack_original_chatlog_tools"
 _API_STATE: dict[str, Callable[[], None] | None] = {"unregister_api": None}
@@ -555,6 +556,9 @@ def _patch_assist_api_prompt(hass: HomeAssistant) -> None:
 
     original_get_api_prompt = llm_module.AssistAPI._async_get_api_prompt
     original_get_tools = llm_module.AssistAPI._async_get_tools
+    original_get_api_instance = llm_module.AssistAPI.async_get_api_instance
+    APIInstance = llm_module.APIInstance
+    selector_serializer = llm_module.selector_serializer
 
     @callback
     def patched_get_api_prompt(self, llm_context, exposed_entities):
@@ -574,10 +578,23 @@ def _patch_assist_api_prompt(hass: HomeAssistant) -> None:
         )
         return final_tools
 
+    async def patched_get_api_instance(self, llm_context):
+        # claw kernel ignores exposed_entities entirely; skip the expensive
+        # _get_exposed_entities full-state walk that blocks the event loop.
+        return APIInstance(
+            api=self,
+            api_prompt=self._async_get_api_prompt(llm_context, None),
+            llm_context=llm_context,
+            tools=self._async_get_tools(llm_context, None),
+            custom_serializer=selector_serializer,
+        )
+
     llm_module.AssistAPI._async_get_api_prompt = patched_get_api_prompt
     llm_module.AssistAPI._async_get_tools = patched_get_tools
+    llm_module.AssistAPI.async_get_api_instance = patched_get_api_instance
     setattr(llm_module.AssistAPI, _ASSIST_PROMPT_ORIGINAL_KEY, original_get_api_prompt)
     setattr(llm_module.AssistAPI, _ASSIST_TOOLS_ORIGINAL_KEY, original_get_tools)
+    setattr(llm_module.AssistAPI, _ASSIST_INSTANCE_ORIGINAL_KEY, original_get_api_instance)
     setattr(llm_module, _PATCH_KEY, True)
     LOGGER.debug("AssistAPI switched to the centralized internal LLM kernel")
 
@@ -590,11 +607,17 @@ def _unpatch_assist_api_prompt() -> None:
         llm_module.AssistAPI, _ASSIST_PROMPT_ORIGINAL_KEY, None
     )
     original_get_tools = getattr(llm_module.AssistAPI, _ASSIST_TOOLS_ORIGINAL_KEY, None)
+    original_get_api_instance = getattr(
+        llm_module.AssistAPI, _ASSIST_INSTANCE_ORIGINAL_KEY, None
+    )
     if original_get_api_prompt is None or original_get_tools is None:
         return
 
     llm_module.AssistAPI._async_get_api_prompt = original_get_api_prompt
     llm_module.AssistAPI._async_get_tools = original_get_tools
+    if original_get_api_instance is not None:
+        llm_module.AssistAPI.async_get_api_instance = original_get_api_instance
+        delattr(llm_module.AssistAPI, _ASSIST_INSTANCE_ORIGINAL_KEY)
     delattr(llm_module.AssistAPI, _ASSIST_PROMPT_ORIGINAL_KEY)
     delattr(llm_module.AssistAPI, _ASSIST_TOOLS_ORIGINAL_KEY)
     if hasattr(llm_module, _PATCH_KEY):

@@ -26,6 +26,8 @@ LOGGER = logging.getLogger(__name__)
 
 _LOCAL_INTENTS_PATCHED = "_ha_crack_intents_patched"
 _LOCAL_INTENTS_ORIGINAL = "_ha_crack_original_async_handle_intents"
+_INTENTS_DOWNGRADE_DONE = "_ha_crack_intents_downgrade_done"
+_INTENTS_DOWNGRADE_TARGET = "home-assistant-intents==2026.3.3"
 _RESULT_PATCHED = "_ha_crack_result_patched"
 _RESULT_ORIGINAL = "_ha_crack_original_result_extraction"
 _STREAM_CLOSURE_PATCHED = "_ha_crack_stream_closure_patched"
@@ -136,6 +138,69 @@ def unpatch_local_intents() -> None:
     LOGGER.debug("Restored async_handle_intents after claw_assistant unload")
 
 
+async def async_downgrade_intents_package(hass: HomeAssistant) -> None:
+    # Pin home-assistant-intents to 2026.3.3 on disk. Newer versions ship a
+    # bloated zh-CN.json (~533 sentence templates) that explode into ~76k
+    # regex matches per recognize call and stall the event loop.
+    # get_intents() reads the JSON from disk on every call, so a force-
+    # reinstall takes effect immediately without restarting the process.
+    import os
+    import sys
+
+    if os.environ.get(_INTENTS_DOWNGRADE_DONE) == "1":
+        return
+
+    def _check_current_version() -> str | None:
+        try:
+            from importlib.metadata import version
+            return version("home-assistant-intents")
+        except Exception:  # noqa: BLE001
+            return None
+
+    current = await hass.async_add_executor_job(_check_current_version)
+    if current == "2026.3.3":
+        os.environ[_INTENTS_DOWNGRADE_DONE] = "1"
+        LOGGER.debug("home-assistant-intents already at 2026.3.3")
+        return
+
+    def _pip_install() -> tuple[int, str, str]:
+        import subprocess
+        try:
+            proc = subprocess.run(
+                [
+                    sys.executable, "-m", "pip", "install",
+                    "--quiet", "--no-deps", "--force-reinstall",
+                    _INTENTS_DOWNGRADE_TARGET,
+                ],
+                capture_output=True, text=True, timeout=120,
+            )
+            return proc.returncode, proc.stdout, proc.stderr
+        except Exception as exc:  # noqa: BLE001
+            return -1, "", str(exc)
+
+    LOGGER.info("Downgrading home-assistant-intents %s -> 2026.3.3", current)
+    code, _stdout, stderr = await hass.async_add_executor_job(_pip_install)
+    if code != 0:
+        LOGGER.warning("home-assistant-intents downgrade failed (rc=%s): %s", code, stderr.strip())
+        return
+
+    os.environ[_INTENTS_DOWNGRADE_DONE] = "1"
+    LOGGER.info("home-assistant-intents downgraded to 2026.3.3")
+
+    # Clear default_agent's cached zh-* intents so next recognize re-reads disk.
+    try:
+        for entry in list(hass.data.values()):
+            if not isinstance(entry, dict):
+                continue
+            for value in list(entry.values()):
+                cache = getattr(value, "_lang_intents", None)
+                if isinstance(cache, dict):
+                    for key in [k for k in cache if isinstance(k, str) and k.lower().startswith("zh")]:
+                        cache.pop(key, None)
+    except Exception:  # noqa: BLE001
+        LOGGER.debug("Skipped clearing default_agent zh cache", exc_info=True)
+
+
 def patch_chat_log_result_extraction(hass: HomeAssistant) -> None:
 
     from homeassistant.components import conversation as conv_module
@@ -148,7 +213,11 @@ def patch_chat_log_result_extraction(hass: HomeAssistant) -> None:
 
     @callback
     def patched_async_get_result_from_chat_log(user_input, chat_log):
-        synthesized_content = build_synthesized_assistant_from_chat_log(chat_log)
+        synthesized_content = build_synthesized_assistant_from_chat_log(
+            chat_log,
+            hass=hass,
+            language=getattr(user_input, "language", None),
+        )
         if synthesized_content is not None:
             if _chat_log_turn_has_assistant_content(chat_log):
                 return original_async_get_result_from_chat_log(user_input, chat_log)
