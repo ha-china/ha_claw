@@ -598,8 +598,10 @@ async def _emit_frontend_progress(hass: HomeAssistant, chat_log, text: str) -> N
         listener(chat_log, {"role": "assistant"})
         chat_log._claw_progress_active = True
     else:
-        listener(chat_log, {"content": "\n\n"})
+        listener(chat_log, {"content": "\n"})
 
+    if not text.startswith("\n"):
+        text = "\n" + text
     full = text
 
     if not _is_streaming_enabled(hass):
