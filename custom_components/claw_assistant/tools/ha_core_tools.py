@@ -24,6 +24,7 @@ from ..runtime.config_file_store import (
     list_pending_operations,
     stage_config_operation,
 )
+from ..runtime.text_patch import PatchError, apply_patches
 from ..runtime.data_path import output_dir_path
 from ..runtime.im_transport import async_send_im_payload
 
@@ -551,10 +552,17 @@ Available actions:
 - action=list: list a directory
 - action=read: read a file
 - action=stage_write / stage_append / stage_mkdir: stage a non-destructive change
+- action=stage_patch: surgical anchor-based edit of an existing file (PREFERRED over stage_write for modifications)
 - action=stage_delete: stage a file or directory deletion (destructive)
 - action=apply: apply a staged operation
 - action=cancel: cancel a staged operation
 - action=list_pending: list pending operations
+
+PATCH-FIRST RULE: When modifying an existing file, YOU MUST use action=stage_patch
+with anchor-based ops instead of re-reading + stage_write the whole file.
+stage_patch params: patches=[{op, anchor, new_text, occurrence?, regex?, count?}, ...], dry_run=true/false.
+Ops: replace | insert_before | insert_after | delete | prepend | append | create.
+Anchors match against the current file text. Use action=read first to find exact anchors.
 
 Policy (text-driven, NO UI buttons exist; YOU judge the user's intent):
 - write/append/mkdir auto-apply on `apply` (reversible; no consent needed).
@@ -582,6 +590,7 @@ automation edits. Reading these files is always fine."""
                     "stage_write",
                     "stage_append",
                     "stage_mkdir",
+                    "stage_patch",
                     "stage_delete",
                     "apply",
                     "cancel",
@@ -595,6 +604,8 @@ automation edits. Reading these files is always fine."""
             vol.Optional("include_hidden", default=False): bool,
             vol.Optional("user_consent", default=False): bool,
             vol.Optional("consent_quote", default=""): str,
+            vol.Optional("patches", default=[]): list,
+            vol.Optional("dry_run", default=False): bool,
         }
     )
 
@@ -626,6 +637,9 @@ automation edits. Reading these files is always fine."""
                     "count": len(pending),
                     "pending": pending,
                 }
+
+            if action == "stage_patch":
+                return await self._stage_patch(hass, path, tool_input.tool_args)
 
             if action in {"stage_write", "stage_append", "stage_mkdir", "stage_delete"}:
                 stage_action = action.removeprefix("stage_")
@@ -673,6 +687,51 @@ automation edits. Reading these files is always fine."""
             return {"success": False, "error": str(err), "requires_confirmation": True}
         except Exception as err:
             return {"success": False, "error": str(err)}
+
+    async def _stage_patch(self, hass: HomeAssistant, path: str, args: dict) -> JsonObjectType:
+        patches = args.get("patches", [])
+        dry_run = bool(args.get("dry_run", False))
+        if not isinstance(patches, list) or not patches:
+            return {"success": False, "error": "'patches' must be a non-empty list"}
+        if not path:
+            return {"success": False, "error": "'path' is required for stage_patch"}
+
+        read_result = await async_read_config_file(hass, path)
+        if "error" in read_result:
+            return {"success": False, "error": read_result["error"]}
+
+        original = read_result.get("content", "")
+        label = f"config/{path}"
+
+        try:
+            report = apply_patches(original, patches, label=label)
+        except PatchError as err:
+            return {"success": False, "error": str(err), **err.to_dict()}
+
+        if dry_run:
+            return {
+                "success": True,
+                "dry_run": True,
+                "report": report.to_dict(),
+                "preview_after": report.after[:3000],
+            }
+
+        operation = stage_config_operation(
+            hass,
+            action="write",
+            relative_path=path,
+            content=report.after,
+            create_dirs=False,
+        )
+        result = await async_apply_staged_operation(
+            hass, operation["approval_id"], user_consent=False, consent_quote="",
+        )
+        return {
+            "success": True,
+            "message": f"Patched and applied: {path} ({len(report.applied)} ops)",
+            "report": report.to_dict(),
+            **result,
+        }
 
 
 class ValidateServiceTool(llm.Tool):
