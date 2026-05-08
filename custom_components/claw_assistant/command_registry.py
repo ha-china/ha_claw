@@ -74,6 +74,21 @@ CORE_COMMAND_REGISTRY: tuple[CommandSpec, ...] = (
         category="Info",
         aliases=("cmds",),
     ),
+    CommandSpec(
+        name="goal",
+        usage="/goal [<text>|status|pause|resume|clear]",
+        description=(
+            "Set a standing goal. The fallback (备用) agent judges each turn; "
+            "claw_assistant keeps working until the goal is done or you "
+            "/goal pause | /goal clear."
+        ),
+        description_zh=(
+            "设置常驻目标。每轮由\u201c后备 AI\u201d判定是否完成；未完成则 "
+            "自动续跑，直到 /goal pause 或 /goal clear 才停。"
+        ),
+        category="Session",
+        aliases=("goals",),
+    ),
 )
 
 
