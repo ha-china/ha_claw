@@ -103,6 +103,7 @@
         pollInterval = setInterval(() => pollPendingJS(hass), 2000);
         pollPendingJS(hass);
         exposeGlobalAPI();
+        setupGoalContinuationStream(hass);
         setupContinuousConversation(hass);
         setupContextStatusBar(hass);
         setupFileUpload(hass);
@@ -112,6 +113,8 @@
             }
         }, 100);
     }
+
+    function setupGoalContinuationStream() {}
 
     function setupContinuousConversation(hass) {
         if (!hass?.connection) return;
