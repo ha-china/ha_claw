@@ -562,6 +562,33 @@ class ClawUploadView(HomeAssistantView):
 _INTENT_PATCH_KEY = "_claw_original_recognize_intent"
 
 
+def _sanitize_orphaned_tool_results(chat_log) -> None:
+    from homeassistant.components.conversation.chat_log import (
+        AssistantContent,
+        ToolResultContent,
+    )
+
+    content = getattr(chat_log, "content", None)
+    if not content:
+        return
+    call_ids: set[str] = set()
+    for msg in content:
+        if isinstance(msg, AssistantContent) and msg.tool_calls:
+            for tc in msg.tool_calls:
+                cid = getattr(tc, "id", "") or ""
+                if cid:
+                    call_ids.add(cid)
+    orphaned = []
+    for i, msg in enumerate(content):
+        if isinstance(msg, ToolResultContent):
+            if msg.tool_call_id and msg.tool_call_id not in call_ids:
+                orphaned.append(i)
+    if orphaned:
+        for idx in reversed(orphaned):
+            content.pop(idx)
+        _LOGGER.info("Sanitized %d orphaned tool_result(s) before continuation", len(orphaned))
+
+
 def _install_recognize_intent_hook(hass) -> None:
     from homeassistant.components.assist_pipeline import pipeline as pipeline_mod
     from homeassistant.components.assist_pipeline.pipeline import PipelineRun
@@ -653,18 +680,20 @@ def _install_recognize_intent_hook(hass) -> None:
                     try:
                         from homeassistant.components.conversation.chat_log import current_chat_log
                         chat_log = current_chat_log.get()
-                        if chat_log is not None and chat_log.delta_listener:
-                            original_listener = chat_log.delta_listener
+                        if chat_log is not None:
+                            _sanitize_orphaned_tool_results(chat_log)
+                            if chat_log.delta_listener:
+                                original_listener = chat_log.delta_listener
 
-                            def prefixed_listener(inner_chat_log, delta):
-                                if listener_state["pending"] and delta.get("content"):
-                                    delta = dict(delta)
-                                    delta["content"] = "\n\n" + delta["content"]
-                                    listener_state["pending"] = False
-                                original_listener(inner_chat_log, delta)
+                                def prefixed_listener(inner_chat_log, delta):
+                                    if listener_state["pending"] and delta.get("content"):
+                                        delta = dict(delta)
+                                        delta["content"] = "\n\n" + delta["content"]
+                                        listener_state["pending"] = False
+                                    original_listener(inner_chat_log, delta)
 
-                            chat_log.delta_listener = prefixed_listener
-                            restore_listener = (chat_log, original_listener)
+                                chat_log.delta_listener = prefixed_listener
+                                restore_listener = (chat_log, original_listener)
                     except Exception:
                         _LOGGER.debug("pipeline async_converse hook: newline listener wrap failed", exc_info=True)
                     try:
