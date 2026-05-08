@@ -18,7 +18,9 @@ from .adaptive_memory import (
     prioritize_agents,
     should_temporarily_skip_agent,
 )
-from .evolution_review import async_schedule_evolution_review
+from .curator import record_turn_activity
+from .evolution_review import async_schedule_evolution_review, consume_loaded_skills
+from .goals import get_goal_manager
 from .events import fire_ai_response
 from .i18n import t
 from .internal_llm import (
@@ -42,6 +44,7 @@ from .signal_capture import async_capture_passive_signal
 from .state import (
     consume_next_agent_handoff,
     get_conversation_status,
+    get_runtime_store,
     get_task_loop_state,
     get_tool_calls_state,
     get_tool_results_state,
@@ -129,13 +132,44 @@ async def _finalize_completed_response(
     tool_results: list[dict[str, Any]],
     language: str | None,
     original_async_converse,
-) -> str:
+) -> tuple[str, bool, str | None]:
 
     plain = response.speech.get("plain", {}) if isinstance(response.speech, dict) else {}
     raw = plain.get("original_speech", plain.get("speech", ""))
     final_text = sanitize_response_text(raw)
     if not final_text:
-        return ""
+        return "", False, None
+
+    converse_channel = original_async_converse or get_runtime_store(hass).get(
+        "original_async_converse"
+    )
+    verdict_suffix, should_continue, continuation_prompt = await _gate_goal(
+        hass,
+        conversation_id=conversation_id,
+        final_text=final_text,
+        original_async_converse=converse_channel,
+    )
+    LOGGER.info(
+        "goal gate result: suffix=%r continue=%s prompt=%r",
+        verdict_suffix[:80] if verdict_suffix else "", should_continue, bool(continuation_prompt),
+    )
+    pending = get_runtime_store(hass).setdefault("pending_goal_continuations", {})
+    completed = get_runtime_store(hass).setdefault("completed_goal_conversations", set())
+    conv_key = str(conversation_id or "default")
+    if should_continue and continuation_prompt:
+        completed.discard(conv_key)
+        pending[conv_key] = continuation_prompt
+        pending["latest"] = continuation_prompt
+    else:
+        pending.pop(conv_key, None)
+        pending.pop("latest", None)
+        if verdict_suffix:
+            completed.add(conv_key)
+    if verdict_suffix:
+        final_text = f"{final_text}\n\n{verdict_suffix}"
+        from .native_chatlog_bridge import append_final_message, emit_live_content_delta
+        await emit_live_content_delta(agent_id=agent_id, text=f"\n\n{verdict_suffix}")
+        append_final_message(agent_id=agent_id, content=final_text)
 
     plain["speech"] = final_text
     plain["original_speech"] = final_text
@@ -170,9 +204,40 @@ async def _finalize_completed_response(
         language=language,
         agent_id=agent_id,
         original_async_converse=original_async_converse,
+        loaded_skills=consume_loaded_skills(hass, conversation_id),
     )
+    if should_continue and not continuation_prompt:
+        LOGGER.warning(
+            "goal: judge said continue but no continuation_prompt — Ralph loop will stall",
+        )
     get_tool_calls_state(hass).clear()
-    return final_text
+    return final_text, should_continue, continuation_prompt if should_continue else None
+
+
+async def _gate_goal(
+    hass: HomeAssistant,
+    *,
+    conversation_id,
+    final_text: str,
+    original_async_converse,
+) -> tuple[str, bool, str | None]:
+    if not conversation_id:
+        return "", False, None
+    mgr = get_goal_manager(hass, conversation_id)
+    await mgr.async_ensure_loaded()
+    if not mgr.is_active():
+        return "", False, None
+    try:
+        decision = await mgr.async_evaluate_after_turn(final_text)
+    except Exception as err:
+        LOGGER.debug("goal: evaluate_after_turn failed: %s", err, exc_info=True)
+        return "", False, None
+    suffix = (decision.get("message") or "").strip()
+    return (
+        suffix,
+        bool(decision.get("should_continue")),
+        decision.get("continuation_prompt"),
+    )
 
 
 async def _finalize_synthesized_success(
@@ -196,7 +261,7 @@ async def _finalize_synthesized_success(
         response_text=response_text,
     )
     tool_results = _snapshot_tool_results(get_tool_results_state(hass))
-    final_text = await _finalize_completed_response(
+    final_text, goal_continuing, cont_prompt = await _finalize_completed_response(
         hass,
         response=result.response,
         task_loop=task_loop,
@@ -228,9 +293,11 @@ async def _finalize_synthesized_success(
         result.response.response_type = intent.IntentResponseType.ACTION_DONE
     if getattr(result, "response", None) and hasattr(result.response, "error_code"):
         result.response.error_code = None
-    result.continue_conversation = not is_user_done_text(
+
+    result.continue_conversation = goal_continuing or not is_user_done_text(
         user_text, detect_user_ending_intent
     )
+    record_turn_activity(hass)
     set_current_thought(hass, None)
     return result
 
@@ -264,7 +331,7 @@ async def _finalize_agent_success(
         agent_id=agent_id,
         response_text=response_text,
     )
-    final_text = await _finalize_completed_response(
+    final_text, goal_continuing, cont_prompt = await _finalize_completed_response(
         hass,
         response=result.response,
         task_loop=task_loop,
@@ -295,9 +362,11 @@ async def _finalize_agent_success(
     )
     LOGGER.info("AI response: %s...", (final_text or response_text)[:100])
     set_current_thought(hass, None)
-    result.continue_conversation = not is_user_done_text(
+
+    result.continue_conversation = goal_continuing or not is_user_done_text(
         user_text, detect_user_ending_intent
     )
+    record_turn_activity(hass)
     return result
 
 

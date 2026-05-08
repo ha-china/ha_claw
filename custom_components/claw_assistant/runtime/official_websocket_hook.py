@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import base64
 import logging
 import subprocess
@@ -390,6 +391,120 @@ def _guess_mime(filename: str) -> str:
     return _MIME_MAP.get(ext, "application/octet-stream")
 
 
+# Binary signature prefixes; if any of these is the leading bytes of the file
+# we MUST NOT treat it as text — even if a small chunk decodes as valid UTF-8
+# by accident. Covers the common "weird" formats LLMs generate (PDF, zip,
+# images, audio/video, sqlite, …) so the content-sniff fallback below stays
+# safe.
+_BINARY_MAGIC_PREFIXES: tuple[bytes, ...] = (
+    b"\x89PNG\r\n\x1a\n", b"\xff\xd8\xff", b"GIF87a", b"GIF89a",
+    b"BM", b"RIFF", b"%PDF-", b"PK\x03\x04", b"PK\x05\x06", b"PK\x07\x08",
+    b"\x1f\x8b",  # gzip
+    b"7z\xbc\xaf\x27\x1c",  # 7z
+    b"Rar!\x1a\x07",  # rar
+    b"OggS", b"ID3", b"\xff\xfb", b"\xff\xf3", b"\xff\xf2",  # mp3 frames
+    b"\x00\x00\x00\x18ftyp", b"\x00\x00\x00\x1cftyp", b"\x00\x00\x00 ftyp",
+    b"\x1aE\xdf\xa3",  # mkv/webm
+    b"SQLite format 3\x00",
+    b"\x7fELF", b"MZ",  # executables
+    b"\x00asm",  # wasm
+)
+
+
+def _sniff_is_text(head: bytes) -> bool:
+    """Best-effort detection of text content from the first chunk of a file.
+
+    The check is intentionally conservative: a file is treated as text only if
+    (a) it does not start with a known binary magic, (b) it does not contain
+    NUL bytes in the sniffed window, and (c) the chunk decodes cleanly as
+    UTF-8 (or UTF-8 with a BOM). Anything else is served as binary so we
+    never accidentally rewrite a media file's content-type and break the
+    browser's renderer.
+    """
+    if not head:
+        return False
+    for sig in _BINARY_MAGIC_PREFIXES:
+        if head.startswith(sig):
+            return False
+    if b"\x00" in head:
+        return False
+    sample = head[3:] if head.startswith(b"\xef\xbb\xbf") else head
+    try:
+        sample.decode("utf-8")
+    except UnicodeDecodeError:
+        # Allow truncation in the middle of a multi-byte char: retry
+        # without the trailing partial sequence.
+        for cut in range(1, 4):
+            try:
+                sample[:-cut].decode("utf-8")
+                return True
+            except UnicodeDecodeError:
+                continue
+        return False
+    return True
+
+
+class ClawFileView(HomeAssistantView):
+    """Serve files from ``<config>/www/claw_assistant/`` with explicit
+    ``charset=utf-8`` for text content-types.
+
+    HA's built-in ``/local/...`` static handler derives ``Content-Type`` from
+    ``mimetypes.guess_type()`` which returns e.g. ``text/markdown`` *without*
+    a charset parameter. Browsers running in a Chinese locale then default to
+    GBK and render UTF-8 files as mojibake. This view routes claw_assistant
+    output files through HA's HTTP stack with a guaranteed
+    ``Content-Type: text/<x>; charset=utf-8`` header for text extensions.
+    """
+
+    url = "/claw_file/{filename:.+}"
+    name = "claw_assistant:file"
+    requires_auth = False
+
+    async def get(self, request: web.Request, filename: str) -> web.StreamResponse:
+        hass = request.app["hass"]
+        from .data_path import output_dir_path
+        output_dir = output_dir_path(hass).resolve()
+        # Path-traversal guard: resolve and verify the target stays inside
+        # OUTPUT_DIR. ``..`` segments / absolute paths in ``filename`` would
+        # otherwise let any unauthenticated client read arbitrary files.
+        try:
+            target = (output_dir / filename).resolve(strict=False)
+            target.relative_to(output_dir)
+        except (ValueError, OSError):
+            return web.Response(status=403, text="forbidden")
+
+        def _probe() -> tuple[bool, bytes]:
+            # Read just enough to (a) confirm the file exists and (b) feed
+            # the text/binary sniffer below. 8KB is plenty: every common
+            # binary magic fits in the first ~16 bytes and a non-trivial
+            # UTF-8 truncation is impossible inside 8KB of valid text.
+            try:
+                if not target.is_file():
+                    return False, b""
+                with target.open("rb") as fh:
+                    return True, fh.read(8192)
+            except OSError:
+                return False, b""
+
+        is_file, head = await hass.async_add_executor_job(_probe)
+        if not is_file:
+            return web.Response(status=404, text="not found")
+
+        mime = _guess_mime(target.name)
+        if _sniff_is_text(head):
+            # Treat the file as UTF-8 text regardless of extension — covers
+            # the long tail of "weird" formats the AI invents (.tex, .toml,
+            # .lua, made-up extensions, no extension at all, …) without
+            # forcing us to maintain a hand-curated allow-list.
+            base = mime if mime.startswith("text/") else "text/plain"
+            content_type = f"{base}; charset=utf-8"
+        else:
+            content_type = mime
+        return web.FileResponse(
+            target, headers={"Content-Type": content_type}
+        )
+
+
 class ClawUploadView(HomeAssistantView):
     url = "/api/claw_assistant/upload"
     name = "api:claw_assistant:upload"
@@ -444,6 +559,172 @@ class ClawUploadView(HomeAssistantView):
         })
 
 
+_INTENT_PATCH_KEY = "_claw_original_recognize_intent"
+
+
+def _install_recognize_intent_hook(hass) -> None:
+    from homeassistant.components.assist_pipeline import pipeline as pipeline_mod
+    from homeassistant.components.assist_pipeline.pipeline import PipelineRun
+    from .goals import get_goal_manager
+    from .state import get_runtime_store
+
+    if hass.data.get(_INTENT_PATCH_KEY):
+        return
+
+    _original_recognize = PipelineRun.recognize_intent
+
+    async def _hooked_recognize_intent(self, intent_input, conversation_id, conversation_extra_system_prompt):
+        original_converse = pipeline_mod.conversation.async_converse
+        flag_key = f"_claw_pipeline_converse_cont_{conversation_id}"
+
+        async def _hooked_converse(*args, **kwargs):
+            active_conversation_id = kwargs.get("conversation_id") or conversation_id
+            _LOGGER.info(
+                "pipeline async_converse hook: enter conv=%s text=%s",
+                active_conversation_id, str(kwargs.get("text", ""))[:80],
+            )
+            result = await original_converse(*args, **kwargs)
+            _LOGGER.info(
+                "pipeline async_converse hook: first return conv=%s continue=%s",
+                active_conversation_id, getattr(result, "continue_conversation", None),
+            )
+            if self.hass.data.get(flag_key):
+                _LOGGER.info("pipeline async_converse hook: recursive call skipped conv=%s", active_conversation_id)
+                return result
+            self.hass.data[flag_key] = True
+            try:
+                for _ci in range(50):
+                    active_conversation_id = kwargs.get("conversation_id") or conversation_id
+                    runtime_store = get_runtime_store(self.hass)
+                    completed = runtime_store.get("completed_goal_conversations", set())
+                    if (
+                        str(active_conversation_id) in completed
+                        or str(conversation_id) in completed
+                        or "default" in completed
+                    ):
+                        _LOGGER.info(
+                            "pipeline async_converse hook: completed goal, stop conv=%s",
+                            active_conversation_id,
+                        )
+                        break
+                    pending = runtime_store.get("pending_goal_continuations", {})
+                    prompt = (
+                        pending.pop(str(active_conversation_id), None)
+                        or pending.pop(str(conversation_id), None)
+                        or pending.pop("latest", None)
+                    )
+                    goal_conversation_id = active_conversation_id
+                    mgr = get_goal_manager(self.hass, goal_conversation_id)
+                    await mgr.async_ensure_loaded()
+                    active = bool(prompt) or mgr.is_active()
+                    if not active and goal_conversation_id != conversation_id:
+                        mgr = get_goal_manager(self.hass, conversation_id)
+                        await mgr.async_ensure_loaded()
+                        active = mgr.is_active()
+                        goal_conversation_id = conversation_id
+                    if not active and goal_conversation_id != "default":
+                        mgr = get_goal_manager(self.hass, "default")
+                        await mgr.async_ensure_loaded()
+                        active = mgr.is_active()
+                        goal_conversation_id = "default"
+                    _LOGGER.info(
+                        "pipeline async_converse hook: loop=%d active=%s conv=%s goal_conv=%s",
+                        _ci, active, active_conversation_id, goal_conversation_id,
+                    )
+                    if not active:
+                        break
+                    if not prompt:
+                        prompt = mgr.next_continuation_prompt()
+                        if not prompt:
+                            _LOGGER.warning(
+                                "pipeline async_converse hook: no continuation prompt conv=%s",
+                                goal_conversation_id,
+                            )
+                            break
+                    _LOGGER.info(
+                        "pipeline async_converse hook: continuation turn %d for %s prompt=%s",
+                        _ci, active_conversation_id, prompt[:120],
+                    )
+                    next_kwargs = dict(kwargs)
+                    next_kwargs["text"] = prompt
+                    next_kwargs["conversation_id"] = active_conversation_id
+                    restore_listener = None
+                    listener_state = {"pending": True}
+                    try:
+                        from homeassistant.components.conversation.chat_log import current_chat_log
+                        chat_log = current_chat_log.get()
+                        if chat_log is not None and chat_log.delta_listener:
+                            original_listener = chat_log.delta_listener
+
+                            def prefixed_listener(inner_chat_log, delta):
+                                if listener_state["pending"] and delta.get("content"):
+                                    delta = dict(delta)
+                                    delta["content"] = "\n\n" + delta["content"]
+                                    listener_state["pending"] = False
+                                original_listener(inner_chat_log, delta)
+
+                            chat_log.delta_listener = prefixed_listener
+                            restore_listener = (chat_log, original_listener)
+                    except Exception:
+                        _LOGGER.debug("pipeline async_converse hook: newline listener wrap failed", exc_info=True)
+                    try:
+                        result = await asyncio.wait_for(
+                            original_converse(*args, **next_kwargs),
+                            timeout=180,
+                        )
+                    except TimeoutError:
+                        _LOGGER.warning(
+                            "pipeline async_converse hook: continuation timeout %d conv=%s",
+                            _ci, active_conversation_id,
+                        )
+                        break
+                    finally:
+                        await asyncio.sleep(0.2)
+                        if restore_listener is not None:
+                            restore_listener[0].delta_listener = restore_listener[1]
+                    plain = result.response.speech.get("plain", {}) if getattr(result.response, "speech", None) else {}
+                    speech_text = str(plain.get("speech", "") or "")
+                    if speech_text.strip() and listener_state["pending"]:
+                        try:
+                            from .native_chatlog_bridge import emit_live_content_delta
+                            await emit_live_content_delta(
+                                agent_id=str(next_kwargs.get("agent_id") or "assistant"),
+                                text="\n\n" + speech_text,
+                            )
+                        except Exception:
+                            _LOGGER.debug("pipeline async_converse hook: final speech delta failed", exc_info=True)
+                    _LOGGER.info(
+                        "pipeline async_converse hook: continuation return %d continue=%s speech=%s",
+                        _ci, getattr(result, "continue_conversation", None),
+                        speech_text[:120],
+                    )
+            finally:
+                self.hass.data.pop(flag_key, None)
+                _LOGGER.info("pipeline async_converse hook: exit conv=%s", conversation_id)
+            return result
+
+        pipeline_mod.conversation.async_converse = _hooked_converse
+        try:
+            return await _original_recognize(
+                self, intent_input, conversation_id, conversation_extra_system_prompt,
+            )
+        finally:
+            pipeline_mod.conversation.async_converse = original_converse
+
+    PipelineRun.recognize_intent = _hooked_recognize_intent
+    hass.data[_INTENT_PATCH_KEY] = _original_recognize
+    _LOGGER.info("Installed recognize_intent goal-continuation hook on PipelineRun")
+
+
+def _uninstall_recognize_intent_hook(hass) -> None:
+    _original = hass.data.pop(_INTENT_PATCH_KEY, None)
+    if _original is None:
+        return
+    from homeassistant.components.assist_pipeline.pipeline import PipelineRun
+    PipelineRun.recognize_intent = _original
+    _LOGGER.info("Uninstalled recognize_intent goal-continuation hook")
+
+
 def install_official_websocket_process_hook(hass) -> None:
 
     domain_data = hass.data.setdefault("claw_assistant", {})
@@ -451,6 +732,7 @@ def install_official_websocket_process_hook(hass) -> None:
         return
     handlers = hass.data.setdefault("websocket_api", {})
     domain_data[_PATCH_KEY] = handlers.get("conversation/process", _NO_HANDLER)
+    _install_recognize_intent_hook(hass)
     websocket_api.async_register_command(hass, streaming_websocket_process)
     websocket_api.async_register_command(hass, websocket_get_pending_js)
     websocket_api.async_register_command(hass, websocket_report_state)
@@ -458,10 +740,12 @@ def install_official_websocket_process_hook(hass) -> None:
     websocket_api.async_register_command(hass, websocket_get_context_status)
     websocket_api.async_register_command(hass, websocket_upload_file)
     hass.http.register_view(ClawUploadView())
+    hass.http.register_view(ClawFileView())
 
 
 def uninstall_official_websocket_process_hook(hass) -> None:
 
+    _uninstall_recognize_intent_hook(hass)
     domain_data = hass.data.setdefault("claw_assistant", {})
     original_handler = domain_data.pop(_PATCH_KEY, _UNSET)
     if original_handler is _UNSET:
