@@ -245,9 +245,16 @@ async def emit_live_content_delta(*, agent_id: str, text: str) -> bool:
         return False
     if chat_log.delta_listener:
         chat_log.delta_listener(chat_log, {"role": "assistant"})
+        chunk = ""
         for char in text:
-            chat_log.delta_listener(chat_log, {"content": char})
-            await asyncio.sleep(0.02)
+            chunk += char
+            if len(chunk) < 6 and char not in " \n，。！？,.!?;；:：":
+                continue
+            chat_log.delta_listener(chat_log, {"content": chunk})
+            chunk = ""
+            await asyncio.sleep(0.01)
+        if chunk:
+            chat_log.delta_listener(chat_log, {"content": chunk})
     return True
 
 

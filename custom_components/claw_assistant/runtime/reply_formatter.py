@@ -1,9 +1,3 @@
-"""Unified speech prefix handling.
-
-Single source of truth for adding/stripping agent reply prefixes.
-Every callsite that touches plain["speech"] must go through these helpers.
-"""
-
 from __future__ import annotations
 
 import re
@@ -16,7 +10,6 @@ _AGENT_REPLY_PREFIX_RE = re.compile(
 
 
 def strip_reply_prefix(text: str) -> str:
-    """Remove all nested (xxx) Reply: prefixes, return pure content."""
     while True:
         m = _AGENT_REPLY_PREFIX_RE.match(text)
         if not m:
@@ -40,7 +33,6 @@ def format_reply_speech(
     text: str,
     language: str | None = None,
 ) -> str:
-    """Build '(agent_name) Reply: text', stripping any existing prefix first."""
     clean = strip_reply_prefix(text)
     label = reply_label(language)
     return "({name}) {label}: {content}".format(
@@ -53,7 +45,6 @@ def format_labeled_speech(
     text: str,
     label_word: str,
 ) -> str:
-    """Build '(agent_name) label_word: text' with prefix stripping."""
     clean = strip_reply_prefix(text)
     return "({name}) {label}: {content}".format(
         name=agent_name, label=label_word, content=clean,
@@ -73,7 +64,6 @@ def format_detailed_speech(
     then_word: str | None = None,
     handoff_replies: list[tuple[str, str]] | None = None,
 ) -> str:
-    """Build DETAILED mode speech with all sections joined by separators."""
     label = reply_label(language)
     clean_response = strip_reply_prefix(response_text)
     sep = "\n\n\u200b---\n\n"
@@ -105,7 +95,6 @@ def stamp_plain(
     language: str | None = None,
     add_prefix: bool = True,
 ) -> None:
-    """One-stop helper: set original_speech, agent_name, agent_id, speech."""
     clean = strip_reply_prefix(text)
     plain["original_speech"] = clean
     plain["agent_name"] = agent_name

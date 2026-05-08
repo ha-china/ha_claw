@@ -34,13 +34,13 @@ _HA_RICH_MEDIA_TAG_RE = re.compile(r"\[(IMAGE|GIF|VIDEO|FILE):(.+?)\]")
 # (``/local/claw_assistant/...`` — what ``output_url()`` returns) are accepted
 # so the renderer no longer depends on the AI sticking to a single style.
 _HA_LOCAL_PATH_RE = re.compile(
-    r"(?<![\w/])((?:/config/www|/local)/claw_assistant/[^\s<>\"\[\]()]+)"
+    r"(?<![\w/(])((?:/config/www|/local)/claw_assistant/[^\s<>\"\[\]()]+)"
 )
 # Full http(s) URL pointing at a frontend-served claw_assistant media file
 # (e.g. ``http://192.168.x.x:8123/local/claw_assistant/foo.mp4`` produced by
 # ``absolute_output_url``). Captured in group(1).
 _HA_LOCAL_FULL_URL_RE = re.compile(
-    r"(https?://[^\s<>\"\[\]()]*?/local/claw_assistant/[^\s<>\"\[\]()]+)",
+    r"(?<![\w/(])(https?://[^\s<>\"\[\]()]*?/local/claw_assistant/[^\s<>\"\[\]()]+)",
     re.IGNORECASE,
 )
 _HTML_IMG_TAG_RE = re.compile(r"<img\b[^>]*>", re.IGNORECASE)
@@ -228,7 +228,7 @@ def _expand_ha_frontend_local_paths(text: str) -> str:
         if suffix in _VIDEO_EXTENSIONS:
             return _render_ha_frontend_video(url, name)
         if suffix in _LINK_EXTENSIONS:
-            return f"[{name}]({url})"
+            return _render_ha_frontend_blank_link(url, name)
         return url
 
     return _HA_LOCAL_PATH_RE.sub(_replace, text)
@@ -258,10 +258,78 @@ def _expand_ha_frontend_full_urls(text: str) -> str:
         if suffix in _VIDEO_EXTENSIONS:
             return _render_ha_frontend_video(url, name)
         if suffix in _LINK_EXTENSIONS:
-            return f"[{name}]({url})"
+            return _render_ha_frontend_blank_link(url, name)
         return url
 
     return _HA_LOCAL_FULL_URL_RE.sub(_replace, text)
+
+
+def _route_claw_text_url(url: str) -> str:
+    """Rewrite a ``/local/claw_assistant/<name>`` path to ``/claw_file/<name>``
+    so the file is served by ``ClawFileView`` with an explicit
+    ``charset=utf-8`` header. Without this rewrite, browsers running in a
+    Chinese locale render text files (.md/.txt/.json/...) as GBK and produce
+    mojibake.
+
+    Non-claw_assistant URLs are returned unchanged so external links continue
+    to function. Media files (images/videos) keep using ``/local/...`` because
+    binary content-types are unaffected by charset.
+    """
+    if not url:
+        return url
+    prefix = "/local/claw_assistant/"
+    if url.startswith(prefix):
+        return "/claw_file/" + url[len(prefix):]
+    # Full URL form: ``http(s)://host/local/claw_assistant/<name>``.
+    if "://" in url and "/local/claw_assistant/" in url:
+        return url.replace("/local/claw_assistant/", "/claw_file/", 1)
+    return url
+
+
+def _render_ha_frontend_blank_link(url: str, label: str) -> str:
+    """Render a claw_assistant file link that opens in a new browser tab.
+
+    The HA frontend chat card renders raw HTML, so emitting a fully formed
+    ``<a target="_blank">`` tag (rather than a ``[label](url)`` markdown link)
+    is the only reliable way to force a new-window open without intercepting
+    the user's chat navigation.
+    """
+    routed = _route_claw_text_url(url)
+    safe_label = label.replace('"', '&quot;')
+    safe_url = routed.replace('"', '&quot;')
+    return (
+        f'<a href="{safe_url}" target="_blank" rel="noopener noreferrer">'
+        f'{safe_label}</a>'
+    )
+
+
+# Markdown link the LLM may already have produced (``[label](/local/claw_assistant/x.md)``
+# or full URL form). Converted in-place to ``<a target="_blank">`` so it opens
+# in a new browser window rather than navigating away from the HA chat view.
+_LOCAL_MD_LINK_RE = re.compile(
+    r"(?<!\!)\[([^\]\n]{1,500})\]\("
+    r"((?:https?://[^\s)]{0,2000}?)?(?:/local|/config/www)/claw_assistant/[^\s)]{1,2000})"
+    r"\)"
+)
+
+
+def _convert_local_md_links_to_new_window(text: str) -> str:
+    if "/local/claw_assistant/" not in text and "/config/www/claw_assistant/" not in text:
+        return text
+
+    def _replace(match: "re.Match[str]") -> str:
+        label = match.group(1).strip() or "file"
+        raw_url = match.group(2).strip()
+        url = raw_url
+        if url.startswith("http"):
+            inner = re.search(r"/local/claw_assistant/[^\s)]+", url)
+            if inner:
+                url = inner.group(0)
+        if url.startswith("/config/www/"):
+            url = "/local/" + url.removeprefix("/config/www/").lstrip("/")
+        return _render_ha_frontend_blank_link(url, label)
+
+    return _LOCAL_MD_LINK_RE.sub(_replace, text)
 
 
 def _render_ha_frontend_video(url: str, label: str) -> str:
@@ -826,28 +894,34 @@ def _rewrite_chained_agent_errors(text: str, *, language: str | None = None) -> 
 
 def sanitize_response_text(text: str, *, language: str | None = None) -> str:
 
+    def _finalize(value: str) -> str:
+        value = value.replace("]┊", "]\n┊")
+        value = re.sub(r"(\[[^\]\n]{1,80}\])(?=\S)", r"\1\n", value)
+        value = re.sub(r"([^\n])(?=┊)", r"\1\n", value)
+        return re.sub(r"\n{3,}", "\n\n", value)
+
     if len(text) > _LARGE_TEXT_THRESHOLD:
-        return text.strip()
+        return _finalize(text.strip())
     stripped = _strip_memory_context(text).strip()
     if not stripped:
         return ""
 
     rewritten = _rewrite_chained_agent_errors(stripped, language=language)
     if rewritten is not stripped and rewritten != stripped:
-        return _normalize_markdown(_normalize_response_links(rewritten))
+        return _finalize(_normalize_markdown(_normalize_response_links(rewritten)))
 
     payload = _extract_json_payload(stripped)
     if not payload:
-        return _normalize_markdown(_normalize_response_links(stripped))
+        return _finalize(_normalize_markdown(_normalize_response_links(stripped)))
 
     mode = str(payload.get("mode", "")).lower()
     if mode in {"tool_calls", "toolcalls"}:
         return ""
 
     if mode == "answer" and isinstance(payload.get("content"), str):
-        return _normalize_markdown(_normalize_response_links(payload["content"].strip()))
+        return _finalize(_normalize_markdown(_normalize_response_links(payload["content"].strip())))
 
-    return _normalize_markdown(_normalize_response_links(stripped))
+    return _finalize(_normalize_markdown(_normalize_response_links(stripped)))
 
 
 def get_response_text(result: Any, *, language: str | None = None) -> str:
@@ -901,6 +975,12 @@ def apply_agent_response_format(
     channel_type = get_channel_type(conversation_id)
     if hass and channel_type == "ha":
         response_text = _expand_ha_frontend_media_tags(hass, response_text)
+        # Convert any LLM-emitted ``[label](/local/claw_assistant/x.md)`` style
+        # markdown links into ``<a target="_blank">`` HTML so they open in a
+        # new browser window. Must run before ``_stash_existing_html_media`` so
+        # the freshly emitted ``<a>`` tags are protected from URL/path
+        # expansion in the subsequent passes.
+        response_text = _convert_local_md_links_to_new_window(response_text)
         # Hide already-formed HTML media tags (``<video>``, ``<a>``, ``<img>``,
         # …) before the URL/path expanders run, otherwise the expanders will
         # match URLs *inside* a tag's ``src``/``href`` attribute and emit a
