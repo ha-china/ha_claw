@@ -897,7 +897,74 @@ async def async_handle_chat_command(
     if command.name == "model":
         return await _handle_model_command(hass, user_input, command.args)
 
+    if command.name == "goal":
+        return await _handle_goal_command(hass, user_input, command.args)
+
     return None
+
+
+async def _handle_goal_command(
+    hass,
+    user_input: conversation.ConversationInput,
+    args: str,
+) -> ChatCommandOutcome:
+    from .runtime.goals import get_goal_manager, localised_message
+
+    conversation_id = user_input.conversation_id or "default"
+    mgr = get_goal_manager(hass, conversation_id)
+    await mgr.async_ensure_loaded()
+
+    raw = (args or "").strip()
+    lowered = raw.lower()
+
+    if not raw or lowered in ("status", "info", "show", "?"):
+        if not mgr.has_goal():
+            from .runtime.state import get_runtime_store
+            runtime_store = get_runtime_store(hass)
+            cache = runtime_store.get("goal_managers")
+            if isinstance(cache, dict):
+                for candidate in cache.values():
+                    if candidate is mgr:
+                        continue
+                    await candidate.async_ensure_loaded()
+                    if candidate.has_goal():
+                        mgr = candidate
+                        break
+            if not mgr.has_goal() and runtime_store.get("pending_goal_continuations"):
+                return ChatCommandOutcome(
+                    result=_build_result(user_input, localised_message(hass, "cmd_goal_pending_unbound"))
+                )
+        return ChatCommandOutcome(result=_build_result(user_input, mgr.status_line()))
+
+    if lowered in ("pause", "stop"):
+        if await mgr.async_pause(reason="user-paused") is None:
+            return ChatCommandOutcome(
+                result=_build_result(user_input, localised_message(hass, "cmd_no_active_to_pause"))
+            )
+        return ChatCommandOutcome(result=_build_result(user_input, mgr.status_line()))
+
+    if lowered in ("resume", "continue", "go"):
+        if await mgr.async_resume() is None:
+            return ChatCommandOutcome(
+                result=_build_result(user_input, localised_message(hass, "cmd_no_goal_to_resume"))
+            )
+        return ChatCommandOutcome(result=_build_result(user_input, mgr.status_line()))
+
+    if lowered in ("clear", "drop", "remove", "off"):
+        had = mgr.has_goal()
+        await mgr.async_clear()
+        key = "cmd_cleared" if had else "cmd_nothing_to_clear"
+        return ChatCommandOutcome(
+            result=_build_result(user_input, localised_message(hass, key))
+        )
+
+    try:
+        await mgr.async_set(raw)
+    except ValueError:
+        return ChatCommandOutcome(
+            result=_build_result(user_input, localised_message(hass, "cmd_empty_text"))
+        )
+    return ChatCommandOutcome(rewritten_text=raw)
 
 
 def _list_available_agents(hass) -> list[dict[str, str]]:

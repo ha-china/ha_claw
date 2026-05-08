@@ -141,6 +141,10 @@ _MESSAGES: dict[str, dict[str, str]] = {
         "zh": "命令",
         "en": "commands",
     },
+    "cmd_goal_pending_unbound": {
+        "zh": "后台目标正在继续运行，但当前会话没有绑定目标状态。",
+        "en": "A background goal is still running, but the current conversation is not bound to its goal state.",
+    },
     "cmd_model_no_config": {
         "zh": "未找到 claw_assistant 配置。",
         "en": "claw_assistant configuration not found.",
