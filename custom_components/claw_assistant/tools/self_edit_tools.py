@@ -37,6 +37,7 @@ from ..runtime.skill_store import (
     get_installed_skill,
     list_installed_skills,
 )
+from ..runtime.text_patch import PatchError, apply_patches
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -222,8 +223,13 @@ class ProposeSelfEditTool(llm.Tool):
         "(skills/guides) and memory hygiene (purification + boundary). "
         "Params: target_type (skill|guide|memory), target_id "
         "(skill slug, guide relative_path, OR memory key), "
-        "action (create|update|delete), markdown (required for create/update; "
-        "for memory it is the new value), reason"
+        "action (create|update|patch|delete), markdown (required for create/update; "
+        "for memory it is the new value), reason. "
+        "PATCH-FIRST RULE: When modifying an existing skill or guide, prefer "
+        "action=patch with anchor-based ops instead of re-emitting the full markdown. "
+        "patch params: patches=[{op, anchor, new_text, occurrence?, regex?, count?}], dry_run=true/false. "
+        "Ops: replace | insert_before | insert_after | delete | prepend | append. "
+        "Use GetInstalledSkill first to read the current content and locate exact anchors."
     )
     parameters = vol.Schema(
         {
@@ -232,6 +238,8 @@ class ProposeSelfEditTool(llm.Tool):
             vol.Required("action"): str,
             vol.Optional("markdown", default=""): str,
             vol.Required("reason"): str,
+            vol.Optional("patches", default=[]): list,
+            vol.Optional("dry_run", default=False): bool,
         }
     )
 
@@ -247,6 +255,14 @@ class ProposeSelfEditTool(llm.Tool):
         action = (args.get("action") or "").strip().lower()
         markdown = args.get("markdown") or ""
         reason = (args.get("reason") or "").strip()
+        patches = args.get("patches", [])
+        dry_run = bool(args.get("dry_run", False))
+
+        if action == "patch":
+            return await self._patch_target(
+                hass, target_type, target_id, patches, reason, dry_run,
+            )
+
         try:
             proposal = await async_stage_proposal(
                 hass,
@@ -265,6 +281,74 @@ class ProposeSelfEditTool(llm.Tool):
                 f"Proposal staged for {target_type}/{target_id} ({action}). "
                 f"Awaiting human approval via ApplyProposal."
             ),
+            **proposal,
+        }
+
+    async def _patch_target(
+        self,
+        hass: HomeAssistant,
+        target_type: str,
+        target_id: str,
+        patches: list,
+        reason: str,
+        dry_run: bool,
+    ) -> JsonObjectType:
+        if not isinstance(patches, list) or not patches:
+            return {"success": False, "error": "'patches' must be a non-empty list"}
+        if not target_id:
+            return {"success": False, "error": "'target_id' is required"}
+
+        if target_type == "skill":
+            try:
+                skill_data = await hass.async_add_executor_job(get_installed_skill, target_id)
+            except (ValueError, FileNotFoundError) as err:
+                return {"success": False, "error": str(err)}
+            original = skill_data.get("markdown", "")
+        elif target_type == "guide":
+            try:
+                doc = get_homeassistant_guide_doc(target_id)
+            except (ValueError, FileNotFoundError) as err:
+                return {"success": False, "error": str(err)}
+            original = doc.get("markdown", "") if doc else ""
+        else:
+            return {"success": False, "error": f"patch not supported for target_type={target_type!r}; use update instead"}
+
+        if not original:
+            return {"success": False, "error": f"{target_type}/{target_id} has no content to patch"}
+
+        label = f"{target_type}/{target_id}"
+        try:
+            report = apply_patches(original, patches, label=label)
+        except PatchError as err:
+            return {"success": False, "error": str(err), **err.to_dict()}
+
+        if dry_run:
+            return {
+                "success": True,
+                "dry_run": True,
+                "report": report.to_dict(),
+                "preview_after": report.after[:3000],
+            }
+
+        try:
+            proposal = await async_stage_proposal(
+                hass,
+                target_type=target_type,
+                target_id=target_id,
+                action="update",
+                proposed_markdown=report.after,
+                reason=f"[patch] {reason}" if reason else "[patch]",
+                slug_hint=f"{target_type}-{target_id}-patch",
+            )
+        except ValueError as err:
+            return {"success": False, "error": str(err)}
+        return {
+            "success": True,
+            "message": (
+                f"Patch proposal staged for {target_type}/{target_id} "
+                f"({len(report.applied)} ops). Awaiting human approval via ApplyProposal."
+            ),
+            "report": report.to_dict(),
             **proposal,
         }
 
