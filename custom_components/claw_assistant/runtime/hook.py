@@ -181,10 +181,16 @@ def install_conversation_hook(hass: HomeAssistant, entry: ConfigEntry) -> None:
             pass
         get_conversation_status(hass)["user_language"] = frontend_lang
         if agent_id is not None and agent_id != entry.entry_id:
-            return await original_async_converse(
+            result = await original_async_converse(
                 hass, text, conversation_id, context, language,
                 agent_id, device_id, satellite_id, extra_system_prompt,
             )
+            try:
+                from .patches import _maybe_apply_global_response_format
+                _maybe_apply_global_response_format(hass, result, agent_id)
+            except Exception:
+                pass
+            return result
         return await execute_conversation_turn(
             hass,
             entry,
