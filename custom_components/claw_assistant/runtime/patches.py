@@ -549,6 +549,14 @@ def _is_streaming_enabled(hass: HomeAssistant) -> bool:
     return entries[0].options.get(CONF_ENABLE_STREAMING_EFFECT, True)
 
 
+def _is_tool_progress_enabled(hass: HomeAssistant) -> bool:
+    from ..const import CONF_ENABLE_TOOL_PROGRESS
+    entries = hass.config_entries.async_entries(DOMAIN)
+    if not entries:
+        return True
+    return entries[0].options.get(CONF_ENABLE_TOOL_PROGRESS, True)
+
+
 _HEADING_STRIP_RE = re.compile(r"^#{1,6}\s+")
 
 
@@ -595,31 +603,31 @@ async def _emit_frontend_progress(hass: HomeAssistant, chat_log, text: str) -> N
         listener = wrapped
 
     if not getattr(chat_log, "_claw_progress_active", False):
-        listener(chat_log, {"role": "assistant"})
+        listener(chat_log, {"role": "assistant", "_claw_skip_tts": True})
         chat_log._claw_progress_active = True
     else:
-        listener(chat_log, {"content": "\n"})
+        listener(chat_log, {"content": "\n", "_claw_skip_tts": True})
 
     if not text.startswith("\n"):
         text = "\n" + text
     full = text
 
     if not _is_streaming_enabled(hass):
-        listener(chat_log, {"content": full})
-        listener(chat_log, {"content": "\n"})
+        listener(chat_log, {"content": full, "_claw_skip_tts": True})
+        listener(chat_log, {"content": "\n", "_claw_skip_tts": True})
         return
 
     chunks = _PROGRESS_CHUNK_RE.findall(full)
     if not chunks:
-        listener(chat_log, {"content": full})
-        listener(chat_log, {"content": "\n"})
+        listener(chat_log, {"content": full, "_claw_skip_tts": True})
+        listener(chat_log, {"content": "\n", "_claw_skip_tts": True})
         return
 
     await asyncio.sleep(0)
     for chunk in chunks:
-        listener(chat_log, {"content": chunk})
+        listener(chat_log, {"content": chunk, "_claw_skip_tts": True})
         await asyncio.sleep(0.02)
-    listener(chat_log, {"content": "\n"})
+    listener(chat_log, {"content": "\n", "_claw_skip_tts": True})
 
 
 def patch_tool_progress(hass: HomeAssistant) -> None:
@@ -660,7 +668,8 @@ def patch_tool_progress(hass: HomeAssistant) -> None:
         native_thinking = getattr(content, "thinking_content", None)
         if native_thinking and native_thinking.strip():
             thinking_text = native_thinking.strip()
-        if thinking_text:
+        _progress_on = _is_tool_progress_enabled(hass)
+        if thinking_text and _progress_on:
             truncated = thinking_text[:120].replace("#", "").replace(">", "").replace("<", "").replace("|", "")
             lines = [l.strip() for l in truncated.splitlines() if l.strip()]
             display = " ".join(lines)
@@ -676,7 +685,7 @@ def patch_tool_progress(hass: HomeAssistant) -> None:
             )
 
         tool_calls = getattr(content, "tool_calls", None)
-        if tool_calls:
+        if tool_calls and _progress_on:
             from .state import get_conversation_status
             lang = get_conversation_status(hass).get("user_language") or hass.config.language or "en"
             for tc in tool_calls:

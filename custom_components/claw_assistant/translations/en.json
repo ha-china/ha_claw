@@ -92,6 +92,7 @@
           "save_and_exit": "Save and complete",
           "next_step": "Next step",
           "enable_streaming_effect": "Streaming Display",
+          "enable_tool_progress": "Tool Call Progress",
           "continuous_conversation": "Continuous Chat Window",
           "enable_context_status_bar": "Context Status Bar",
           "enable_file_upload": "File Upload",
@@ -99,6 +100,7 @@
         },
         "data_description": {
           "enable_streaming_effect": "When enabled, tool progress messages appear with a typewriter effect; when disabled, they appear instantly",
+          "enable_tool_progress": "When enabled, shows live tool execution progress in the chat (e.g. querying devices, searching). When disabled, tools run silently — ideal for voice pipelines.",
           "continuous_conversation": "When enabled, reopening or activating the frontend chat keeps using the same conversation until /new is sent. Disabled keeps the current per-window behavior.",
           "enable_context_status_bar": "When enabled, shows context tokens, window age, and current reply elapsed time above the chat input.",
           "enable_file_upload": "When enabled, shows an attach button in the chat input for uploading images, videos, and documents via drag, paste, or click.",

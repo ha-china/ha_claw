@@ -1,5 +1,5 @@
 DOMAIN = "claw_assistant"
-VERSION = "7.5.0"
+VERSION = "7.6.0"
 
 CONF_PRIMARY_AGENT = "primary_agent"
 CONF_FALLBACK_AGENT = "fallback_agent"
@@ -13,6 +13,7 @@ CONF_CONTINUOUS_CONVERSATION = "continuous_conversation"
 CONF_ENABLE_CONTEXT_STATUS_BAR = "enable_context_status_bar"
 CONF_ENABLE_FILE_UPLOAD = "enable_file_upload"
 CONF_ENABLE_RICH_MARKDOWN = "enable_rich_markdown"
+CONF_ENABLE_TOOL_PROGRESS = "enable_tool_progress"
 CONF_MAX_TOOL_REPEAT = "max_tool_repeat"
 CONF_PIPELINE_TIMEOUT = "pipeline_timeout"
 
