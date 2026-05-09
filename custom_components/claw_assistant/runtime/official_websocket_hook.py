@@ -562,6 +562,124 @@ class ClawUploadView(HomeAssistantView):
 _INTENT_PATCH_KEY = "_claw_original_recognize_intent"
 
 
+_LOCAL_INTENT_PATCH_KEY = "_claw_local_intent_patched"
+_AIHUB_INTENT_PATCH_KEY = "_claw_aihub_intent_original"
+
+
+def _install_local_intent_format_hook(hass) -> None:
+    from homeassistant.components import conversation as conv_module
+
+    if hass.data.get(_LOCAL_INTENT_PATCH_KEY):
+        return
+
+    original_handle_intents = conv_module.async_handle_intents
+
+    async def _patched_handle_intents(hass_inner, user_input, chat_log, **kwargs):
+        response = await original_handle_intents(hass_inner, user_input, chat_log, **kwargs)
+        if response is None:
+            return None
+        try:
+            _stamp_intent_response_speech(hass_inner, response)
+        except Exception:
+            _LOGGER.debug("local intent speech stamp failed", exc_info=True)
+        return response
+
+    conv_module.async_handle_intents = _patched_handle_intents
+    hass.data[_LOCAL_INTENT_PATCH_KEY] = original_handle_intents
+    _LOGGER.debug("Installed local intent format hook on async_handle_intents")
+
+    _install_aihub_intent_simplify_hook(hass)
+
+
+def _uninstall_local_intent_format_hook(hass) -> None:
+    _uninstall_aihub_intent_simplify_hook(hass)
+
+    original = hass.data.pop(_LOCAL_INTENT_PATCH_KEY, None)
+    if original is None:
+        return
+    from homeassistant.components import conversation as conv_module
+    conv_module.async_handle_intents = original
+    _LOGGER.debug("Uninstalled local intent format hook")
+
+
+def _install_aihub_intent_simplify_hook(hass) -> None:
+    if hass.data.get(_AIHUB_INTENT_PATCH_KEY):
+        return
+    try:
+        from custom_components.ai_hub.conversation import AIHubConversationAgent
+    except ImportError:
+        _LOGGER.debug("ai_hub not installed, skip intent simplify hook")
+        return
+
+    original = AIHubConversationAgent._async_handle_local_and_builtin_intents
+
+    async def _simplified_handle(self, user_input, chat_log):
+        language = (getattr(user_input, "language", None) or "").lower()
+        if not language.startswith("zh"):
+            return None
+        try:
+            from custom_components.ai_hub.intents import get_global_intent_handler
+            intent_handler = get_global_intent_handler(self.hass)
+        except Exception as e:
+            _LOGGER.debug("Local intent handler init failed: %s", e)
+            return None
+        try:
+            return await self._async_try_local_intent_fallback(
+                user_input, chat_log, intent_handler,
+            )
+        except Exception as e:
+            _LOGGER.warning("Local intent strict match failed: %s", e, exc_info=True)
+            return None
+
+    AIHubConversationAgent._async_handle_local_and_builtin_intents = _simplified_handle
+    hass.data[_AIHUB_INTENT_PATCH_KEY] = original
+    _LOGGER.info("Installed ai_hub intent simplify hook (strict local match only)")
+
+
+def _uninstall_aihub_intent_simplify_hook(hass) -> None:
+    original = hass.data.pop(_AIHUB_INTENT_PATCH_KEY, None)
+    if original is None:
+        return
+    try:
+        from custom_components.ai_hub.conversation import AIHubConversationAgent
+        AIHubConversationAgent._async_handle_local_and_builtin_intents = original
+        _LOGGER.info("Uninstalled ai_hub intent simplify hook")
+    except ImportError:
+        pass
+
+
+def _stamp_intent_response_speech(hass, response) -> None:
+    from ..const import (
+        CONF_CONVERSATION_MODE,
+        CONVERSATION_MODE_NO_NAME,
+        DEFAULT_CONVERSATION_MODE,
+        DOMAIN,
+    )
+    from .reply_formatter import format_reply_speech, strip_reply_prefix
+
+    entries = hass.config_entries.async_entries(DOMAIN)
+    if not entries:
+        return
+    mode = entries[0].options.get(CONF_CONVERSATION_MODE, DEFAULT_CONVERSATION_MODE)
+    if mode == CONVERSATION_MODE_NO_NAME:
+        return
+
+    plain = response.speech.get("plain") if response.speech else None
+    if not isinstance(plain, dict):
+        return
+    speech = plain.get("speech", "")
+    if not speech or not isinstance(speech, str):
+        return
+    clean = strip_reply_prefix(speech)
+    if clean.startswith("("):
+        return
+
+    from .state import get_conversation_status
+    lang = get_conversation_status(hass).get("user_language") or hass.config.language or "zh"
+    stamped = format_reply_speech("Home Assistant", clean, lang)
+    plain["speech"] = stamped
+
+
 def _sanitize_orphaned_tool_results(chat_log) -> None:
     from homeassistant.components.conversation.chat_log import (
         AssistantContent,
@@ -762,6 +880,7 @@ def install_official_websocket_process_hook(hass) -> None:
     handlers = hass.data.setdefault("websocket_api", {})
     domain_data[_PATCH_KEY] = handlers.get("conversation/process", _NO_HANDLER)
     _install_recognize_intent_hook(hass)
+    _install_local_intent_format_hook(hass)
     websocket_api.async_register_command(hass, streaming_websocket_process)
     websocket_api.async_register_command(hass, websocket_get_pending_js)
     websocket_api.async_register_command(hass, websocket_report_state)
@@ -775,6 +894,7 @@ def install_official_websocket_process_hook(hass) -> None:
 def uninstall_official_websocket_process_hook(hass) -> None:
 
     _uninstall_recognize_intent_hook(hass)
+    _uninstall_local_intent_format_hook(hass)
     domain_data = hass.data.setdefault("claw_assistant", {})
     original_handler = domain_data.pop(_PATCH_KEY, _UNSET)
     if original_handler is _UNSET:
