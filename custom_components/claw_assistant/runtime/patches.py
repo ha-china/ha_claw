@@ -940,7 +940,7 @@ def patch_global_response_format(hass: HomeAssistant) -> None:
         try:
             _maybe_apply_global_response_format(hass, result, agent_id)
         except Exception:
-            pass
+            LOGGER.debug("global response format failed", exc_info=True)
         return result
 
     agent_manager.async_converse = patched_async_converse
@@ -954,14 +954,16 @@ def patch_global_response_format(hass: HomeAssistant) -> None:
 def _maybe_apply_global_response_format(hass, result, agent_id) -> None:
 
     if not result or not result.response or not result.response.speech:
+        LOGGER.debug("global_format: skip (no result/response/speech) agent=%s", agent_id)
         return
     plain = result.response.speech.get("plain")
     if not isinstance(plain, dict):
+        LOGGER.debug("global_format: skip (no plain dict) agent=%s", agent_id)
         return
     if plain.get("agent_name"):
+        LOGGER.debug("global_format: skip (already stamped agent_name=%s) agent=%s", plain.get("agent_name"), agent_id)
         return
-
-    from homeassistant.helpers import entity_registry as er
+    LOGGER.debug("global_format: applying format, speech=%s agent=%s", str(plain.get("speech", ""))[:80], agent_id)
 
     from ..const import (
         CONF_CONVERSATION_MODE,
@@ -970,15 +972,7 @@ def _maybe_apply_global_response_format(hass, result, agent_id) -> None:
     )
     from .response_format import apply_agent_response_format
 
-    agent_name = (agent_id or "Assistant").split(".")[-1]
-    if agent_id:
-        try:
-            registry = er.async_get(hass)
-            entity = registry.async_get(agent_id)
-            if entity is not None:
-                agent_name = entity.name or entity.original_name or agent_name
-        except Exception:
-            pass
+    agent_name = "Claw Assistant"
 
     conversation_mode = DEFAULT_CONVERSATION_MODE
     try:
