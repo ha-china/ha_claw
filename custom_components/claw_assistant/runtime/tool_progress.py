@@ -10,6 +10,64 @@ def _esc(text: str) -> str:
     return text
 
 
+_HASS_ACTION_ZH = {
+    "TurnOn": "打开", "TurnOff": "关闭", "Toggle": "切换",
+    "GetState": "获取状态", "Nevermind": "取消",
+    "SetPosition": "调整位置", "StopMoving": "停止移动",
+    "StartTimer": "设置定时器", "CancelTimer": "取消定时器",
+    "CancelAllTimers": "取消所有定时器",
+    "IncreaseTimer": "延长定时器", "DecreaseTimer": "缩短定时器",
+    "PauseTimer": "暂停定时器", "UnpauseTimer": "恢复定时器",
+    "TimerStatus": "查询定时器状态",
+    "GetCurrentDate": "获取日期", "GetCurrentTime": "获取时间",
+    "Respond": "回复", "Broadcast": "广播",
+    "ClimateGetTemperature": "获取温度", "ClimateSetTemperature": "设置温度",
+    "LightSet": "调整灯光",
+    "MediaPause": "暂停播放", "MediaUnpause": "恢复播放",
+    "MediaNext": "下一曲", "MediaPrevious": "上一曲",
+    "MediaPlayerMute": "静音", "MediaPlayerUnmute": "取消静音",
+    "SetVolume": "设置音量", "SetVolumeRelative": "调整音量",
+    "MediaSearchAndPlay": "搜索并播放",
+    "OpenCover": "打开窗帘", "CloseCover": "关闭窗帘",
+    "FanSetSpeed": "调整风速",
+    "HumidifierSetpoint": "设置湿度", "HumidifierMode": "设置加湿模式",
+    "VacuumStart": "启动清扫", "VacuumReturnToBase": "返回基座",
+    "VacuumCleanArea": "区域清扫",
+    "LawnMowerStartMowing": "启动割草", "LawnMowerDock": "返回基座",
+    "GetWeather": "获取天气",
+    "ShoppingListAddItem": "添加购物项", "ShoppingListCompleteItem": "完成购物项",
+    "ShoppingListLastItems": "查看最近购物项",
+    "ListAddItem": "添加列表项", "ListCompleteItem": "完成列表项",
+    "ListRemoveItem": "删除列表项",
+}
+
+_BATCH_ACTION_TAG = {"turn_on": "TurnOn", "turn_off": "TurnOff", "toggle": "Toggle"}
+
+_DOMAIN_ZH = {
+    "light": "灯光",
+    "switch": "开关",
+    "fan": "风扇",
+    "cover": "窗帘",
+    "media_player": "媒体设备",
+    "input_boolean": "开关助手",
+    "automation": "自动化",
+    "humidifier": "加湿器",
+    "vacuum": "扫地机器人",
+    "lawn_mower": "割草机",
+    "lock": "门锁",
+}
+
+
+_DOMAIN_ACTION_ZH = {
+    ("vacuum", "turn_on"): "启动",
+    ("vacuum", "turn_off"): "返回基座",
+    ("cover", "turn_on"): "打开",
+    ("cover", "turn_off"): "关闭",
+    ("lock", "turn_on"): "解锁",
+    ("lock", "turn_off"): "上锁",
+}
+
+
 def _tool_desc(name: str, a: dict, lang: str, hass=None) -> str:
     from .reply_formatter import is_chinese
     zh = is_chinese(lang)
@@ -20,11 +78,23 @@ def _tool_desc(name: str, a: dict, lang: str, hass=None) -> str:
     if name == "BatchControl":
         ids = a.get("entity_ids", [])
         raw_act = str(a.get("action", ""))
-        cnt = len(ids) if isinstance(ids, list) else "?"
+        domain = e(str(a.get("domain", "")))
+        area = e(str(a.get("area", "")))
+        state = e(str(a.get("state", "")))
+        cnt = len(ids) if isinstance(ids, list) and ids else None
         if zh:
-            act_zh = {"turn_on": "打开", "turn_off": "关闭", "toggle": "切换"}.get(raw_act, e(raw_act))
-            return f"🔗 正在{act_zh} {cnt} 个设备..."
-        return f"🔗 Batch {e(raw_act)} x{cnt} devices..."
+            act_zh = _DOMAIN_ACTION_ZH.get(
+                (domain, raw_act),
+                _HASS_ACTION_ZH.get(_BATCH_ACTION_TAG.get(raw_act, ""), e(raw_act)),
+            )
+            domain_zh = _DOMAIN_ZH.get(domain, domain or "设备")
+            if cnt is not None:
+                return f"🔗 正在{act_zh} {cnt} 个{domain_zh}..."
+            return f"🔗 正在{act_zh}所有{domain_zh}..."
+        domain_en = domain or "devices"
+        if cnt is not None:
+            return f"🔗 {e(raw_act)} {cnt} {domain_en}..."
+        return f"🔗 {e(raw_act)} all {domain_en}..."
     if name == "ServiceCall":
         d = e(str(a.get("domain", "")))
         s = e(str(a.get("service", "")))
@@ -398,43 +468,13 @@ def _tool_desc(name: str, a: dict, lang: str, hass=None) -> str:
     if name.startswith("Hass"):
         eid = e(str(a.get("name", a.get("entity_id", ""))))[:22]
         tag = name.replace("Hass", "")
-        _HA_ZH = {
-            "TurnOn": "打开", "TurnOff": "关闭", "Toggle": "切换",
-            "GetState": "获取状态", "Nevermind": "取消",
-            "SetPosition": "调整位置", "StopMoving": "停止移动",
-            "StartTimer": "设置定时器", "CancelTimer": "取消定时器",
-            "CancelAllTimers": "取消所有定时器",
-            "IncreaseTimer": "延长定时器", "DecreaseTimer": "缩短定时器",
-            "PauseTimer": "暂停定时器", "UnpauseTimer": "恢复定时器",
-            "TimerStatus": "查询定时器状态",
-            "GetCurrentDate": "获取日期", "GetCurrentTime": "获取时间",
-            "Respond": "回复", "Broadcast": "广播",
-            "ClimateGetTemperature": "获取温度", "ClimateSetTemperature": "设置温度",
-            "LightSet": "调整灯光",
-            "MediaPause": "暂停播放", "MediaUnpause": "恢复播放",
-            "MediaNext": "下一曲", "MediaPrevious": "上一曲",
-            "MediaPlayerMute": "静音", "MediaPlayerUnmute": "取消静音",
-            "SetVolume": "设置音量", "SetVolumeRelative": "调整音量",
-            "MediaSearchAndPlay": "搜索并播放",
-            "OpenCover": "打开窗帘", "CloseCover": "关闭窗帘",
-            "FanSetSpeed": "调整风速",
-            "HumidifierSetpoint": "设置湿度", "HumidifierMode": "设置加湿模式",
-            "VacuumStart": "启动清扫", "VacuumReturnToBase": "返回基座",
-            "VacuumCleanArea": "区域清扫",
-            "LawnMowerStartMowing": "启动割草", "LawnMowerDock": "返回基座",
-            "GetWeather": "获取天气",
-            "ShoppingListAddItem": "添加购物项", "ShoppingListCompleteItem": "完成购物项",
-            "ShoppingListLastItems": "查看最近购物项",
-            "ListAddItem": "添加列表项", "ListCompleteItem": "完成列表项",
-            "ListRemoveItem": "删除列表项",
-        }
         _QUERY_TAGS = {
             "GetState", "TimerStatus", "GetCurrentDate", "GetCurrentTime",
             "ClimateGetTemperature", "GetWeather", "ShoppingListLastItems",
         }
         icon = "💫" if tag in _QUERY_TAGS else "🔗"
         if zh:
-            zh_tag = _HA_ZH.get(tag, tag)
+            zh_tag = _HASS_ACTION_ZH.get(tag, tag)
             return f"{icon} 正在{zh_tag} {eid}..." if eid else f"{icon} 正在{zh_tag}..."
         return f"{icon} {tag}: {eid}..." if eid else f"{icon} {tag}..."
 

@@ -720,7 +720,32 @@ def _install_recognize_intent_hook(hass) -> None:
 
     async def _hooked_recognize_intent(self, intent_input, conversation_id, conversation_extra_system_prompt):
         original_converse = pipeline_mod.conversation.async_converse
+        original_get_chat_log = pipeline_mod.conversation.async_get_chat_log
         flag_key = f"_claw_pipeline_converse_cont_{conversation_id}"
+
+        def _hooked_get_chat_log(*args, **kwargs):
+            listener = kwargs.get("chat_log_delta_listener")
+            if listener is not None:
+                def _tts_filtered_listener(chat_log, delta):
+                    if (
+                        isinstance(delta, dict)
+                        and delta.get("_claw_skip_tts")
+                        and delta.get("content")
+                    ):
+                        event_delta = dict(delta)
+                        event_delta.pop("_claw_skip_tts", None)
+                        self.process_event(
+                            pipeline_mod.PipelineEvent(
+                                pipeline_mod.PipelineEventType.INTENT_PROGRESS,
+                                {"chat_log_delta": event_delta},
+                            )
+                        )
+                        return
+                    listener(chat_log, delta)
+
+                kwargs = dict(kwargs)
+                kwargs["chat_log_delta_listener"] = _tts_filtered_listener
+            return original_get_chat_log(*args, **kwargs)
 
         async def _hooked_converse(*args, **kwargs):
             active_conversation_id = kwargs.get("conversation_id") or conversation_id
@@ -851,12 +876,14 @@ def _install_recognize_intent_hook(hass) -> None:
             return result
 
         pipeline_mod.conversation.async_converse = _hooked_converse
+        pipeline_mod.conversation.async_get_chat_log = _hooked_get_chat_log
         try:
             return await _original_recognize(
                 self, intent_input, conversation_id, conversation_extra_system_prompt,
             )
         finally:
             pipeline_mod.conversation.async_converse = original_converse
+            pipeline_mod.conversation.async_get_chat_log = original_get_chat_log
 
     PipelineRun.recognize_intent = _hooked_recognize_intent
     hass.data[_INTENT_PATCH_KEY] = _original_recognize
