@@ -98,8 +98,8 @@ _MESSAGES: dict[str, dict[str, str]] = {
         "en": "Available commands:",
     },
     "cmd_help_footer": {
-        "zh": "输入 /help <命令> 查看详情。",
-        "en": "Use /help <command> for details.",
+        "zh": "输入 `/help 命令名` 查看详情。",
+        "en": "Use `/help command_name` for details.",
     },
     "cmd_help_usage": {
         "zh": "用法",

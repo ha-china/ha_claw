@@ -11,6 +11,7 @@ class CommandSpec:
     category: str
     description_zh: str = ""
     aliases: tuple[str, ...] = ()
+    subcommands: tuple[tuple[str, str, str], ...] = ()
 
 
 CORE_COMMAND_REGISTRY: tuple[CommandSpec, ...] = (
@@ -37,26 +38,40 @@ CORE_COMMAND_REGISTRY: tuple[CommandSpec, ...] = (
     ),
     CommandSpec(
         name="history",
-        usage="/history <clear|stats|recent>",
-        description="Manage or inspect stored conversation history for this assistant.",
-        description_zh="管理或查看助手的对话历史记录。",
+        usage="/history",
+        description="Manage or inspect stored conversation history.",
+        description_zh="管理或查看对话历史记录。",
         category="Session",
+        subcommands=(
+            ("/history clear", "Clear all stored history.", "清除所有对话历史。"),
+            ("/history stats", "Show history statistics.", "显示历史统计信息。"),
+            ("/history recent", "Show recent entries.", "显示最近的记录。"),
+        ),
     ),
     CommandSpec(
         name="skill",
-        usage="/skill <name> [input]",
+        usage="/skill",
         description="Inspect installed skills or invoke one by name.",
         description_zh="查看已安装技能或按名称调用。",
         category="Skills",
         aliases=("skills",),
+        subcommands=(
+            ("/skill list", "List all installed skills.", "列出所有已安装技能。"),
+            ("/skill <name>", "View skill details.", "查看技能详情。"),
+            ("/skill <name> [input]", "Invoke a skill with input.", "用输入调用技能。"),
+        ),
     ),
     CommandSpec(
         name="model",
-        usage="/model [number]",
+        usage="/model",
         description="List available AI agents or switch primary/fallback by number.",
         description_zh="列出可用模型或按序号切换主力/备用。",
         category="Config",
         aliases=("models",),
+        subcommands=(
+            ("/model", "List all available models.", "列出所有可用模型。"),
+            ("/model <number>", "Switch to model by number.", "按序号切换模型。"),
+        ),
     ),
     CommandSpec(
         name="help",
@@ -76,18 +91,18 @@ CORE_COMMAND_REGISTRY: tuple[CommandSpec, ...] = (
     ),
     CommandSpec(
         name="goal",
-        usage="/goal [<text>|status|pause|resume|clear]",
-        description=(
-            "Set a standing goal. The fallback (备用) agent judges each turn; "
-            "claw_assistant keeps working until the goal is done or you "
-            "/goal pause | /goal clear."
-        ),
-        description_zh=(
-            "设置常驻目标。每轮由\u201c后备 AI\u201d判定是否完成；未完成则 "
-            "自动续跑，直到 /goal pause 或 /goal clear 才停。"
-        ),
+        usage="/goal",
+        description="Set a standing goal. The agent keeps working until done.",
+        description_zh="设置常驻目标，助手自动续跑直到完成。",
         category="Session",
         aliases=("goals",),
+        subcommands=(
+            ("/goal <text>", "Set a new goal.", "设置新目标。"),
+            ("/goal status", "Check current goal progress.", "查看当前目标进度。"),
+            ("/goal pause", "Pause the current goal.", "暂停当前目标。"),
+            ("/goal resume", "Resume a paused goal.", "恢复已暂停的目标。"),
+            ("/goal clear", "Stop and remove the goal.", "停止并清除目标。"),
+        ),
     ),
 )
 

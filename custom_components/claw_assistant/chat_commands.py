@@ -227,6 +227,10 @@ _CATEGORY_KEYS = {
 }
 
 
+def _escape_md_angles(s: str) -> str:
+    return s.replace("<", "\\<").replace(">", "\\>")
+
+
 def _build_command_catalog_message(language: str | None = None) -> str:
     grouped: dict[str, list[CommandSpec]] = {}
     for spec in core_command_specs():
@@ -240,21 +244,37 @@ def _build_command_catalog_message(language: str | None = None) -> str:
         if lines:
             lines.append("")
         cat_label = t(_CATEGORY_KEYS.get(category, category), language)
-        lines.append(f"{cat_label}{t('cmd_commands_suffix', language)}:")
+        lines.append(f"**{cat_label}{t('cmd_commands_suffix', language)}**")
+        lines.append("")
         for spec in specs:
-            lines.append(f"- {spec.usage} - {_spec_desc(spec, language)}")
+            if spec.subcommands:
+                from .runtime.reply_formatter import is_chinese
+                zh = is_chinese(language)
+                desc = _spec_desc(spec, language)
+                lines.append(f"**`/{spec.name}`** — {desc}")
+                for sub_usage, sub_desc_en, sub_desc_zh in spec.subcommands:
+                    sub_usage_esc = _escape_md_angles(sub_usage)
+                    sub_desc = sub_desc_zh if zh else sub_desc_en
+                    lines.append(f"　　`{sub_usage_esc}` — {sub_desc}")
+                lines.append("")
+            else:
+                usage = _escape_md_angles(spec.usage)
+                desc = _spec_desc(spec, language)
+                lines.append(f"`{usage}` — {desc}")
+                lines.append("")
 
     skill_registry = _skill_command_registry()
     if skill_registry:
-        lines.extend(["", f"{t('cmd_skill_commands', language)}:"])
+        lines.extend(["", f"**{t('cmd_skill_commands', language)}**", ""])
         for command_name, skill in sorted(skill_registry.items()):
             description = str(skill.get("description", "") or "").strip()
-            suffix = f" - {description}" if description else ""
-            lines.append(f"- /{command_name}{suffix}")
+            suffix = f" — {description}" if description else ""
+            lines.append(f"`/{command_name}`{suffix}")
+            lines.append("")
 
     conflicts = _conflicting_skill_commands()
     if conflicts:
-        lines.extend(["", f"{t('cmd_skill_conflicts', language)}:"])
+        lines.extend(["", f"**{t('cmd_skill_conflicts', language)}**", ""])
         for entry in conflicts[:8]:
             skill = entry["skill"]
             skill_name = str(skill.get("name", "") or skill.get("slug", ""))
@@ -270,17 +290,18 @@ def _build_help_message(command_name: str = "", language: str | None = None) -> 
     lookup = command_name.strip()
     if not lookup:
         return (
-            f"{t('cmd_help_header', language)}\n"
+            f"{t('cmd_help_header', language)}\n\n"
             f"{_build_command_catalog_message(language)}\n\n"
-            f"{t('cmd_help_footer', language)}"
+            f"---\n{t('cmd_help_footer', language)}"
         )
 
     spec = _find_core_command_spec(lookup)
     if spec is not None:
+        usage = _escape_md_angles(spec.usage)
         return (
-            f"/{spec.name}\n"
-            f"{t('cmd_help_usage', language)}: {spec.usage}\n"
-            f"{t('cmd_help_category', language)}: {t(_CATEGORY_KEYS.get(spec.category, spec.category), language)}\n"
+            f"**/{spec.name}**\n\n"
+            f"{t('cmd_help_usage', language)}: `{usage}`\n"
+            f"{t('cmd_help_category', language)}: {t(_CATEGORY_KEYS.get(spec.category, spec.category), language)}\n\n"
             f"{_spec_desc(spec, language)}"
         )
 
@@ -290,9 +311,11 @@ def _build_help_message(command_name: str = "", language: str | None = None) -> 
         description = str(skill_meta.get("description", "") or "").strip()
         skill_name = str(skill_meta.get("name", "") or normalized)
         lines = [
-            f"/{normalized}",
-            f"{t('cmd_help_usage', language)}: /{normalized} [input]",
+            f"**/{normalized}**",
+            "",
+            f"{t('cmd_help_usage', language)}: `/{normalized} [input]`",
             f"{t('cmd_help_category', language)}: {t('cmd_category_skills', language)}",
+            "",
             f"Invoke the installed skill '{skill_name}'.",
         ]
         if description:
