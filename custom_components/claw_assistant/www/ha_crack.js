@@ -1,7 +1,7 @@
 (function() {
     'use strict';
     
-    const HACRACK_VERSION = '20260504-upload-v29';
+    const HACRACK_VERSION = '20260509-assist-dock-v30';
     let initialized = false;
     let pollInterval = null;
     let hassRef = null;
@@ -105,8 +105,10 @@
         exposeGlobalAPI();
         setupGoalContinuationStream(hass);
         setupContinuousConversation(hass);
+        setupAssistRightDock(hass);
         setupContextStatusBar(hass);
         setupFileUpload(hass);
+        setupFrontendBridge(hass);
         setTimeout(() => {
             if (window.HACrack?.preventAssistDialogClose) {
                 window.HACrack.preventAssistDialogClose();
@@ -114,7 +116,481 @@
         }, 100);
     }
 
+    function setupFrontendBridge(hass) {
+        if (!hass?.connection) return;
+        const conn = hass.connection;
+        if (window.__clawBridgeConn === conn) return;
+        window.__clawBridgeConn = conn;
+
+        const seen = new Set();
+
+        function getConn() {
+            const ha = document.querySelector('home-assistant');
+            return ha?.hass?.connection || conn;
+        }
+
+        async function sendResult(execId, result) {
+            const c = getConn();
+            for (let i = 0; i < 3; i++) {
+                try {
+                    await c.sendMessagePromise({
+                        type: 'ha_crack/frontend_exec_result',
+                        exec_id: execId,
+                        result: result
+                    });
+                    return;
+                } catch(_) {
+                    await new Promise(r => setTimeout(r, 300));
+                }
+            }
+        }
+
+        async function runTask(task) {
+            if (!task?.id || !task?.code || seen.has(task.id)) return;
+            seen.add(task.id);
+            if (seen.size > 200) { const it = seen.values(); seen.delete(it.next().value); }
+            let result;
+            try {
+                try {
+                    result = new Function('return (' + task.code + ')')();
+                } catch(_) {
+                    result = new Function(task.code)();
+                }
+                if (result instanceof Promise) result = await result;
+            } catch(e) {
+                result = { error: e.message, stack: (e.stack||'').slice(0,300) };
+            }
+            if (result === undefined || result === null) result = { value: null };
+            else if (typeof result !== 'object') result = { value: result };
+            else { try { JSON.stringify(result); } catch(_) { result = { value: String(result) }; } }
+            await sendResult(task.id, result);
+        }
+
+        conn.subscribeEvents(ev => {
+            const d = ev.data;
+            if (d?.id && d?.code) runTask(d);
+        }, 'claw_frontend_exec').catch(() => {});
+
+        setInterval(async () => {
+            try {
+                const c = getConn();
+                const r = await c.sendMessagePromise({ type: 'ha_crack/frontend_exec_poll' });
+                if (!r?.tasks?.length) return;
+                for (const task of r.tasks) await runTask(task);
+            } catch(_) {}
+        }, 2000);
+
+    }
+
     function setupGoalContinuationStream() {}
+
+    function setupAssistRightDock(hass) {
+        if (window.__clawAssistDockInstalled) return;
+        window.__clawAssistDockInstalled = true;
+
+        let _sidebarDockEnabled = true;
+        let _initialSettingsLoaded = false;
+        const refreshDockSetting = async () => {
+            try {
+                const r = await hass.connection.sendMessagePromise({ type: 'ha_crack/get_settings' });
+                const newVal = r?.enable_sidebar_dock !== false;
+                if (_initialSettingsLoaded && newVal !== _sidebarDockEnabled) {
+                    location.reload();
+                    return;
+                }
+                _sidebarDockEnabled = newVal;
+                _initialSettingsLoaded = true;
+            } catch(e) {}
+        };
+        refreshDockSetting();
+        hass.connection.subscribeEvents(() => refreshDockSetting(), 'ha_crack_settings_changed').catch(() => {});
+
+        const DOCK_ID = 'claw-assist-dock';
+        const DOCK_STYLE_ID = 'claw-assist-dock-style';
+        const DOCK_W = 'min(460px, 38vw)';
+
+        const getMainSR = () => {
+            const home = document.querySelector('home-assistant');
+            return home?.shadowRoot?.querySelector('home-assistant-main')?.shadowRoot || null;
+        };
+
+        const ensureDock = () => {
+            const msr = getMainSR();
+            if (!msr) return null;
+
+            if (!msr.getElementById(DOCK_STYLE_ID)) {
+                const s = document.createElement('style');
+                s.id = DOCK_STYLE_ID;
+                s.textContent = `
+                    :host {
+                        --claw-dock-width: ${DOCK_W};
+                    }
+                    ha-drawer {
+                        transition: padding-right .25s cubic-bezier(.4,0,.2,1) !important;
+                    }
+                    :host([dock-open]) ha-drawer {
+                        padding-right: var(--claw-dock-width) !important;
+                    }
+                    #${DOCK_ID} {
+                        position: fixed;
+                        top: 0;
+                        right: 0;
+                        width: 0;
+                        height: 100vh;
+                        display: flex;
+                        flex-direction: column;
+                        overflow: hidden;
+                        background: var(--primary-background-color, #fff);
+                        transition: width .25s cubic-bezier(.4,0,.2,1);
+                        box-shadow: -1px 0 0 0 var(--divider-color, rgba(0,0,0,.12));
+                        z-index: 100;
+                    }
+                    #${DOCK_ID}[open] {
+                        width: var(--claw-dock-width);
+                    }
+                    #${DOCK_ID} .dock-header {
+                        flex: 0 0 auto;
+                        display: flex;
+                        align-items: center;
+                        height: var(--header-height, 56px);
+                        min-height: var(--header-height, 56px);
+                        padding: 0 10px 0 16px;
+                        background: var(--sidebar-menu-button-background-color, inherit);
+                        color: var(--sidebar-menu-button-text-color, var(--primary-text-color));
+                        font-family: var(--ha-font-family-body, Roboto, Noto, sans-serif);
+                        font-size: var(--ha-font-size-xl, 20px);
+                        font-weight: var(--ha-font-weight-normal, 400);
+                        line-height: 1;
+                        box-sizing: border-box;
+                        -webkit-font-smoothing: antialiased;
+                        border-bottom: 1px solid var(--divider-color, rgba(0,0,0,.12));
+                        touch-action: none;
+                        user-select: none;
+                        -webkit-user-select: none;
+                    }
+                    #${DOCK_ID} .dock-header .dock-title {
+                        flex: 1 1 auto;
+                        min-width: 0;
+                        display: flex;
+                        align-items: center;
+                        gap: 0;
+                        overflow: hidden;
+                    }
+                    #${DOCK_ID} .dock-header .dock-title > [slot="title"] {
+                        display: flex;
+                        align-items: center;
+                        gap: 4px;
+                        margin-left: 5px;
+                        font-size: inherit;
+                        font-weight: inherit;
+                        white-space: nowrap;
+                        overflow: hidden;
+                    }
+                    #${DOCK_ID} .dock-header .dock-title ha-dropdown {
+                        --ha-select-height: 32px;
+                    }
+                    #${DOCK_ID} .dock-header .dock-close {
+                        flex: 0 0 auto;
+                        width: 40px;
+                        height: 40px;
+                        display: flex;
+                        align-items: center;
+                        justify-content: center;
+                        cursor: pointer;
+                        border-radius: 50%;
+                        color: inherit;
+                        opacity: 0.85;
+                        transition: opacity .15s, background .15s;
+                        -webkit-tap-highlight-color: transparent;
+                    }
+                    #${DOCK_ID} .dock-header .dock-close:hover {
+                        opacity: 1;
+                        background: rgba(255,255,255,.12);
+                    }
+                    #${DOCK_ID} .dock-header .dock-close svg {
+                        width: 20px;
+                        height: 20px;
+                        fill: var(--icon-primary-color, currentColor);
+                    }
+                    #${DOCK_ID} .dock-body {
+                        flex: 1 1 auto;
+                        min-height: 0;
+                        display: flex;
+                        flex-direction: column;
+                        overflow-y: auto;
+                        overflow-x: hidden;
+                        overscroll-behavior: contain;
+                    }
+                    #${DOCK_ID} .dock-body ha-assist-chat {
+                        flex: 1 1 auto;
+                        width: 100%;
+                        margin: 0;
+                        min-height: 0;
+                        display: flex;
+                        flex-direction: column;
+                    }
+                    #${DOCK_ID} .dock-resize {
+                        position: absolute;
+                        left: -6px;
+                        top: 0;
+                        width: 12px;
+                        height: 100%;
+                        cursor: col-resize;
+                        z-index: 1;
+                        display: flex;
+                        align-items: center;
+                        justify-content: center;
+                    }
+                    #${DOCK_ID} .dock-resize::before {
+                        content: '';
+                        width: 4px;
+                        height: 40px;
+                        border-radius: 4px;
+                        background: var(--divider-color, rgba(0,0,0,.15));
+                        opacity: 0;
+                        transition: opacity .25s ease, transform .25s ease, height .25s ease;
+                        transform: scaleY(0.6);
+                    }
+                    #${DOCK_ID} .dock-resize:hover::before,
+                    #${DOCK_ID} .dock-resize.active::before {
+                        opacity: 1;
+                        transform: scaleY(1);
+                    }
+                    #${DOCK_ID} .dock-resize.active::before {
+                        background: var(--primary-color, #03a9f4);
+                        height: 56px;
+                        box-shadow: 0 0 8px rgba(3,169,244,.3);
+                    }
+                    #${DOCK_ID}[resizing] {
+                        transition: none !important;
+                        user-select: none;
+                    }
+                    :host([dock-resizing]) ha-drawer {
+                        transition: none !important;
+                    }
+                    #${DOCK_ID}[resizing] .dock-resize::before {
+                        opacity: 1;
+                        transform: scaleY(1);
+                        background: var(--primary-color, #03a9f4);
+                        height: 56px;
+                    }
+                    @media (max-width: 870px) {
+                        #${DOCK_ID}[open] {
+                            position: fixed;
+                            inset: 0;
+                            width: 100vw;
+                            z-index: 100;
+                        }
+                        #${DOCK_ID} .dock-resize { display: none; }
+                    }
+                `;
+                msr.appendChild(s);
+            }
+
+            let dock = msr.getElementById(DOCK_ID);
+            if (!dock) {
+                dock = document.createElement('div');
+                dock.id = DOCK_ID;
+                dock.innerHTML = '<div class="dock-resize"></div><div class="dock-header"><div class="dock-title">Assist</div><div class="dock-close" title="Close"><svg viewBox="0 0 24 24"><path d="M19,6.41L17.59,5L12,10.59L6.41,5L5,6.41L10.59,12L5,17.59L6.41,19L12,13.41L17.59,19L19,17.59L13.41,12L19,6.41Z"/></svg></div></div><div class="dock-body"></div>';
+                msr.appendChild(dock);
+
+                const handle = dock.querySelector('.dock-resize');
+                let longPressTimer = null;
+                let dragging = false;
+
+                const activate = () => { handle.classList.add('active'); };
+                const deactivate = () => { if (!dragging) handle.classList.remove('active'); };
+
+                handle.addEventListener('pointerdown', (e) => {
+                    longPressTimer = setTimeout(() => {
+                        longPressTimer = null;
+                        dragging = true;
+                        activate();
+                        dock.setAttribute('resizing', '');
+                        document.body.style.cursor = 'col-resize';
+                        document.body.style.userSelect = 'none';
+
+                        const hostEl = document.querySelector('home-assistant')?.shadowRoot?.querySelector('home-assistant-main');
+                        if (hostEl) hostEl.setAttribute('dock-resizing', '');
+                        const wasNarrow = hostEl?.hasAttribute('narrow') || false;
+                        const onMove = (ev) => {
+                            const w = Math.max(280, Math.min(window.innerWidth * 0.8, window.innerWidth - ev.clientX));
+                            if (hostEl) {
+                                hostEl.style.setProperty('--claw-dock-width', w + 'px');
+                                hostEl.style.setProperty('--mdc-top-app-bar-width', 'calc(100% - var(--mdc-drawer-width, 0px) - ' + w + 'px)');
+                                const remaining = window.innerWidth - w;
+                                if (remaining < 870 && !hostEl.narrow) {
+                                    hostEl.narrow = true;
+                                } else if (remaining >= 870 && !wasNarrow && hostEl.narrow) {
+                                    hostEl.narrow = false;
+                                }
+                            }
+                        };
+                        const onUp = () => {
+                            dragging = false;
+                            dock.removeAttribute('resizing');
+                            if (hostEl) hostEl.removeAttribute('dock-resizing');
+                            document.body.style.cursor = '';
+                            document.body.style.userSelect = '';
+                            handle.classList.remove('active');
+                            document.removeEventListener('pointermove', onMove);
+                            document.removeEventListener('pointerup', onUp);
+                        };
+                        document.addEventListener('pointermove', onMove);
+                        document.addEventListener('pointerup', onUp);
+                    }, 500);
+                });
+                handle.addEventListener('pointerup', () => { if (longPressTimer) { clearTimeout(longPressTimer); longPressTimer = null; } });
+                handle.addEventListener('pointercancel', () => { if (longPressTimer) { clearTimeout(longPressTimer); longPressTimer = null; } });
+                handle.addEventListener('pointerenter', activate);
+                handle.addEventListener('pointerleave', deactivate);
+            }
+            return dock;
+        };
+
+        let _dockActive = false;
+        let _dockVoiceEl = null;
+        let _userClose = false;
+
+        const neutralizeVoiceDialog = (voiceEl) => {
+            const sr = voiceEl?.shadowRoot;
+            if (!sr) return;
+            const d = sr.querySelector('ha-dialog');
+            if (!d) return;
+            d.style.display = 'none';
+            d.removeAttribute('open');
+            try { if (d.open) d.close(); } catch(_) {}
+            if (!d.__clawNeutralized) {
+                d.__clawNeutralized = true;
+                const origShow = d.show;
+                d.show = function() {
+                    if (_dockActive) return;
+                    return origShow?.call(this);
+                };
+            }
+        };
+
+        const grabChat = (voiceEl) => {
+            const dock = ensureDock();
+            if (!dock) return false;
+            const sr = voiceEl?.shadowRoot;
+            if (!sr) return false;
+            const chat = sr.querySelector('ha-assist-chat');
+            if (!chat) return false;
+
+            const dockHeader = dock.querySelector('.dock-header');
+            const titleEl = dockHeader.querySelector('.dock-title');
+            if (titleEl && !titleEl.querySelector('[slot="title"]')) {
+                const dialogHeader = sr.querySelector('ha-dialog-header');
+                if (dialogHeader) {
+                    const titleSlot = dialogHeader.querySelector('[slot="title"]');
+                    if (titleSlot) {
+                        titleEl.innerHTML = '';
+                        titleEl.appendChild(titleSlot);
+                    }
+                }
+            }
+
+            const dockBody = dock.querySelector('.dock-body');
+            dockBody.innerHTML = '';
+            dockBody.appendChild(chat);
+            dock.setAttribute('open', '');
+
+            neutralizeVoiceDialog(voiceEl);
+            voiceEl.style.display = 'none';
+
+            const mainEl = document.querySelector('home-assistant')?.shadowRoot?.querySelector('home-assistant-main');
+            if (mainEl) {
+                mainEl.setAttribute('dock-open', '');
+                mainEl.style.setProperty('--mdc-top-app-bar-width', 'calc(100% - var(--mdc-drawer-width, 0px) - var(--claw-dock-width))');
+            }
+            document.body.style.overflow = '';
+
+            const closeBtn = dock.querySelector('.dock-close');
+            if (closeBtn && !closeBtn.__clawBound) {
+                closeBtn.__clawBound = true;
+                closeBtn.addEventListener('click', () => {
+                    _userClose = true;
+                    voiceEl.closeDialog?.();
+                });
+            }
+            return true;
+        };
+
+        const waitAndGrab = (voiceEl) => {
+            if (grabChat(voiceEl)) return;
+            let tries = 0;
+            const tid = setInterval(() => {
+                if (grabChat(voiceEl) || ++tries > 50) clearInterval(tid);
+            }, 50);
+        };
+
+        const closeDock = () => {
+            _dockActive = false;
+            _dockVoiceEl = null;
+            const msr = getMainSR();
+            if (!msr) return;
+            const dock = msr.getElementById(DOCK_ID);
+            if (dock) {
+                dock.removeAttribute('open');
+                dock.querySelector('.dock-body').innerHTML = '';
+            }
+            const mainEl = document.querySelector('home-assistant')?.shadowRoot?.querySelector('home-assistant-main');
+            if (mainEl) {
+                mainEl.removeAttribute('dock-open');
+                mainEl.style.removeProperty('--mdc-top-app-bar-width');
+            }
+            document.body.style.overflow = '';
+        };
+
+        customElements.whenDefined('ha-voice-command-dialog').then(() => {
+            const proto = customElements.get('ha-voice-command-dialog')?.prototype;
+            if (!proto || proto.__clawRightDockPatched) return;
+            proto.__clawRightDockPatched = true;
+
+            const origShow = proto.showDialog;
+            const origClose = proto.closeDialog;
+            const origUpdated = proto.updated;
+
+            proto.updated = function(changedProps) {
+                if (_dockActive && _dockVoiceEl === this) {
+                    if (changedProps.has('_pipelineId')) {
+                        requestAnimationFrame(() => waitAndGrab(this));
+                    }
+                    neutralizeVoiceDialog(this);
+                    this.style.display = 'none';
+                }
+                return origUpdated?.call(this, changedProps);
+            };
+
+            proto.showDialog = async function(...args) {
+                if (!_sidebarDockEnabled) {
+                    return origShow?.apply(this, args);
+                }
+                if (_dockActive && _dockVoiceEl === this) {
+                    _userClose = true;
+                    this.closeDialog?.();
+                    return;
+                }
+                _dockActive = true;
+                _dockVoiceEl = this;
+                const ret = await origShow?.apply(this, args);
+                await this.updateComplete;
+                waitAndGrab(this);
+                return ret;
+            };
+
+            proto.closeDialog = async function(...args) {
+                if (!_userClose && _dockActive) {
+                    return;
+                }
+                _userClose = false;
+                closeDock();
+                this.style.display = '';
+                return origClose?.apply(this, args);
+            };
+        }).catch(() => {});
+    }
 
     function setupContinuousConversation(hass) {
         if (!hass?.connection) return;
