@@ -896,7 +896,7 @@ def sanitize_response_text(text: str, *, language: str | None = None) -> str:
 
     def _finalize(value: str) -> str:
         value = value.replace("]┊", "]\n┊")
-        value = re.sub(r"(\[[^\]\n]{1,80}\])(?=\S)", r"\1\n", value)
+        value = re.sub(r"(\[[^\]\n]{1,80}\])(?!\()(?=\S)", r"\1\n", value)
         value = re.sub(r"([^\n])(?=┊)", r"\1\n", value)
         return re.sub(r"\n{3,}", "\n\n", value)
 

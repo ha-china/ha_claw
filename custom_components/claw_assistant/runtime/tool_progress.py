@@ -78,29 +78,38 @@ def _tool_desc(name: str, a: dict, lang: str, hass=None) -> str:
     if name == "BatchControl":
         ids = a.get("entity_ids", [])
         raw_act = str(a.get("action", ""))
-        domain = e(str(a.get("domain", "")))
+        domain = str(a.get("domain", ""))
         area = e(str(a.get("area", "")))
-        state = e(str(a.get("state", "")))
         cnt = len(ids) if isinstance(ids, list) and ids else None
         if zh:
             act_zh = _DOMAIN_ACTION_ZH.get(
                 (domain, raw_act),
-                _HASS_ACTION_ZH.get(_BATCH_ACTION_TAG.get(raw_act, ""), e(raw_act)),
+                _HASS_ACTION_ZH.get(_BATCH_ACTION_TAG.get(raw_act, ""), "控制"),
             )
-            domain_zh = _DOMAIN_ZH.get(domain, domain or "设备")
             if cnt is not None:
-                return f"🔗 正在{act_zh} {cnt} 个{domain_zh}..."
-            return f"🔗 正在{act_zh}所有{domain_zh}..."
-        domain_en = domain or "devices"
+                if area:
+                    return f"🔗 正在{act_zh}{area} {cnt} 个设备..."
+                return f"🔗 正在{act_zh} {cnt} 个设备..."
+            if area:
+                return f"🔗 正在{act_zh}{area}设备..."
+            return f"🔗 正在{act_zh}设备..."
         if cnt is not None:
-            return f"🔗 {e(raw_act)} {cnt} {domain_en}..."
-        return f"🔗 {e(raw_act)} all {domain_en}..."
+            if area:
+                return f"🔗 {e(raw_act)} {cnt} devices in {area}..."
+            return f"🔗 {e(raw_act)} {cnt} devices..."
+        if area:
+            return f"🔗 {e(raw_act)} devices in {area}..."
+        return f"🔗 {e(raw_act)} devices..."
     if name == "ServiceCall":
-        d = e(str(a.get("domain", "")))
-        s = e(str(a.get("service", "")))
+        d_raw = str(a.get("domain", ""))
+        s_raw = str(a.get("service", ""))
         if zh:
-            return f"🔗 正在调用 {d}.{s}..." if d else "🔗 正在调用服务..."
-        return f"🔗 Calling {d}.{s}..." if d else "🔗 Calling service..."
+            act_zh = _DOMAIN_ACTION_ZH.get(
+                (d_raw, s_raw),
+                _HASS_ACTION_ZH.get(_BATCH_ACTION_TAG.get(s_raw, ""), ""),
+            ) or _HASS_ACTION_ZH.get(_BATCH_ACTION_TAG.get(s_raw, ""), "控制")
+            return f"🔗 正在{act_zh} 1 个设备..."
+        return f"🔗 Controlling 1 device..."
     if name == "EntityQuery":
         eid = e(str(a.get("entity_id", "")))[:50]
         if zh:

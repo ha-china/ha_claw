@@ -55,6 +55,10 @@ def analyze_response_state(
     if last_tool in [
         "WebSearch",
         "SetConversationState",
+        "ServiceCall",
+        "BatchControl",
+        "Notify",
+        "ScriptExecute",
     ]:
         return {"state": "final", "reason": f"工具{last_tool}已调用，直接终止"}
 
