@@ -295,6 +295,15 @@ class ProposeSelfEditTool(llm.Tool):
     ) -> JsonObjectType:
         if not isinstance(patches, list) or not patches:
             return {"success": False, "error": "'patches' must be a non-empty list"}
+        fixed = []
+        for p in patches:
+            if isinstance(p, str):
+                try:
+                    p = json.loads(p)
+                except (json.JSONDecodeError, TypeError):
+                    pass
+            fixed.append(p)
+        patches = fixed
         if not target_id:
             return {"success": False, "error": "'target_id' is required"}
 

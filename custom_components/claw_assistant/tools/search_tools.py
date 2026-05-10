@@ -18,23 +18,33 @@ _LOGGER = logging.getLogger(__name__)
 
 class WebSearchTool(llm.Tool):
     name = "WebSearch"
-    description = "General-purpose web search for real-time information: news, weather, tech, sports, etc. Auto-selects search engines based on locale. Supported engines: google, bing, baidu, bing_cn. Set engine when the user explicitly requests one (e.g. 'google it' -> engine='google'). Leave engine empty for auto-select. Always write the query in the same language the user used."
+    description = (
+        "Web search. Strategy: bing first, baidu fallback (auto). "
+        "After getting results, use UrlFetch(url) to read page content, "
+        "then WebReadChunk(doc_id, position) for more. "
+        "Engines: google, bing, baidu, bing_cn. Leave engine empty for auto. "
+        "Write query in the same language the user used."
+    )
     parameters = vol.Schema({
         vol.Required("query"): str,
-        vol.Optional("num_results", default=3): int,
+        vol.Optional("num_results", default=5): int,
         vol.Optional("engine", default=""): str,
     })
 
     async def async_call(self, hass: HomeAssistant, tool_input: llm.ToolInput, llm_context: llm.LLMContext) -> JsonObjectType:
         query = tool_input.tool_args.get("query", "")
-        num = tool_input.tool_args.get("num_results", 3)
+        num = tool_input.tool_args.get("num_results", 5)
         engine = tool_input.tool_args.get("engine", "")
         mark_tool_called(hass, "WebSearch")
         try:
             async with WebSearch(hass=hass) as ws:
                 results = await ws.search(query, num, engine=engine, fetch_content=False)
                 if not results:
-                    return {"success": False, "error": "No search results found"}
+                    return {
+                        "success": False,
+                        "error": "No results found",
+                        "hint": "Try: 1) rephrase query with different keywords, 2) set engine='bing' or engine='baidu' explicitly, 3) use English keywords for international topics.",
+                    }
 
                 items = []
                 for i, r in enumerate(results[:num], 1):
@@ -49,14 +59,19 @@ class WebSearchTool(llm.Tool):
                     "success": True,
                     "count": len(items),
                     "results": items,
-                    "hint": "Use UrlFetch to read any result page. Content is returned in chunks; use WebReadChunk to read more.",
+                    "hint": "Use UrlFetch(url) to read full page content. Then WebReadChunk(doc_id, position) for subsequent chunks.",
                 }
         except Exception as e:
             _LOGGER.error("WebSearchTool error: %s", e)
-            return {"success": False, "error": str(e)}
+            return {
+                "success": False,
+                "error": str(e),
+                "hint": "Retry with engine='bing' or engine='baidu'. Or rephrase query.",
+            }
 
 
-_CHUNK_SIZE = 1500
+_CHUNK_TARGET = 1500
+_CHUNK_MAX = 2000
 _CHUNK_CACHE_KEY = "claw_web_chunks"
 
 
@@ -66,15 +81,54 @@ def _get_chunk_cache(hass: HomeAssistant) -> dict:
     return hass.data[_CHUNK_CACHE_KEY]
 
 
+def _split_paragraphs_smart(text: str) -> list[str]:
+    import re
+    paragraphs = re.split(r"\n{2,}", text)
+    chunks: list[str] = []
+    current: list[str] = []
+    current_len = 0
+    for para in paragraphs:
+        para = para.strip()
+        if not para:
+            continue
+        para_len = len(para)
+        if current and current_len + para_len + 2 > _CHUNK_TARGET:
+            chunks.append("\n\n".join(current))
+            current = []
+            current_len = 0
+        if para_len > _CHUNK_MAX:
+            if current:
+                chunks.append("\n\n".join(current))
+                current = []
+                current_len = 0
+            sentences = re.split(r"(?<=[.!?。！？\n])\s*", para)
+            buf: list[str] = []
+            buf_len = 0
+            for s in sentences:
+                s = s.strip()
+                if not s:
+                    continue
+                if buf and buf_len + len(s) + 1 > _CHUNK_TARGET:
+                    chunks.append(" ".join(buf))
+                    buf = []
+                    buf_len = 0
+                buf.append(s)
+                buf_len += len(s) + 1
+            if buf:
+                chunks.append(" ".join(buf))
+        else:
+            current.append(para)
+            current_len += para_len + 2
+    if current:
+        chunks.append("\n\n".join(current))
+    return chunks if chunks else [""]
+
+
 def _store_chunks(hass: HomeAssistant, url: str, title: str, full_text: str) -> tuple[str, list[str]]:
     import hashlib
     doc_id = hashlib.md5(url.encode()).hexdigest()[:10]
-    chunks = []
     cleaned = prepare_web_text_for_ai(full_text, max_chars=len(full_text) + 1)
-    for i in range(0, len(cleaned), _CHUNK_SIZE):
-        chunks.append(cleaned[i:i + _CHUNK_SIZE])
-    if not chunks:
-        chunks = [""]
+    chunks = _split_paragraphs_smart(cleaned)
     cache = _get_chunk_cache(hass)
     cache[doc_id] = {"url": url, "title": title, "chunks": chunks}
     if len(cache) > 50:

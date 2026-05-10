@@ -55,6 +55,7 @@ from .misc_tools import (
     SystemControlTool,
     ThinkContinueTool,
 )
+from .frontend_tools import FrontendInspectTool
 from .search_tools import StockQueryTool, UrlFetchTool, WebReadChunkTool, WebSearchTool
 from .self_edit_tools import (
     ApplyProposalTool,
@@ -77,7 +78,7 @@ TOOL_REGISTRY: dict[str, dict[str, Any]] = {
     "MediaAnalyze": {"category": "device", "desc": "Analyze uploaded media (images/GIFs/videos). Images→single JPEG. Videos→key frames. First call auto-extracts overview frames with timestamp_sec per frame. For deeper analysis, call again with timestamps=[1.5,3.0,...] to extract at exact seconds. Describe what you see and respond to intent/mood. Params: file_path(required), max_dim(default 640), target_kb(default 40), timestamps(optional list of seconds)", "priority": 1},
     "ThinkContinue": {"category": "core", "desc": "Record internal reasoning steps (optional). Params: thought, next_action", "priority": 0},
     "StockQuery": {"category": "search", "desc": "Query stock or fund quotes. Params: codes (for example 'TSLA,AAPL')", "priority": 1},
-    "WebSearch": {"category": "search", "desc": "Web search returning titles+snippets. Use UrlFetch to read a result page. Params: query, num_results, engine (google/bing/baidu/bing_cn)", "priority": 2},
+    "WebSearch": {"category": "search", "desc": "Web search (bing first, baidu fallback). Returns titles+snippets. Then use UrlFetch(url) to read full page, WebReadChunk(doc_id, position) for more. Params: query, num_results(default 5), engine(google/bing/baidu/bing_cn, leave empty for auto)", "priority": 2},
     "BatchControl": {"category": "device", "desc": "Control multiple devices in one request. Params: entity_ids(list) OR discovery filters domain/area/state/name_contains, action(turn_on/turn_off/toggle), data. Domain-aware: vacuum turn_on=start cleaning, turn_off=return to base; cover turn_on=open, turn_off=close; lock turn_on=unlock, turn_off=lock. For 'turn off all lights', call domain='light', state='on', action='turn_off'. For 'start/open all vacuums', call domain='vacuum', action='turn_on'.", "priority": 2},
     "AreaDevices": {"category": "query", "desc": "Get all devices in a specific area. Params: area", "priority": 2},
     "HistoryQuery": {"category": "query", "desc": "Query entity history. Params: entity_id, hours (default 24)", "priority": 2},
@@ -110,7 +111,7 @@ TOOL_REGISTRY: dict[str, dict[str, Any]] = {
     "CustomEntityManager": {"category": "system", "desc": "Create/list/edit/delete dynamic AI entities under claw_assistant device (diagnostic). Use this tool (NOT HAControl/shell) to create custom entities. Supports sensor(Jinja2), binary_sensor(Jinja2), switch(toggle), button(press_action). Params: action(create/list/edit/delete), platform, name, entity_id, state_template, icon, device_class, state_class, unit_of_measurement, press_action", "priority": 1},
     "HelperManager": {"category": "system", "desc": "Create/list/delete HA native helpers (input_boolean/input_number/input_text/input_select/input_datetime/input_button/timer/counter/template sensor/binary_sensor). Use this tool (NOT HAControl/shell) to manage helpers. All params are flat (no nested dict). action=create: helper_type+name+type-specific params. action=delete: entity_id or helper_type+name.", "priority": 1},
     "GetSystemIndex": {"category": "query", "desc": "Get the system structure index (areas/domains/device classes/people/automations/scripts overview). Params: force_refresh (default false)", "priority": 2},
-    "SetConversationState": {"category": "core", "desc": "Set the conversation state. Params: expecting_response(bool), reason", "priority": 2},
+    "SetConversationState": {"category": "core", "desc": "Set conversation state ONLY for complex multi-turn interactions. DO NOT use for simple device control or queries — the system auto-detects completion. Params: expecting_response(bool), reason", "priority": 3},
     "AgentHandoff": {"category": "core", "desc": "Consult another AI agent synchronously. You keep control. Params: agent_id(optional), question(required), context(optional), intent(consult|request|review). Reply comes back as tool result.", "priority": 2},
     "NextAgentHandoff": {"category": "core", "desc": "Consult the next available AI agent. Shortcut for AgentHandoff. Params: question(required), context(optional). Reply comes back as tool result.", "priority": 2},
     "ValidateService": {"category": "query", "desc": "Validate service call parameters. Params: domain, service, data. Returns validity, errors, and suggestions.", "priority": 2},
@@ -129,6 +130,7 @@ TOOL_REGISTRY: dict[str, dict[str, Any]] = {
     "DiscardProposal": {"category": "core", "desc": "Remove a pending proposal without applying it. Params: slug", "priority": 2},
     "ApplyProposal": {"category": "core", "desc": "Approve and apply a pending proposal. Params: slug, approved_by", "priority": 2},
     "Registry": {"category": "system", "desc": "Manage HA registries (areas/floors/labels/categories/entities). Use this for: creating/renaming/deleting areas, assigning entities to areas, adding labels, updating labels. Label rename uses action=update with params:{name:new_name}; label action=rename is accepted as update for compatibility. Params: registry(area/floor/label/category/entity), action(list/get/create/update/delete/rename), *_id, params(dict)", "priority": 1},
+    "FrontendInspect": {"category": "system", "desc": "Interact with the HA frontend like a real user. action=snapshot reads current page DOM tree. action=navigate smoothly navigates via SPA transition (path e.g. /config, /lovelace/0). action=tap clicks an element by CSS selector or visible text (traverses shadow DOM). action=type types text into an input field (selector or text to find, value to type, clear=true to clear first). action=scroll scrolls page or element (direction=up/down/left/right, amount in px). action=exec_js runs arbitrary JS. Params: action, selector, text, path, value, clear, direction, amount, js_code, depth(default 8)", "priority": 2},
     "DashboardCard": {"category": "system", "desc": "Create/manage Lovelace dashboard views and cards. Supports masonry and sections view types. html-card-pro cards use content; other cards use card_config or card_yaml. Workflow: list_dashboards→get_dashboard→get_card/add_view/add_card/update_card. Run check_dependency only before creating custom:html-pro-card. Params: action, dashboard_url, view_index, card_index, section_index(-1=auto for sections views), title, icon, content(HTML/CSS/JS), card_config, card_yaml. Returns mandatory _action_required instructions.", "priority": 2},
 }
 
@@ -206,6 +208,7 @@ def build_tool_map() -> dict[str, type]:
         "IntentCall": IntentCallTool,
         "Registry": RegistryTool,
         "DashboardCard": DashboardCardTool,
+        "FrontendInspect": FrontendInspectTool,
     }
 
 

@@ -337,12 +337,12 @@ The index is cached for 5 minutes and refreshes automatically when state changes
 
 class SetConversationStateTool(llm.Tool):
     name = "SetConversationState"
-    description = """Set the conversation state to indicate whether a user reply is expected.
+    description = """Set the conversation state ONLY for complex multi-turn interactions.
 
-- expecting_response=true: you are waiting for a user reply, such as a question or confirmation
-- expecting_response=false: the task is complete and no reply is needed
+- expecting_response=true: you asked the user a question and need their reply before proceeding
+- expecting_response=false: a long-running multi-step task is fully done
 
-Call this tool after finishing a task so the system can manage the conversation lifecycle correctly."""
+DO NOT call this for simple tasks like device control, queries, or single-action requests. The system auto-detects task completion from your reply text. Only use when the conversation lifecycle genuinely needs explicit signaling."""
     parameters = vol.Schema(
         {
             vol.Required("expecting_response"): bool,
