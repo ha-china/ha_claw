@@ -153,8 +153,9 @@ def _extract_with_trafilatura(
         favor_recall=True,
         include_comments=False,
         include_tables=True,
-        include_links=False,
+        include_links=True,
         deduplicate=False,
+        no_fallback=False,
         config=_trafilatura_config,
     )
     content = _normalize_text(extracted or "")

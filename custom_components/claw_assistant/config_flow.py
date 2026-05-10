@@ -30,6 +30,7 @@ from .const import (
     CONF_ENABLE_CONTEXT_STATUS_BAR,
     CONF_ENABLE_FILE_UPLOAD,
     CONF_ENABLE_RICH_MARKDOWN,
+    CONF_ENABLE_SIDEBAR_DOCK,
     CONF_ENABLE_STREAMING_EFFECT,
     CONF_ENABLE_TOOL_PROGRESS,
     CONF_ENABLE_WEB_SEARCH,
@@ -206,7 +207,7 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
             current_options = dict(self._config_entry.options)
 
             agent_keys = [CONF_PRIMARY_AGENT, CONF_FALLBACK_AGENT, CONF_SECONDARY_FALLBACK_AGENT]
-            conversation_keys = [CONF_CONVERSATION_MODE, CONF_ENABLE_WEB_SEARCH, CONF_ENABLE_STREAMING_EFFECT, CONF_ENABLE_TOOL_PROGRESS, CONF_CONTINUOUS_CONVERSATION, CONF_ENABLE_CONTEXT_STATUS_BAR, CONF_ENABLE_FILE_UPLOAD, CONF_ENABLE_RICH_MARKDOWN, CONF_MAX_TOOL_REPEAT, CONF_PIPELINE_TIMEOUT]
+            conversation_keys = [CONF_CONVERSATION_MODE, CONF_ENABLE_WEB_SEARCH, CONF_ENABLE_STREAMING_EFFECT, CONF_ENABLE_TOOL_PROGRESS, CONF_CONTINUOUS_CONVERSATION, CONF_ENABLE_CONTEXT_STATUS_BAR, CONF_ENABLE_FILE_UPLOAD, CONF_ENABLE_RICH_MARKDOWN, CONF_ENABLE_SIDEBAR_DOCK, CONF_MAX_TOOL_REPEAT, CONF_PIPELINE_TIMEOUT]
 
             if not allow_agent_changes:
                 for key in agent_keys:
@@ -218,7 +219,7 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
                     if key in current_options:
                         self._user_input[key] = current_options[key]
 
-            bool_keys = [CONF_ENABLE_WEB_SEARCH, CONF_ENABLE_STREAMING_EFFECT, CONF_ENABLE_TOOL_PROGRESS, CONF_CONTINUOUS_CONVERSATION, CONF_ENABLE_CONTEXT_STATUS_BAR, CONF_ENABLE_FILE_UPLOAD, CONF_ENABLE_RICH_MARKDOWN]
+            bool_keys = [CONF_ENABLE_WEB_SEARCH, CONF_ENABLE_STREAMING_EFFECT, CONF_ENABLE_TOOL_PROGRESS, CONF_CONTINUOUS_CONVERSATION, CONF_ENABLE_CONTEXT_STATUS_BAR, CONF_ENABLE_FILE_UPLOAD, CONF_ENABLE_RICH_MARKDOWN, CONF_ENABLE_SIDEBAR_DOCK]
 
             for key, value in user_input.items():
                 if key not in exclude_keys:
@@ -561,15 +562,15 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
                 return await self.async_step_conversation_settings()
             return self._save_conversation_subform(user_input)
 
-        current_enable_streaming = self._config_entry.options.get(CONF_ENABLE_STREAMING_EFFECT, True)
         current_tool_progress = self._config_entry.options.get(CONF_ENABLE_TOOL_PROGRESS, True)
         current_continuous_conversation = self._config_entry.options.get(CONF_CONTINUOUS_CONVERSATION, False)
         current_context_status_bar = self._config_entry.options.get(CONF_ENABLE_CONTEXT_STATUS_BAR, False)
         current_file_upload = self._config_entry.options.get(CONF_ENABLE_FILE_UPLOAD, False)
         current_rich_markdown = self._config_entry.options.get(CONF_ENABLE_RICH_MARKDOWN, True)
+        current_sidebar_dock = self._config_entry.options.get(CONF_ENABLE_SIDEBAR_DOCK, True)
 
         schema = vol.Schema({
-            vol.Optional(CONF_ENABLE_STREAMING_EFFECT, default=current_enable_streaming): BooleanSelector(),
+            vol.Optional(CONF_ENABLE_SIDEBAR_DOCK, default=current_sidebar_dock): BooleanSelector(),
             vol.Optional(CONF_ENABLE_TOOL_PROGRESS, default=current_tool_progress): BooleanSelector(),
             vol.Optional(CONF_CONTINUOUS_CONVERSATION, default=current_continuous_conversation): BooleanSelector(),
             vol.Optional(CONF_ENABLE_CONTEXT_STATUS_BAR, default=current_context_status_bar): BooleanSelector(),

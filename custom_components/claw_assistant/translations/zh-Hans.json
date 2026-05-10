@@ -91,7 +91,7 @@
           "back": "返回上级菜单",
           "save_and_exit": "保存并完成",
           "next_step": "下一步",
-          "enable_streaming_effect": "流式显示",
+          "enable_sidebar_dock": "AI 侧边栏",
           "enable_tool_progress": "工具调用进度",
           "continuous_conversation": "连续聊天窗口",
           "enable_context_status_bar": "上下文状态栏",
@@ -99,7 +99,7 @@
           "enable_rich_markdown": "富文本增强"
         },
         "data_description": {
-          "enable_streaming_effect": "启用后，工具调用进度等消息将以逐字打字机效果呈现；关闭则一次性显示",
+          "enable_sidebar_dock": "启用后，AI 对话将以右侧固定侧边栏形式展示，与主界面并排显示；关闭则使用默认浮动弹窗。",
           "enable_tool_progress": "启用后，AI 调用工具时在聊天窗口实时显示执行进度（如正在查询设备、正在搜索等）；关闭则静默执行，适合语音管道等不需要进度展示的场景。",
           "continuous_conversation": "启用后，前端聊天框重新打开或激活仍沿用同一个对话，直到发送 /new 才切换新窗口；关闭则保持当前每个窗口独立上下文。",
           "enable_context_status_bar": "启用后，在聊天输入框上方显示上下文 token、窗口时间与当前回复耗时。",

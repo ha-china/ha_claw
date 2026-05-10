@@ -139,14 +139,27 @@ class WebPageFetcher:
                 _LOGGER.debug("Baidu redirect resolved: %s... -> %s...", url[:50], real_url[:50])
                 url = real_url
 
-        for _ in range(2):
+        headers = kwargs.pop("headers", None) or self._get_headers()
+        try:
+            domain = urlparse(url).netloc.lower()
+        except Exception:
+            domain = ""
+        if "Referer" not in headers:
+            headers["Referer"] = f"https://{domain}/" if domain else "https://www.google.com/"
+        headers.setdefault("Upgrade-Insecure-Requests", "1")
+        headers.setdefault("Sec-Fetch-Dest", "document")
+        headers.setdefault("Sec-Fetch-Mode", "navigate")
+        headers.setdefault("Sec-Fetch-Site", "none")
+        headers.setdefault("Sec-Fetch-User", "?1")
+
+        for attempt in range(3):
             try:
                 async with self.session.get(
                     url,
                     timeout=ClientTimeout(total=30),
                     allow_redirects=True,
                     ssl=False,
-                    **kwargs,
+                    headers=headers,
                 ) as resp:
                     final_url = str(resp.url)
                     if final_url != url:
@@ -164,9 +177,22 @@ class WebPageFetcher:
                         url = str(resp.headers.get("Location", ""))
                         if url:
                             continue
+                    elif resp.status == 403 and attempt == 0:
+                        headers["User-Agent"] = (
+                            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                            "AppleWebKit/537.36 (KHTML, like Gecko) "
+                            "Chrome/125.0.0.0 Safari/537.36"
+                        )
+                        continue
+                    else:
+                        _LOGGER.debug("Request %s returned status %d", url[:60], resp.status)
+                        break
+            except asyncio.TimeoutError:
+                _LOGGER.debug("Request timeout (attempt %d): %s", attempt, url[:60])
+                await asyncio.sleep(1)
             except Exception as err:
-                _LOGGER.debug("Request failed: %s", err)
-                await asyncio.sleep(2)
+                _LOGGER.debug("Request failed (attempt %d): %s", attempt, err)
+                await asyncio.sleep(1)
         return None
 
     async def resolve_baidu_redirect(self, baidu_url: str) -> str | None:
