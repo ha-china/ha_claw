@@ -39,6 +39,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     await _async_ensure_bootstrap_on_first_install(hass)
     async_setup_heartbeat_ticker(hass)
     async_setup_im_approval_bridge(hass)
+    from .services.update_handler import async_setup_update_handler
+    async_setup_update_handler(hass)
     from .runtime.custom_entity_store import async_load_custom_entities
     await async_load_custom_entities(hass)
     from .conversation_utils import async_setup_history_store
@@ -84,6 +86,8 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     if not hass.data[DOMAIN]:
         async_unload_heartbeat_ticker(hass)
         async_unload_im_approval_bridge(hass)
+        from .services.update_handler import async_unload_update_handler
+        async_unload_update_handler(hass)
         from .conversation_utils import async_flush_history_store
         await async_flush_history_store(hass)
         await async_unload_runtime(hass)
