@@ -29,9 +29,9 @@ class SearchResult:
 _CN_TIMEZONES = {"Asia/Shanghai", "Asia/Chongqing", "Asia/Urumqi", "Asia/Harbin", "PRC"}
 
 ENGINES = {
-    "bing": {"url": "https://www.bing.com/search", "param": "q", "sel": ".b_algo", "title": "h2 a", "link": "h2 a", "desc": ".b_caption p"},
-    "baidu": {"url": "https://www.baidu.com/s", "param": "wd", "sel": ".result.c-container, .c-container", "title": "h3 a, .t a", "link": "h3 a, .t a", "desc": ".c-abstract, .c-span-last"},
-    "bing_cn": {"url": "https://cn.bing.com/search", "param": "q", "sel": ".b_algo", "title": "h2 a", "link": "h2 a", "desc": ".b_caption p"},
+    "bing": {"url": "https://www.bing.com/search", "param": "q", "sel": ".b_algo, li.b_algo, .b_results > li", "title": "h2 a, h2 > a, a.tilk", "link": "h2 a, h2 > a, a.tilk", "desc": ".b_caption p, .b_lineclamp2, p"},
+    "baidu": {"url": "https://www.baidu.com/s", "param": "wd", "sel": ".result.c-container, .c-container, .c-result", "title": "h3 a, .t a, .c-title a", "link": "h3 a, .t a, .c-title a", "desc": ".c-abstract, .c-span-last, .content-right_2s-QC"},
+    "bing_cn": {"url": "https://cn.bing.com/search", "param": "q", "sel": ".b_algo, li.b_algo, .b_results > li", "title": "h2 a, h2 > a, a.tilk", "link": "h2 a, h2 > a, a.tilk", "desc": ".b_caption p, .b_lineclamp2, p"},
 }
 _ALL_ENGINES = {"google", *ENGINES}
 SEARCH_ENGINES = list(_ALL_ENGINES)
@@ -46,8 +46,8 @@ def _is_cn(hass=None) -> bool:
 
 def _default_engines(hass=None) -> list[str]:
     if _is_cn(hass):
-        return ["baidu", "bing_cn"]
-    return ["google", "bing"]
+        return ["bing", "bing_cn", "baidu"]
+    return ["bing", "google"]
 
 BLOCKED_DOMAINS = {"zhihu.com", "zhihu.cn"}
 UA_LIST = [
@@ -236,76 +236,201 @@ class WebSearch:
             _LOGGER.error("Google search error: %s", e, exc_info=True)
         return results
 
+    def _extract_results_from_html(
+        self, html: str, engine: str, num: int, required_domains: set[str]
+    ) -> List[SearchResult]:
+        cfg = ENGINES.get(engine, {})
+        soup = BeautifulSoup(html, "html.parser")
+        results: List[SearchResult] = []
+
+        if cfg:
+            for selector in cfg["sel"].split(", "):
+                items = soup.select(selector)[:num]
+                if items:
+                    _LOGGER.debug("%s found %d items with selector %s", engine, len(items), selector)
+                    for item in items:
+                        title_el = link_el = desc_el = None
+                        for ts in cfg["title"].split(", "):
+                            title_el = item.select_one(ts)
+                            if title_el:
+                                break
+                        for ls in cfg["link"].split(", "):
+                            link_el = item.select_one(ls)
+                            if link_el:
+                                break
+                        for ds in cfg["desc"].split(", "):
+                            desc_el = item.select_one(ds)
+                            if desc_el:
+                                break
+                        if not title_el or not link_el:
+                            continue
+                        href = link_el.get("href", "")
+                        if not href:
+                            continue
+                        if href.startswith("/"):
+                            href = f"https://{urlparse(cfg['url']).netloc}{href}"
+                        if self.page_fetcher and self.page_fetcher.is_domain_blocked(href):
+                            continue
+                        if not _matches_required_domains(href, required_domains):
+                            continue
+                        title = title_el.get_text(strip=True)
+                        snippet = desc_el.get_text(strip=True) if desc_el else ""
+                        if title and href:
+                            results.append(SearchResult(
+                                title=title, url=href, snippet=snippet,
+                                metadata={"engine": engine, "timestamp": datetime.now().isoformat()},
+                            ))
+                    if results:
+                        return results[:num]
+                    break
+
+        _LOGGER.debug("%s: selectors failed, using trafilatura extraction", engine)
+        results = self._trafilatura_extract_links(html, engine, num, required_domains)
+        return results
+
+    def _trafilatura_extract_links(
+        self, html: str, engine: str, num: int, required_domains: set[str]
+    ) -> List[SearchResult]:
+        engine_domains = {"bing.com", "cn.bing.com", "baidu.com", "www.baidu.com", "duckduckgo.com"}
+        text = ""
+        try:
+            from trafilatura import extract
+            from trafilatura.settings import DEFAULT_CONFIG
+            from copy import deepcopy
+            cfg = deepcopy(DEFAULT_CONFIG)
+            cfg['DEFAULT']['MIN_EXTRACTED_SIZE'] = '0'
+            cfg['DEFAULT']['MIN_OUTPUT_SIZE'] = '0'
+            text = extract(html, include_links=True, include_tables=False,
+                           no_fallback=False, config=cfg) or ""
+        except Exception as exc:
+            _LOGGER.warning("trafilatura extract failed: %s", exc)
+
+        results: List[SearchResult] = []
+        seen: set[str] = set()
+
+        if text:
+            md_link_pattern = re.compile(r'\[([^\]]+)\]\((https?://[^)]+)\)')
+            for match in md_link_pattern.finditer(text):
+                title, href = match.group(1).strip(), match.group(2).strip()
+                href = href.rstrip(".,;:)")
+                try:
+                    domain = urlparse(href).netloc.lower()
+                except Exception:
+                    continue
+                if any(ed in domain for ed in engine_domains):
+                    continue
+                if self.page_fetcher and self.page_fetcher.is_domain_blocked(href):
+                    continue
+                if not _matches_required_domains(href, required_domains):
+                    continue
+                if href in seen:
+                    continue
+                seen.add(href)
+                if not title or len(title) < 2:
+                    title = domain
+                results.append(SearchResult(
+                    title=title[:200], url=href, snippet="",
+                    metadata={"engine": engine, "timestamp": datetime.now().isoformat(), "fallback": "trafilatura_md"},
+                ))
+                if len(results) >= num:
+                    break
+
+        if not results and text:
+            url_pattern = re.compile(r'(https?://[^\s\])<>"]+)')
+            for line in text.split("\n"):
+                for href in url_pattern.findall(line):
+                    href = href.rstrip(".,;:)")
+                    try:
+                        domain = urlparse(href).netloc.lower()
+                    except Exception:
+                        continue
+                    if any(ed in domain for ed in engine_domains):
+                        continue
+                    if self.page_fetcher and self.page_fetcher.is_domain_blocked(href):
+                        continue
+                    if not _matches_required_domains(href, required_domains):
+                        continue
+                    if href in seen:
+                        continue
+                    seen.add(href)
+                    title = line.split("http")[0].strip(" []()|")
+                    if not title or len(title) < 3:
+                        title = domain
+                    results.append(SearchResult(
+                        title=title[:200], url=href, snippet="",
+                        metadata={"engine": engine, "timestamp": datetime.now().isoformat(), "fallback": "trafilatura_url"},
+                    ))
+                    if len(results) >= num:
+                        break
+                if len(results) >= num:
+                    break
+
+        if not results:
+            soup = BeautifulSoup(html, "html.parser")
+            for a in soup.select("a[href]"):
+                href = a.get("href", "")
+                if not href or not href.startswith("http"):
+                    continue
+                try:
+                    domain = urlparse(href).netloc.lower()
+                except Exception:
+                    continue
+                if any(ed in domain for ed in engine_domains):
+                    continue
+                if self.page_fetcher and self.page_fetcher.is_domain_blocked(href):
+                    continue
+                if not _matches_required_domains(href, required_domains):
+                    continue
+                if href in seen:
+                    continue
+                seen.add(href)
+                title = a.get_text(strip=True) or domain
+                if len(title) < 3:
+                    title = domain
+                results.append(SearchResult(
+                    title=title[:200], url=href, snippet="",
+                    metadata={"engine": engine, "timestamp": datetime.now().isoformat(), "fallback": "bs4_links"},
+                ))
+                if len(results) >= num:
+                    break
+
+        _LOGGER.debug("%s: trafilatura fallback extracted %d results", engine, len(results))
+        return results
+
     async def _search_engine(self, query: str, engine: str, num: int = 5) -> List[SearchResult]:
         if engine == "google":
             return await self._search_google(query, num)
         cfg = ENGINES.get(engine)
-        if not cfg: return []
+        if not cfg:
+            return []
         await self.rate_limiters.get(engine, RateLimiter()).acquire()
         cached = self._get_cached_results(query, engine)
-        if cached: return cached
-        results = []
+        if cached:
+            return cached
         required_domains = _extract_required_domains(query)
         try:
             from urllib.parse import quote
             url = f"{cfg['url']}?{cfg['param']}={quote(query)}"
             _LOGGER.debug("Search engine request: %s - %s", engine, url)
-            page = await self.page_fetcher.make_request(url, headers=self._get_headers())
+            headers = self._get_headers()
+            if "bing" in engine:
+                headers["Cookie"] = "_EDGE_V=1; SRCHD=AF=NOFORM; SRCHHPGUSR=NRSLT=50"
+            page = await self.page_fetcher.make_request(url, headers=headers)
             if not page:
+                _LOGGER.warning("%s: request returned None (timeout/blocked)", engine)
                 return []
-            _LOGGER.debug("%s response length: %s", engine, len(page.text))
-            soup = BeautifulSoup(page.text, "html.parser")
-
-            for selector in cfg["sel"].split(", "):
-                items = soup.select(selector)[:num]
-                if items:
-                    _LOGGER.debug("%s found %d results with selector %s", engine, len(items), selector)
-                    break
-            else:
-                items = []
-
-            for item in items:
-                title_el = None
-                for ts in cfg["title"].split(", "):
-                    title_el = item.select_one(ts)
-                    if title_el: break
-
-                link_el = None
-                for ls in cfg["link"].split(", "):
-                    link_el = item.select_one(ls)
-                    if link_el: break
-
-                desc_el = None
-                for ds in cfg["desc"].split(", "):
-                    desc_el = item.select_one(ds)
-                    if desc_el: break
-
-                if not title_el or not link_el: continue
-                href = link_el.get("href", "")
-                if not href: continue
-                if href.startswith("/"): href = f"https://{urlparse(cfg['url']).netloc}{href}"
-                if self.page_fetcher.is_domain_blocked(href): continue
-                if not _matches_required_domains(href, required_domains):
-                    continue
-
-                title = title_el.get_text(strip=True)
-                snippet = desc_el.get_text(strip=True) if desc_el else ""
-
-                if title and href:
-                    results.append(SearchResult(
-                        title=title,
-                        url=href,
-                        snippet=snippet,
-                        metadata={"engine": engine, "timestamp": datetime.now().isoformat()}
-                    ))
-                    _LOGGER.debug("Found result: %s... -> %s...", title[:30], href[:50])
-
+            if len(page.text) < 2000 and ("verify" in page.text.lower() or "captcha" in page.text.lower() or "waf" in page.text.lower()):
+                _LOGGER.warning("%s: detected captcha/WAF page (%d chars)", engine, len(page.text))
+                return []
+            _LOGGER.debug("%s response length: %d", engine, len(page.text))
+            results = self._extract_results_from_html(page.text, engine, num, required_domains)
             if results:
                 self._cache_results(query, engine, results)
-                _LOGGER.debug("%s successfully fetched %d results", engine, len(results))
+                _LOGGER.debug("%s: got %d results", engine, len(results))
+            return results
         except Exception as e:
-            _LOGGER.error(f"{engine} search error: {e}", exc_info=True)
-        return results
+            _LOGGER.error("%s search error: %s", engine, e, exc_info=True)
+            return []
 
     async def fetch_url_content(self, url: str) -> Optional[SearchResult]:
         return await self.page_fetcher.fetch_url_content(url, SearchResult)
@@ -341,19 +466,17 @@ class WebSearch:
             _LOGGER.error("Failed to process direct URLs: %s", e)
 
         if engine and engine in _ALL_ENGINES:
-            engines_to_try = [engine]
+            engines_to_try = [engine] + [e for e in _default_engines(self._hass) if e != engine]
         else:
             engines_to_try = _default_engines(self._hass)
         _LOGGER.debug("Search: %s (engines: %s)", query, engines_to_try)
-        engine_tasks = [
-            self._search_engine(query, eng, num_results) for eng in engines_to_try
-        ]
-        engine_outputs = await asyncio.gather(*engine_tasks, return_exceptions=True)
         seen_urls: set[str] = set()
         all_results: List[SearchResult] = []
-        for eng, output in zip(engines_to_try, engine_outputs):
-            if isinstance(output, Exception):
-                _LOGGER.error("%s search error: %s", eng, output)
+        for eng in engines_to_try:
+            try:
+                output = await self._search_engine(query, eng, num_results)
+            except Exception as exc:
+                _LOGGER.error("%s search error: %s", eng, exc)
                 continue
             for result in output or []:
                 key = result.url or result.title
@@ -361,22 +484,9 @@ class WebSearch:
                     continue
                 seen_urls.add(key)
                 all_results.append(result)
-
-        if not all_results and engine and engine in _ALL_ENGINES:
-            fallback = [e for e in _default_engines(self._hass) if e != engine]
-            if fallback:
-                _LOGGER.debug("Fallback from %s to %s", engine, fallback)
-                fb_tasks = [self._search_engine(query, e, num_results) for e in fallback]
-                fb_outputs = await asyncio.gather(*fb_tasks, return_exceptions=True)
-                for eng, output in zip(fallback, fb_outputs):
-                    if isinstance(output, Exception):
-                        continue
-                    for result in output or []:
-                        key = result.url or result.title
-                        if not key or key in seen_urls:
-                            continue
-                        seen_urls.add(key)
-                        all_results.append(result)
+            if all_results:
+                _LOGGER.debug("Got %d results from %s, skipping remaining engines", len(all_results), eng)
+                break
 
         if fetch_content and all_results:
             content_tasks = []
