@@ -178,7 +178,7 @@
                 if (!r?.tasks?.length) return;
                 for (const task of r.tasks) await runTask(task);
             } catch(_) {}
-        }, 2000);
+        }, 5000);
 
     }
 
