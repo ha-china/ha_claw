@@ -20,7 +20,7 @@ from homeassistant.components.conversation.const import ChatLogEventType
 from homeassistant.core import callback
 from homeassistant.helpers.chat_session import async_get_chat_session
 
-from ..const import CONF_ENABLE_CONTEXT_STATUS_BAR, CONF_ENABLE_FILE_UPLOAD, DOMAIN
+from ..const import CONF_ENABLE_CONTEXT_STATUS_BAR, CONF_ENABLE_FILE_UPLOAD, CONF_ENABLE_SIDEBAR_DOCK, DOMAIN
 from .continuous_conversation import (
     continuous_conversation_enabled,
     get_effective_conversation_id,
@@ -114,6 +114,13 @@ def file_upload_enabled(hass) -> bool:
     return False
 
 
+def sidebar_dock_enabled(hass) -> bool:
+    for entry in hass.config_entries.async_entries(DOMAIN):
+        if entry.options.get(CONF_ENABLE_SIDEBAR_DOCK, True):
+            return True
+    return False
+
+
 def queue_frontend_js(hass, js_code: str) -> None:
     if not js_code:
         return
@@ -170,6 +177,7 @@ async def websocket_get_settings(
             "continuous_conversation": continuous_conversation_enabled(hass),
             "enable_context_status_bar": context_status_bar_enabled(hass),
             "enable_file_upload": file_upload_enabled(hass),
+            "enable_sidebar_dock": sidebar_dock_enabled(hass),
         },
     )
 
@@ -899,6 +907,47 @@ def _uninstall_recognize_intent_hook(hass) -> None:
     _LOGGER.info("Uninstalled recognize_intent goal-continuation hook")
 
 
+@websocket_api.websocket_command(
+    {
+        vol.Required("type"): "ha_crack/frontend_snapshot",
+        vol.Required("snapshot"): dict,
+    }
+)
+@websocket_api.async_response
+async def websocket_frontend_snapshot(hass, connection, msg):
+    from ..tools.frontend_tools import store_frontend_snapshot
+    store_frontend_snapshot(hass, msg["snapshot"])
+    connection.send_result(msg["id"])
+
+
+@websocket_api.websocket_command(
+    {
+        vol.Required("type"): "ha_crack/frontend_exec_poll",
+    }
+)
+@websocket_api.async_response
+async def websocket_frontend_exec_poll(hass, connection, msg):
+    from ..tools.frontend_tools import _domain_data, _FRONTEND_EXEC_QUEUE
+    q = _domain_data(hass).setdefault(_FRONTEND_EXEC_QUEUE, [])
+    items = list(q)
+    q.clear()
+    connection.send_result(msg["id"], {"tasks": items})
+
+
+@websocket_api.websocket_command(
+    {
+        vol.Required("type"): "ha_crack/frontend_exec_result",
+        vol.Required("exec_id"): str,
+        vol.Required("result"): vol.Any(dict, str, int, float, bool, list, None),
+    }
+)
+@websocket_api.async_response
+async def websocket_frontend_exec_result(hass, connection, msg):
+    from ..tools.frontend_tools import store_frontend_exec_result
+    store_frontend_exec_result(hass, msg["exec_id"], msg["result"])
+    connection.send_result(msg["id"])
+
+
 def install_official_websocket_process_hook(hass) -> None:
 
     domain_data = hass.data.setdefault("claw_assistant", {})
@@ -914,6 +963,9 @@ def install_official_websocket_process_hook(hass) -> None:
     websocket_api.async_register_command(hass, websocket_get_settings)
     websocket_api.async_register_command(hass, websocket_get_context_status)
     websocket_api.async_register_command(hass, websocket_upload_file)
+    websocket_api.async_register_command(hass, websocket_frontend_snapshot)
+    websocket_api.async_register_command(hass, websocket_frontend_exec_poll)
+    websocket_api.async_register_command(hass, websocket_frontend_exec_result)
     hass.http.register_view(ClawUploadView())
     hass.http.register_view(ClawFileView())
 
