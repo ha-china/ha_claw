@@ -496,6 +496,26 @@
             dockBody.appendChild(chat);
             dock.setAttribute('open', '');
 
+            const patchMarkdownIndent = (root) => {
+                if (!root) return;
+                root.querySelectorAll('ha-markdown').forEach(md => {
+                    if (md.shadowRoot && !md.shadowRoot.getElementById('claw-md-fix')) {
+                        const s = document.createElement('style');
+                        s.id = 'claw-md-fix';
+                        s.textContent = 'ha-markdown-element > :is(ol, ul) { padding-inline-start: 2.15em !important; }';
+                        md.shadowRoot.appendChild(s);
+                    }
+                });
+            };
+            const chatSR = chat.shadowRoot;
+            if (chatSR) {
+                patchMarkdownIndent(chatSR);
+                if (!chatSR.__clawMdObs) {
+                    chatSR.__clawMdObs = new MutationObserver(() => patchMarkdownIndent(chatSR));
+                    chatSR.__clawMdObs.observe(chatSR, { childList: true, subtree: true });
+                }
+            }
+
             neutralizeVoiceDialog(voiceEl);
             voiceEl.style.display = 'none';
 
