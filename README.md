@@ -6,7 +6,7 @@
 
 Honestly, I never set out to "hack" Home Assistant.
 
-HA's native conversation system has a fatal flaw: **the single-shot mechanism**. One AI Agent, one tool call, one result. In real-world scenarios this is practically useless — when you say "set the living room to movie mode," the AI needs to dim the lights, adjust brightness, turn on the TV, switch the input source, and close the curtains. A single tool call simply can't handle that.
+HA's native conversation system has a fatal flaw: **the single-shot mechanism**. One AI Agent, one result. In real-world scenarios this is practically useless — when you say "set the living room to movie mode," the AI needs to dim the lights, adjust brightness, turn on the TV, switch the input source, and close the curtains. A single tool call simply can't handle that.
 
 So Claw Assistant was born. I **deeply transformed HA's official conversation pipeline via a Hook mechanism**, injecting multi-turn tool call loops, Agent cascading, adaptive memory, streaming output, and other modern AI Agent architectures — all without breaking existing functionality.
 
