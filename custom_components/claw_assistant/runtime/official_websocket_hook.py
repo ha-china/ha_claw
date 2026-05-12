@@ -138,10 +138,20 @@ async def websocket_get_pending_js(
     connection: websocket_api.ActiveConnection,
     msg: dict,
 ) -> None:
-    pending = _domain_data(hass).setdefault(_PENDING_JS_KEY, [])
-    js_codes = list(pending)
-    pending.clear()
-    connection.send_result(msg["id"], {"js_codes": js_codes})
+    dd = _domain_data(hass)
+    pending = dd.setdefault(_PENDING_JS_KEY, [])
+    cursors = dd.setdefault("_pending_js_cursors", {})
+    conn_id = id(connection)
+    cursor = cursors.get(conn_id, 0)
+    unseen = pending[cursor:]
+    cursors[conn_id] = len(pending)
+    if len(pending) > 200:
+        min_cursor = min(cursors.values()) if cursors else len(pending)
+        if min_cursor > 0:
+            del pending[:min_cursor]
+            for k in cursors:
+                cursors[k] -= min_cursor
+    connection.send_result(msg["id"], {"js_codes": unseen})
 
 
 @websocket_api.websocket_command(
@@ -949,10 +959,56 @@ async def websocket_frontend_snapshot(hass, connection, msg):
 @websocket_api.async_response
 async def websocket_frontend_exec_poll(hass, connection, msg):
     from ..tools.frontend_tools import _domain_data, _FRONTEND_EXEC_QUEUE
-    q = _domain_data(hass).setdefault(_FRONTEND_EXEC_QUEUE, [])
-    items = list(q)
-    q.clear()
-    connection.send_result(msg["id"], {"tasks": items})
+    dd = _domain_data(hass)
+    q = dd.setdefault(_FRONTEND_EXEC_QUEUE, [])
+    cursors = dd.setdefault("_exec_poll_cursors", {})
+    conn_id = id(connection)
+    cursor = cursors.get(conn_id, 0)
+    unseen = q[cursor:]
+    cursors[conn_id] = len(q)
+    if len(q) > 200:
+        min_cursor = min(cursors.values()) if cursors else len(q)
+        if min_cursor > 0:
+            del q[:min_cursor]
+            for k in cursors:
+                cursors[k] -= min_cursor
+    connection.send_result(msg["id"], {"tasks": unseen})
+
+
+class _ExecSub:
+    __slots__ = ("connection", "ws_msg_id")
+    def __init__(self, connection, ws_msg_id: int):
+        self.connection = connection
+        self.ws_msg_id = ws_msg_id
+    def send_message(self, msg):
+        self.connection.send_message(msg)
+
+
+@websocket_api.websocket_command(
+    {
+        vol.Required("type"): "ha_crack/frontend_exec_subscribe",
+    }
+)
+@websocket_api.async_response
+async def websocket_frontend_exec_subscribe(hass, connection, msg):
+    from ..tools.frontend_tools import _domain_data, _FRONTEND_EXEC_SUBS, _FRONTEND_EXEC_QUEUE
+    dd = _domain_data(hass)
+    subs: list = dd.setdefault(_FRONTEND_EXEC_SUBS, [])
+    sub = _ExecSub(connection, msg["id"])
+    subs.append(sub)
+    q = dd.get(_FRONTEND_EXEC_QUEUE, [])
+    for task in q[-20:]:
+        try:
+            connection.send_message({"id": msg["id"], "type": "event", "event": {"type": "exec", "task": task}})
+        except Exception:
+            pass
+    def unsub():
+        try:
+            subs.remove(sub)
+        except ValueError:
+            pass
+    connection.subscriptions[msg["id"]] = unsub
+    connection.send_result(msg["id"])
 
 
 @websocket_api.websocket_command(
@@ -991,22 +1047,30 @@ async def websocket_dialog_snapshot(hass, connection, msg):
 def install_official_websocket_process_hook(hass) -> None:
 
     domain_data = hass.data.setdefault("claw_assistant", {})
+    handlers = hass.data.setdefault("websocket_api", {})
+    for cmd_type, cmd in (
+        ("conversation/process", streaming_websocket_process),
+        ("ha_crack/get_pending_js", websocket_get_pending_js),
+        ("ha_crack/report_state", websocket_report_state),
+        ("ha_crack/get_settings", websocket_get_settings),
+        ("ha_crack/get_context_status", websocket_get_context_status),
+        ("ha_crack/upload_file", websocket_upload_file),
+        ("ha_crack/frontend_snapshot", websocket_frontend_snapshot),
+        ("ha_crack/frontend_exec_poll", websocket_frontend_exec_poll),
+        ("ha_crack/frontend_exec_result", websocket_frontend_exec_result),
+        ("ha_crack/frontend_exec_subscribe", websocket_frontend_exec_subscribe),
+        ("ha_crack/dialog_snapshot", websocket_dialog_snapshot),
+    ):
+        if cmd_type not in handlers:
+            websocket_api.async_register_command(hass, cmd)
+    from .chat_history_api import register_chat_history_websocket
+    register_chat_history_websocket(hass)
+
     if _PATCH_KEY in domain_data:
         return
-    handlers = hass.data.setdefault("websocket_api", {})
     domain_data[_PATCH_KEY] = handlers.get("conversation/process", _NO_HANDLER)
     _install_recognize_intent_hook(hass)
     _install_local_intent_format_hook(hass)
-    websocket_api.async_register_command(hass, streaming_websocket_process)
-    websocket_api.async_register_command(hass, websocket_get_pending_js)
-    websocket_api.async_register_command(hass, websocket_report_state)
-    websocket_api.async_register_command(hass, websocket_get_settings)
-    websocket_api.async_register_command(hass, websocket_get_context_status)
-    websocket_api.async_register_command(hass, websocket_upload_file)
-    websocket_api.async_register_command(hass, websocket_frontend_snapshot)
-    websocket_api.async_register_command(hass, websocket_frontend_exec_poll)
-    websocket_api.async_register_command(hass, websocket_frontend_exec_result)
-    websocket_api.async_register_command(hass, websocket_dialog_snapshot)
     hass.http.register_view(ClawUploadView())
     hass.http.register_view(ClawFileView())
 

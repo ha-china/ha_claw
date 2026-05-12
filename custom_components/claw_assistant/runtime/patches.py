@@ -1252,7 +1252,7 @@ _AIHUB_TIMEOUT_PATCHED = "_claw_aihub_timeout_patched"
 _AIHUB_TIMEOUT_ORIGINAL = 60.0
 
 
-_AIHUB_TIMEOUT_TARGET = 180.0
+_AIHUB_TIMEOUT_TARGET = 300.0
 
 
 def patch_aihub_provider_timeout(hass: HomeAssistant) -> None:
@@ -1332,15 +1332,10 @@ def patch_aihub_markdown_filter(hass: HomeAssistant) -> None:
             md_mod._claw_original_filter_streaming = md_mod.filter_markdown_streaming
             setattr(md_mod, _AIHUB_MD_FILTER_PATCHED, True)
         if _rich_markdown_enabled(hass):
-            _heading_re = re.compile(r"^(#{1,6})\s+", re.MULTILINE)
-            def _rich_filter_content(content: str) -> str:
-                return _heading_re.sub(lambda m: "**" if len(m.group(1)) <= 3 else "", content)
-            def _rich_filter_streaming(content: str) -> str:
-                if content.startswith("#"):
-                    return content.lstrip("#").lstrip()
+            def _passthrough(content: str) -> str:
                 return content
-            md_mod.filter_markdown_content = _rich_filter_content
-            md_mod.filter_markdown_streaming = _rich_filter_streaming
+            md_mod.filter_markdown_content = _passthrough
+            md_mod.filter_markdown_streaming = _passthrough
             LOGGER.debug("Patched ai_hub markdown_filter to passthrough (rich_markdown ON)")
         else:
             md_mod.filter_markdown_content = md_mod._claw_original_filter_content
@@ -1563,3 +1558,151 @@ def unpatch_openai_allow_empty_key() -> None:
         LOGGER.debug("Restored openai_conversation api_key validation")
     except Exception as exc:
         LOGGER.debug("openai_conversation unpatch skipped: %s", exc)
+
+
+_AIHUB_IMAGE_RETRY_PATCHED = "_claw_aihub_image_retry_patched"
+_IMAGE_URL_ERROR_HINTS = ("image_url", "unknown variant", "expected `text`")
+
+
+_IMAGE_FALLBACK_HINT = "[Image removed - model does not support vision]"
+
+_IMAGE_OCR_INSTRUCTION = (
+    "\n\n[SYSTEM NOTICE: Image content was removed because this model cannot process images. "
+    "If you need to analyze the image, you MUST use ExecutePython tool with pytesseract OCR:\n"
+    "```python\n"
+    "import subprocess\n"
+    "subprocess.run(['pip', 'install', '-q', 'pytesseract', 'Pillow'], check=True)\n"
+    "from PIL import Image\n"
+    "import pytesseract\n"
+    "text = pytesseract.image_to_string(Image.open('/path/to/image.jpg'))\n"
+    "print(text)\n"
+    "```\n"
+    "Do NOT guess image content. Use Python OCR or tell user you cannot see the image.]"
+)
+
+
+def _strip_image_blocks(messages: list) -> int:
+    """Strip image_url content blocks from LLMMessage list. Returns count stripped."""
+    stripped = 0
+    to_remove = []
+    last_user_idx = -1
+    for i, msg in enumerate(messages):
+        role = getattr(msg, "role", "")
+        if role == "user":
+            last_user_idx = i
+        content = getattr(msg, "content", None)
+        if isinstance(content, list):
+            new_content = []
+            img_count = 0
+            for part in content:
+                if isinstance(part, dict) and part.get("type") == "image_url":
+                    img_count += 1
+                    continue
+                new_content.append(part)
+            if img_count:
+                stripped += img_count
+                if new_content:
+                    msg.content = new_content
+                else:
+                    if role == "user":
+                        to_remove.append(i)
+                    else:
+                        msg.content = _IMAGE_FALLBACK_HINT
+    for i in reversed(to_remove):
+        if i == last_user_idx:
+            last_user_idx = -1
+        elif i < last_user_idx:
+            last_user_idx -= 1
+        messages.pop(i)
+    if stripped and last_user_idx >= 0:
+        last_user = messages[last_user_idx]
+        content = getattr(last_user, "content", "")
+        if isinstance(content, str):
+            last_user.content = content + _IMAGE_OCR_INSTRUCTION
+        elif isinstance(content, list):
+            content.append({"type": "text", "text": _IMAGE_OCR_INSTRUCTION})
+    return stripped
+
+
+def _is_image_url_error(err: Exception) -> bool:
+    err_str = str(err).lower()
+    return any(hint in err_str for hint in _IMAGE_URL_ERROR_HINTS)
+
+
+def patch_aihub_image_url_retry(hass: HomeAssistant) -> None:
+    patched = []
+    try:
+        from custom_components.ai_hub.providers.openai_compatible import OpenAICompatibleProvider
+        if not getattr(OpenAICompatibleProvider, _AIHUB_IMAGE_RETRY_PATCHED, False):
+            orig_complete_stream = OpenAICompatibleProvider.complete_stream
+
+            async def _patched_openai_stream(self, messages, tools=None, **kwargs):
+                try:
+                    async for chunk in orig_complete_stream(self, messages, tools=tools, **kwargs):
+                        yield chunk
+                except Exception as err:
+                    if not _is_image_url_error(err):
+                        raise
+                    stripped = _strip_image_blocks(messages)
+                    if not stripped:
+                        raise
+                    LOGGER.info("OpenAI provider hit image_url error; stripped %d images and retrying", stripped)
+                    async for chunk in orig_complete_stream(self, messages, tools=tools, **kwargs):
+                        yield chunk
+
+            OpenAICompatibleProvider.complete_stream = _patched_openai_stream
+            OpenAICompatibleProvider._claw_orig_complete_stream = orig_complete_stream
+            setattr(OpenAICompatibleProvider, _AIHUB_IMAGE_RETRY_PATCHED, True)
+            patched.append("OpenAI")
+    except Exception as exc:
+        LOGGER.debug("ai_hub OpenAI image_url retry patch skipped: %s", exc)
+
+    try:
+        from custom_components.ai_hub.providers.anthropic_compatible import AnthropicCompatibleProvider
+        if not getattr(AnthropicCompatibleProvider, _AIHUB_IMAGE_RETRY_PATCHED, False):
+            orig_anthropic_stream = AnthropicCompatibleProvider.complete_stream
+
+            async def _patched_anthropic_stream(self, messages, tools=None, **kwargs):
+                try:
+                    async for chunk in orig_anthropic_stream(self, messages, tools=tools, **kwargs):
+                        yield chunk
+                except Exception as err:
+                    if not _is_image_url_error(err):
+                        raise
+                    stripped = _strip_image_blocks(messages)
+                    if not stripped:
+                        raise
+                    LOGGER.info("Anthropic provider hit image_url error; stripped %d images and retrying", stripped)
+                    async for chunk in orig_anthropic_stream(self, messages, tools=tools, **kwargs):
+                        yield chunk
+
+            AnthropicCompatibleProvider.complete_stream = _patched_anthropic_stream
+            AnthropicCompatibleProvider._claw_orig_complete_stream = orig_anthropic_stream
+            setattr(AnthropicCompatibleProvider, _AIHUB_IMAGE_RETRY_PATCHED, True)
+            patched.append("Anthropic")
+    except Exception as exc:
+        LOGGER.debug("ai_hub Anthropic image_url retry patch skipped: %s", exc)
+
+    if patched:
+        LOGGER.debug("Patched ai_hub complete_stream for image_url retry: %s", ", ".join(patched))
+
+
+def unpatch_aihub_image_url_retry() -> None:
+    for cls_path in (
+        "custom_components.ai_hub.providers.openai_compatible.OpenAICompatibleProvider",
+        "custom_components.ai_hub.providers.anthropic_compatible.AnthropicCompatibleProvider",
+    ):
+        try:
+            parts = cls_path.rsplit(".", 1)
+            mod = __import__(parts[0], fromlist=[parts[1]])
+            cls = getattr(mod, parts[1])
+            if not getattr(cls, _AIHUB_IMAGE_RETRY_PATCHED, False):
+                continue
+            orig = getattr(cls, "_claw_orig_complete_stream", None)
+            if orig:
+                cls.complete_stream = orig
+                delattr(cls, "_claw_orig_complete_stream")
+            delattr(cls, _AIHUB_IMAGE_RETRY_PATCHED)
+        except Exception:
+            pass
+    LOGGER.debug("Restored ai_hub complete_stream")

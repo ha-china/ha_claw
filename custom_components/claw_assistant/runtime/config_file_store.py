@@ -240,6 +240,14 @@ def apply_staged_operation_sync(
         )
 
     target = _resolve_config_path(hass, operation["path"])
+
+    old_content = ""
+    if operation["action"] in ("write", "append") and target.is_file():
+        try:
+            old_content = target.read_text("utf-8")
+        except Exception:
+            old_content = ""
+
     _apply_operation(
         target,
         operation["action"],
@@ -255,6 +263,12 @@ def apply_staged_operation_sync(
     }
     if operation["action"] in _ACTIONS_REQUIRING_CONFIRMATION:
         resolution["consent_quote"] = consent_quote.strip()
+    if operation["action"] in ("write", "append"):
+        resolution["_old_content"] = old_content
+        try:
+            resolution["_new_content"] = target.read_text("utf-8")
+        except Exception:
+            resolution["_new_content"] = operation.get("content", "")
     state["last_resolution"] = resolution
     return dict(resolution)
 
@@ -266,6 +280,8 @@ async def async_apply_staged_operation(
     user_consent: bool = False,
     consent_quote: str = "",
 ) -> dict[str, Any]:
+    import time as _time
+
     def _apply() -> dict[str, Any]:
         return apply_staged_operation_sync(
             hass,
@@ -274,7 +290,22 @@ async def async_apply_staged_operation(
             consent_quote=consent_quote,
         )
 
-    return await hass.async_add_executor_job(_apply)
+    result = await hass.async_add_executor_job(_apply)
+
+    if result.get("status") == "applied" and "_old_content" in result:
+        from .blueprint_bridge import notify_blueprint_studio
+        notify_blueprint_studio(
+            hass,
+            action="ai_edit",
+            path=result["path"],
+            old_content=result.pop("_old_content", ""),
+            new_content=result.pop("_new_content", ""),
+        )
+    else:
+        result.pop("_old_content", None)
+        result.pop("_new_content", None)
+
+    return result
 
 
 def cancel_staged_operation(hass: HomeAssistant, approval_id: str) -> dict[str, Any]:

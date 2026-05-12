@@ -334,6 +334,17 @@ def append_final_message(*, agent_id: str, content: str) -> bool:
     chat_log = current_chat_log.get()
     if chat_log is None:
         return False
+    turn_contents = _latest_turn_contents(chat_log)
+    if _turn_has_assistant_text(turn_contents, content):
+        return False
+    if chat_log.content:
+        last = chat_log.content[-1]
+        if (
+            isinstance(last, AssistantContent)
+            and last.agent_id == agent_id
+            and (last.content or "").strip() == content.strip()
+        ):
+            return False
 
     chat_log.async_add_assistant_content_without_tools(
         AssistantContent(

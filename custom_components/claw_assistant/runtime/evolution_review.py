@@ -166,6 +166,7 @@ def _should_review(
     assistant_text: str,
     tool_calls: list[Any],
     conversation_id: str | None,
+    tool_results: list[Any] | None = None,
 ) -> bool:
     if not assistant_text.strip():
         return False
@@ -177,10 +178,23 @@ def _should_review(
         return False
     if conversation_id and conversation_id.startswith("evolution:"):
         return False
-    # Skip self-fed goal continuation turns — the judge already decided to
-    # keep going; we don't need a learning review on every Ralph-loop step.
     if is_continuation_prompt(original_text):
         return False
+    # Skip review when every tool succeeded — there is no failure or anomaly
+    # worth learning from, and the post-response LLM call wastes a slot.
+    if tool_results:
+        all_ok = True
+        for entry in tool_results:
+            if isinstance(entry, dict):
+                if entry.get("success") is False or entry.get("error"):
+                    all_ok = False
+                    break
+            else:
+                if getattr(entry, "success", True) is False or getattr(entry, "error", None):
+                    all_ok = False
+                    break
+        if all_ok:
+            return False
     return True
 
 
@@ -256,12 +270,14 @@ def async_schedule_evolution_review(
     agent_id: str | None,
     original_async_converse=None,
     loaded_skills: list[str] | None = None,
+    tool_results: list[Any] | None = None,
 ) -> None:
     if not _should_review(
         original_text=original_text,
         assistant_text=assistant_text,
         tool_calls=tool_calls,
         conversation_id=conversation_id,
+        tool_results=tool_results,
     ):
         return
 
