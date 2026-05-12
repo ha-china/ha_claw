@@ -228,7 +228,7 @@ _CATEGORY_KEYS = {
 
 
 def _escape_md_angles(s: str) -> str:
-    return s.replace("<", "\\<").replace(">", "\\>")
+    return s
 
 
 def _build_command_catalog_message(language: str | None = None) -> str:

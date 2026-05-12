@@ -28,6 +28,7 @@ from homeassistant.util.json import JsonObjectType
 from homeassistant.util.yaml import dump, load_yaml, parse_yaml
 
 from ..runtime.text_patch import PatchError, apply_patches
+from ..entity_privacy import entity_is_exposed
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -114,7 +115,7 @@ class ScriptTool(llm.Tool):
             if action == "list":
                 page = max(1, int(tool_input.tool_args.get("page", 1)))
                 page_size = max(1, int(tool_input.tool_args.get("page_size", 10)))
-                return await self._list_scripts(hass, page=page, page_size=page_size)
+                return await self._list_scripts(hass, llm_context=llm_context, page=page, page_size=page_size)
 
             if action == "get":
                 return await self._get_script(hass, entity_id, script_id)
@@ -199,13 +200,15 @@ class ScriptTool(llm.Tool):
 
 
     async def _list_scripts(
-        self, hass: HomeAssistant, *, page: int = 1, page_size: int = 10
+        self, hass: HomeAssistant, *, llm_context: llm.LLMContext | None = None, page: int = 1, page_size: int = 10
     ) -> JsonObjectType:
         """List scripts with pagination."""
         registry = er.async_get(hass)
         all_items = []
         for state in hass.states.async_all():
             if not state.entity_id.startswith("script."):
+                continue
+            if not entity_is_exposed(hass, state.entity_id, llm_context):
                 continue
             obj_id = state.entity_id.removeprefix("script.")
             reg_entry = registry.async_get(state.entity_id)

@@ -99,6 +99,7 @@ class SmartDiscovery:
         name_pattern: Optional[str] = None,
         inferred_type: Optional[str] = None,
         assistant: Optional[str] = None,
+        skip_expose_check: bool = False,
     ) -> List[Dict[str, Any]]:
 
         query_type = self._detect_query_type(entity_type, area, domain, state, name_contains)
@@ -114,7 +115,7 @@ class SmartDiscovery:
             return await self._discover_area_entities(area, domain, state, limit)
         else:
             return await self._discover_general_entities(
-                entity_type, area, domain, state, name_contains, limit, device_class, name_pattern, inferred_type, assistant
+                entity_type, area, domain, state, name_contains, limit, device_class, name_pattern, inferred_type, assistant, skip_expose_check
             )
 
     def _detect_query_type(
@@ -407,6 +408,7 @@ class SmartDiscovery:
         name_pattern: Optional[str],
         inferred_type: Optional[str],
         assistant: Optional[str] = None,
+        skip_expose_check: bool = False,
     ) -> List[Dict[str, Any]]:
 
         entities = []
@@ -431,9 +433,10 @@ class SmartDiscovery:
         for state_obj in self.hass.states.async_all():
             entity_id = state_obj.entity_id
 
-            check_assistant = assistant or "conversation"
-            if not async_should_expose(self.hass, check_assistant, entity_id):
-                continue
+            if not skip_expose_check:
+                check_assistant = assistant or "conversation"
+                if not async_should_expose(self.hass, check_assistant, entity_id):
+                    continue
 
             entity_domain = entity_id.split(".")[0]
 

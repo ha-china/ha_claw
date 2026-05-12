@@ -903,7 +903,9 @@ Available actions:
             registry = er.async_get(hass)
             unavailable = [
                 e.entity_id for e in registry.entities.values()
-                if e.platform == domain and hass.states.get(e.entity_id) and hass.states.get(e.entity_id).state == "unavailable"
+                if e.platform == domain
+                and hass.states.get(e.entity_id)
+                and hass.states.get(e.entity_id).state == "unavailable"
             ]
             info["unavailable_entities"] = unavailable[:20]
             handler = hass.data.get("system_log")
@@ -1216,12 +1218,39 @@ DISCIPLINE: 1) Follow the exact workflow steps above — no exploratory calls. 2
 
             if action == "config_entries/flow_handlers":
                 type_filter = str(params.get("type_filter", "") or "").strip() or None
+                query = str(params.get("query", "") or params.get("domain", "") or "").strip()
                 handlers = sorted(await async_get_config_flows(hass, type_filter=type_filter))
+                matched_handlers = handlers
+                installed_entries = []
+                if query:
+                    q_norm = query.replace("_", "").replace("-", "").replace(" ", "").lower()
+                    matched_handlers = [
+                        h for h in handlers
+                        if q_norm in h.replace("_", "").replace("-", "").lower()
+                        or h.replace("_", "").replace("-", "").lower() in q_norm
+                    ]
+                    installed_entries = [
+                        {
+                            "entry_id": e.entry_id,
+                            "domain": e.domain,
+                            "title": e.title,
+                            "state": str(e.state),
+                        }
+                        for e in hass.config_entries.async_entries()
+                        if q_norm in e.domain.replace("_", "").replace("-", "").lower()
+                        or e.domain.replace("_", "").replace("-", "").lower() in q_norm
+                    ]
                 return {
                     "success": True,
-                    "message": f"Loaded {len(handlers)} flow handlers",
-                    "handlers": handlers,
-                    "count": len(handlers),
+                    "message": (
+                        f"Found {len(matched_handlers)} native flow handlers for '{query}'"
+                        if query else f"Loaded {len(handlers)} flow handlers"
+                    ),
+                    "handlers": matched_handlers,
+                    "installed_entries": installed_entries,
+                    "native_available": bool(matched_handlers),
+                    "already_installed": bool(installed_entries),
+                    "count": len(matched_handlers),
                 }
 
             if action == "config_entries/flow/progress":
@@ -1693,7 +1722,12 @@ DISCIPLINE: 1) Follow the exact workflow steps above — no exploratory calls. 2
 
 class HACSTool(llm.Tool):
     name = "HACS"
-    description = """HACS store tool.
+    description = """HACS store tool — for THIRD-PARTY integrations/plugins ONLY.
+BEFORE using HACS for an integration:
+1) First call ConfigEntries action=config_entries/flow_handlers with params={query:"name_or_domain"}.
+2) If already_installed=true, use/manage that existing native integration entry.
+3) If native_available=true, use ConfigEntries action=config_entries/flow/init with the matching handler.
+4) Only use HACS search/github_search/install when no native handler is available.
 
 Available actions:
 - action=list: List installed HACS repos. page/page_size for pagination

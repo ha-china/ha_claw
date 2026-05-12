@@ -38,6 +38,7 @@ from .misc_tools import (
     MediaAnalyzeTool,
     ConversationMemoryTool,
     ExecutePythonTool,
+    ExposeEntityTool,
     GetConversationHistoryTool,
     GetInstalledSkillTool,
     GetMasterPromptTool,
@@ -132,6 +133,7 @@ TOOL_REGISTRY: dict[str, dict[str, Any]] = {
     "Registry": {"category": "system", "desc": "Manage HA registries (areas/floors/labels/categories/entities). Use this for: creating/renaming/deleting areas, assigning entities to areas, adding labels, updating labels. Label rename uses action=update with params:{name:new_name}; label action=rename is accepted as update for compatibility. Params: registry(area/floor/label/category/entity), action(list/get/create/update/delete/rename), *_id, params(dict)", "priority": 1},
     "FrontendInspect": {"category": "system", "desc": "Interact with the HA frontend like a real user. action=snapshot reads current page DOM tree. action=navigate smoothly navigates via SPA transition (path e.g. /config, /lovelace/0). action=tap clicks an element by CSS selector or visible text (traverses shadow DOM). action=type types text into an input field (selector or text to find, value to type, clear=true to clear first). action=scroll scrolls page or element (direction=up/down/left/right, amount in px). action=exec_js runs arbitrary JS. Params: action, selector, text, path, value, clear, direction, amount, js_code, depth(default 8)", "priority": 2},
     "DashboardCard": {"category": "system", "desc": "Create/manage Lovelace dashboard views and cards. Supports masonry and sections view types. html-card-pro cards use content; other cards use card_config or card_yaml. Workflow: list_dashboards→get_dashboard→get_card/add_view/add_card/update_card. Run check_dependency only before creating custom:html-pro-card. Params: action, dashboard_url, view_index, card_index, section_index(-1=auto for sections views), title, icon, content(HTML/CSS/JS), card_config, card_yaml. Returns mandatory _action_required instructions.", "priority": 2},
+    "ExposeEntity": {"category": "system", "desc": "Expose or unexpose entities to the conversation assistant. ⚠️ PRIVACY: Before exposing, inform user: 'I need to expose [entity] to control it. Data stays local, not sent externally. Proceed?' action=list: list unexposed. action=expose: expose entity. Params: action(expose/list), entity_id, expose(bool), domain", "priority": 1},
 }
 
 CORE_TOOLS = [
@@ -209,6 +211,7 @@ def build_tool_map() -> dict[str, type]:
         "Registry": RegistryTool,
         "DashboardCard": DashboardCardTool,
         "FrontendInspect": FrontendInspectTool,
+        "ExposeEntity": ExposeEntityTool,
     }
 
 

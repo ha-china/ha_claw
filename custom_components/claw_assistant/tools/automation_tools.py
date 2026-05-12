@@ -21,6 +21,7 @@ from homeassistant.util.json import JsonObjectType
 from homeassistant.util.yaml import dump, load_yaml, parse_yaml
 
 from ..runtime.text_patch import PatchError, apply_patches
+from ..entity_privacy import entity_is_exposed
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -105,7 +106,7 @@ class AutomationTool(llm.Tool):
             if action == "list":
                 page = max(1, int(tool_input.tool_args.get("page", 1)))
                 page_size = max(1, int(tool_input.tool_args.get("page_size", 10)))
-                return await self._list_automations(hass, page=page, page_size=page_size)
+                return await self._list_automations(hass, llm_context=llm_context, page=page, page_size=page_size)
 
             if action == "get":
                 return await self._get_automation(hass, entity_id, automation_id)
@@ -185,14 +186,15 @@ class AutomationTool(llm.Tool):
         return entity_id, automation_id
 
     async def _list_automations(
-        self, hass: HomeAssistant, *, page: int = 1, page_size: int = 10
+        self, hass: HomeAssistant, *, llm_context: llm.LLMContext | None = None, page: int = 1, page_size: int = 10
     ) -> JsonObjectType:
-        """List automations with pagination."""
         registry = er.async_get(hass)
         component = hass.data.get(DATA_COMPONENT)
         all_items = []
         for state in hass.states.async_all():
             if not state.entity_id.startswith("automation."):
+                continue
+            if not entity_is_exposed(hass, state.entity_id, llm_context):
                 continue
             auto_id = state.entity_id.removeprefix("automation.")
             if component is not None:

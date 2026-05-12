@@ -2727,3 +2727,137 @@ class GetConversationHistoryTool(llm.Tool):
             "history": context_str,
             "turns": len(turns),
         }
+
+
+_EXPOSE_PRIVACY_NOTICE = (
+    "Hello! I'm the Claw Assistant integration. This project was created to unlock the full potential "
+    "of AI in your smart home — giving you powerful voice and chat control over your devices. "
+    "To enable AI control of a device, it needs to be 'exposed' to the conversation assistant. "
+    "\n\n⚠️ PRIVACY & SECURITY NOTICE:\n"
+    "• Your data stays 100% LOCAL within your Home Assistant instance\n"
+    "• No device states or commands are sent to external servers\n"
+    "• Only exposed entities can be read or controlled by AI\n"
+    "• You can unexpose entities at any time to revoke AI access\n"
+    "• This integration respects Home Assistant's built-in privacy controls\n\n"
+    "By exposing an entity, you're granting the AI assistant permission to:\n"
+    "1. Read the device's current state and attributes\n"
+    "2. Send control commands (turn on/off, adjust settings, etc.)\n"
+    "3. Include the device in automations and routines\n\n"
+    "Would you like me to proceed with exposing this entity?"
+)
+
+
+class ExposeEntityTool(llm.Tool):
+    name = "ExposeEntity"
+    description = (
+        "Expose or unexpose entities to the conversation assistant. "
+        "⚠️ IMPORTANT: Before exposing any entity, you MUST present the full privacy notice to the user "
+        "(available in tool result as 'privacy_notice'). Wait for user acknowledgment before proceeding. "
+        "action=list: list unexposed entities (returns privacy_notice). "
+        "action=expose: expose/unexpose entity. "
+        "Params: action(expose/list), entity_id, expose(bool, default true), domain."
+    )
+
+    parameters = vol.Schema(
+        {
+            vol.Optional("action", default="expose"): vol.In(["expose", "list"]),
+            vol.Optional("entity_id"): str,
+            vol.Optional("entity_ids"): list,
+            vol.Optional("expose", default=True): bool,
+            vol.Optional("domain"): str,
+            vol.Optional("confirmed", default=False): bool,
+        }
+    )
+
+    async def async_call(
+        self,
+        hass: HomeAssistant,
+        tool_input: llm.ToolInput,
+        llm_context: llm.LLMContext,
+    ) -> JsonObjectType:
+        from homeassistant.components.homeassistant.exposed_entities import (
+            async_expose_entity,
+            async_should_expose,
+        )
+
+        action = tool_input.tool_args.get("action", "expose")
+        entity_id = tool_input.tool_args.get("entity_id")
+        entity_ids = tool_input.tool_args.get("entity_ids") or []
+        expose = tool_input.tool_args.get("expose", True)
+        domain = tool_input.tool_args.get("domain")
+        confirmed = tool_input.tool_args.get("confirmed", False)
+
+        if entity_id and entity_id not in entity_ids:
+            entity_ids = [entity_id] + list(entity_ids)
+
+        if action == "list":
+            unexposed = []
+            for state in hass.states.async_all():
+                eid = state.entity_id
+                if domain and not eid.startswith(f"{domain}."):
+                    continue
+                if not async_should_expose(hass, "conversation", eid):
+                    unexposed.append({
+                        "entity_id": eid,
+                        "name": state.attributes.get("friendly_name", eid),
+                    })
+            return {
+                "success": True,
+                "action": "list",
+                "domain": domain,
+                "unexposed_count": len(unexposed),
+                "unexposed_entities": unexposed[:50],
+                "privacy_notice": _EXPOSE_PRIVACY_NOTICE,
+                "instruction": "IMPORTANT: Present the privacy_notice to the user BEFORE exposing any entity.",
+            }
+
+        if not entity_ids:
+            return {"success": False, "error": "entity_id or entity_ids required for expose action"}
+
+        targets = []
+        for eid in entity_ids:
+            state = hass.states.get(eid)
+            if state:
+                targets.append({
+                    "entity_id": eid,
+                    "name": state.attributes.get("friendly_name", eid),
+                    "currently_exposed": async_should_expose(hass, "conversation", eid),
+                })
+
+        if not targets:
+            return {"success": False, "error": "No valid entities found"}
+
+        if not confirmed:
+            return {
+                "success": False,
+                "requires_confirmation": True,
+                "action": "expose" if expose else "unexpose",
+                "targets": targets,
+                "privacy_notice": _EXPOSE_PRIVACY_NOTICE,
+                "instruction": (
+                    "STOP! You MUST present the privacy_notice to the user and list the entities to be exposed. "
+                    "Wait for user to acknowledge. Then call again with confirmed=true."
+                ),
+            }
+
+        results = []
+        for eid in entity_ids:
+            state = hass.states.get(eid)
+            if not state:
+                continue
+            was_exposed = async_should_expose(hass, "conversation", eid)
+            async_expose_entity(hass, "conversation", eid, expose)
+            is_exposed = async_should_expose(hass, "conversation", eid)
+            results.append({
+                "entity_id": eid,
+                "name": state.attributes.get("friendly_name", eid),
+                "was_exposed": was_exposed,
+                "is_exposed": is_exposed,
+            })
+
+        return {
+            "success": True,
+            "action": "exposed" if expose else "unexposed",
+            "count": len(results),
+            "results": results,
+        }

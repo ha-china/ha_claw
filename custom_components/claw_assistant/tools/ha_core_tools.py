@@ -27,6 +27,7 @@ from ..runtime.config_file_store import (
 from ..runtime.text_patch import PatchError, apply_patches
 from ..runtime.data_path import output_dir_path
 from ..runtime.im_transport import async_send_im_payload
+from ..entity_privacy import entity_is_exposed, privacy_blocked_response, domain_unexposed_response
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -667,7 +668,8 @@ PATCH-FIRST RULE (MANDATORY):
 2. For ANY modification, YOU MUST use action=stage_patch with surgical anchor ops.
 3. Only fall back to action=stage_write when the change covers >50% of the file content.
 4. NEVER stage_write a file you haven't read first — you WILL corrupt it.
-stage_patch params: patches=[{op, anchor, new_text, occurrence?, regex?, count?}, ...], dry_run=true/false.
+stage_patch params: patches=[{"op":"replace","anchor":"old","new_text":"new"}, ...], dry_run=true/false.
+Each patch must be an object, not a JSON-encoded string. Do not pass patches=["{\"op\":\"replace\",...}"].
 Ops: replace | insert_before | insert_after | delete | prepend | append | create.
 Anchors match against the current file text. Copy exact strings from the read result as anchors.
 
@@ -731,10 +733,15 @@ automation edits. Reading these files is always fine."""
         try:
             if action == "list":
                 result = await async_list_config_entries(hass, path, include_hidden)
+                if path:
+                    from ..runtime.blueprint_bridge import notify_blueprint_studio
+                    notify_blueprint_studio(hass, action="navigate", path=path)
                 return {"success": True, **result}
 
             if action == "read":
                 result = await async_read_config_file(hass, path)
+                from ..runtime.blueprint_bridge import notify_blueprint_studio
+                notify_blueprint_studio(hass, action="navigate", path=path)
                 return {"success": True, **result}
 
             if action == "list_pending":
@@ -796,7 +803,9 @@ automation edits. Reading these files is always fine."""
             return {"success": False, "error": str(err)}
 
     async def _stage_patch(self, hass: HomeAssistant, path: str, args: dict) -> JsonObjectType:
-        patches = args.get("patches", [])
+        patches = self._normalize_patches(args.get("patches", []))
+        if isinstance(patches, str):
+            return {"success": False, "error": patches}
         dry_run = bool(args.get("dry_run", False))
         if not isinstance(patches, list) or not patches:
             return {"success": False, "error": "'patches' must be a non-empty list"}
@@ -839,6 +848,28 @@ automation edits. Reading these files is always fine."""
             "report": report.to_dict(),
             **result,
         }
+
+    @staticmethod
+    def _normalize_patches(raw_patches: object) -> list[dict[str, Any]] | str:
+        if not isinstance(raw_patches, list):
+            return "'patches' must be a non-empty list of objects"
+
+        patches: list[dict[str, Any]] = []
+        for index, patch in enumerate(raw_patches):
+            if isinstance(patch, dict):
+                patches.append(patch)
+                continue
+            if isinstance(patch, str):
+                try:
+                    parsed = json.loads(patch)
+                except json.JSONDecodeError as err:
+                    return f"patch #{index} is a string but not valid JSON: {err.msg}"
+                if not isinstance(parsed, dict):
+                    return f"patch #{index} JSON must decode to an object"
+                patches.append(parsed)
+                continue
+            return f"patch #{index} must be an object"
+        return patches
 
 
 class ValidateServiceTool(llm.Tool):
@@ -970,6 +1001,8 @@ class EntityQueryTool(llm.Tool):
         entity_id = tool_input.tool_args.get("entity_id", "")
         state = hass.states.get(entity_id)
         if state:
+            if not entity_is_exposed(hass, entity_id, llm_context):
+                return {"success": False, "error": f"Entity {entity_id} not found"}
             return {
                 "success": True,
                 "entity_id": entity_id,
@@ -990,7 +1023,7 @@ class EntityQueryTool(llm.Tool):
         if results:
             matched_entity_id = _extract_discovered_entity_id(results)
             state = hass.states.get(matched_entity_id) if matched_entity_id else None
-            if state:
+            if state and entity_is_exposed(hass, matched_entity_id, llm_context):
                 return {
                     "success": True,
                     "entity_id": matched_entity_id,
@@ -1147,12 +1180,23 @@ Use ListServices/ServiceHelp to discover available services and parameters."""
                 from ..smart_discovery import get_smart_discovery
                 discovery = get_smart_discovery(hass)
 
+                _CROSS_DOMAINS = {"light": ["switch"], "switch": ["light"]}
                 results = await discovery.discover_entities(
                     name_contains=entity_id,
                     domain=domain if domain else None,
                     limit=5,
                     assistant=llm_context.assistant if llm_context else None,
                 )
+                if not results and domain in _CROSS_DOMAINS:
+                    for alt in _CROSS_DOMAINS[domain]:
+                        results = await discovery.discover_entities(
+                            name_contains=entity_id,
+                            domain=alt,
+                            limit=5,
+                            assistant=llm_context.assistant if llm_context else None,
+                        )
+                        if results:
+                            break
 
                 matched_entity_id = None
                 if results:
@@ -1163,6 +1207,18 @@ Use ListServices/ServiceHelp to discover available services and parameters."""
                         else:
                             target["entity_id"] = matched_entity_id
                 if not matched_entity_id:
+                    private_results = await discovery.discover_entities(
+                        name_contains=entity_id,
+                        domain=domain if domain else None,
+                        limit=1,
+                        skip_expose_check=True,
+                    )
+                    if private_results:
+                        return privacy_blocked_response(entity_id)
+                    if domain:
+                        domain_resp = domain_unexposed_response(hass, entity_id, domain, llm_context)
+                        if domain_resp:
+                            return domain_resp
                     from homeassistant.helpers.llm import _get_exposed_entities
 
                     exposed_entities = (
@@ -1176,6 +1232,8 @@ Use ListServices/ServiceHelp to discover available services and parameters."""
                         "error": f"Entity not found: {entity_id}",
                         "available_entities": exposed[:10],
                     }
+            if entity_id and hass.states.get(str(entity_id)) and not entity_is_exposed(hass, str(entity_id), llm_context):
+                return privacy_blocked_response(entity_id)
 
         if domain == "cover":
             service, service_data = _resolve_cover_service_for_features(
@@ -1269,7 +1327,6 @@ Parameters:
     async def async_call(
         self, hass: HomeAssistant, tool_input: llm.ToolInput, llm_context: llm.LLMContext
     ) -> JsonObjectType:
-        from homeassistant.components.homeassistant import async_should_expose
         from homeassistant.helpers import area_registry as ar, entity_registry as er
 
         domain_filter = tool_input.tool_args.get("domain", "")
@@ -1291,9 +1348,7 @@ Parameters:
         for state in hass.states.async_all():
             if count >= limit:
                 break
-            if llm_context.assistant and not async_should_expose(
-                hass, llm_context.assistant, state.entity_id
-            ):
+            if not entity_is_exposed(hass, state.entity_id, llm_context):
                 continue
             if domain_filter and not state.entity_id.startswith(f"{domain_filter}."):
                 continue
@@ -1999,6 +2054,8 @@ class HistoryQueryTool(llm.Tool):
         from datetime import datetime, timedelta
 
         entity_id = tool_input.tool_args.get("entity_id", "")
+        if hass.states.get(entity_id) and not entity_is_exposed(hass, entity_id, llm_context):
+            return {"success": False, "error": f"Entity {entity_id} not found"}
         hours = tool_input.tool_args.get("hours", 24)
         try:
             from homeassistant.components.recorder import get_instance
