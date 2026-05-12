@@ -1,5 +1,5 @@
 DOMAIN = "claw_assistant"
-VERSION = "7.8.0"
+VERSION = "7.9.0"
 
 CONF_PRIMARY_AGENT = "primary_agent"
 CONF_FALLBACK_AGENT = "fallback_agent"
