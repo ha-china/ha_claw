@@ -47,7 +47,8 @@ _MAX_COMPRESSION_ATTEMPTS = 3
 _MIN_CONTEXT_LENGTH = 8000
 
 _CONTEXT_PROBE_TIERS = [
-    1000000, 500000, 200000, 128000, 64000, 32000, 16000, 8000,
+    1000000, 800000, 600000, 500000, 400000, 300000, 200000,
+    160000, 128000, 100000, 80000, 64000, 48000, 32000, 16000, 8000,
 ]
 
 
@@ -85,20 +86,23 @@ def _get_next_probe_tier(current: int) -> int:
 
 def _content_length(msg: Any) -> int:
     role = getattr(msg, "role", "")
-    text = ""
     if role == "system":
-        text = getattr(msg, "content", "") or ""
-    elif role == "user":
-        text = getattr(msg, "content", "") or ""
-    elif role == "assistant":
+        return len(getattr(msg, "content", "") or "")
+    if role == "user":
+        return len(getattr(msg, "content", "") or "")
+    if role == "assistant":
         text = getattr(msg, "content", "") or ""
         thinking = getattr(msg, "thinking_content", "") or ""
         tool_calls = getattr(msg, "tool_calls", None) or []
-        extra = sum(len(str(getattr(tc, "tool_args", "") or "")) for tc in tool_calls)
-        return len(text) + len(thinking) + extra
-    elif role == "tool_result":
-        text = str(getattr(msg, "tool_result", "") or "")
-    return len(text)
+        tc_len = 0
+        for tc in tool_calls:
+            tc_len += len(getattr(tc, "tool_name", "") or "") + 20
+            tc_len += len(str(getattr(tc, "tool_args", "") or ""))
+            tc_len += len(getattr(tc, "id", "") or getattr(tc, "tool_call_id", "") or "")
+        return len(text) + len(thinking) + tc_len
+    if role == "tool_result":
+        return len(str(getattr(msg, "tool_result", "") or "")) + len(getattr(msg, "tool_name", "") or "") + 20
+    return 0
 
 
 def _content_tokens(msg: Any) -> int:

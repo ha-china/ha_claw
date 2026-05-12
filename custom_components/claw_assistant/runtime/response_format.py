@@ -603,8 +603,7 @@ def _normalize_markdown(text: str) -> str:
             continue
 
         if _BLOCKQUOTE_RE.match(line):
-            if out and out[-1].strip() and not _BLOCKQUOTE_RE.match(out[-1]):
-                out.append("")
+            line = re.sub(r"^>\s?", "", line)
             out.append(line)
             continue
 

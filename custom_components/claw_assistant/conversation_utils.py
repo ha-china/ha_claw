@@ -122,6 +122,23 @@ class ConversationHistory:
 
         self._schedule_save()
 
+    def set_conversation_title(self, conversation_id: str, title: str) -> None:
+        title = (title or "").strip()
+        if not title or conversation_id not in self._histories:
+            return
+
+        metadata = self._histories[conversation_id][0].metadata
+        if metadata.get("title"):
+            return
+        metadata["title"] = title
+        self._schedule_save()
+
+    def get_conversation_title(self, conversation_id: str) -> str:
+        turns = self._histories.get(conversation_id) or []
+        if not turns:
+            return ""
+        return str((turns[0].metadata or {}).get("title", "") or "").strip()
+
     def get_history(self, conversation_id: str) -> List[ConversationTurn]:
 
         self._cleanup_old_turns(conversation_id)

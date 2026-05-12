@@ -15,6 +15,7 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers import intent
 
 from .agent_fallback import (
+    build_recovered_history_context_prompt,
     _finalize_completed_response,
     _finalize_synthesized_success,
     _snapshot_tool_results,
@@ -420,6 +421,11 @@ async def _execute_conversation_turn_inner(
     effective_agent = agent_id or (fallback_agents[0] if fallback_agents else "")
     if effective_agent:
         get_conversation_status(hass)["current_agent_id"] = effective_agent
+    title_agent_ids = [
+        agent_id
+        for agent_id in dict.fromkeys((runtime_config.summary_agent, effective_agent))
+        if agent_id
+    ]
 
     original_text = text
     is_first_turn = bool(task_loop.get("is_first_turn", False))
@@ -432,9 +438,18 @@ async def _execute_conversation_turn_inner(
                 conversation_id=conversation_id,
                 runtime_config=runtime_config,
             )
+            recovered_context = build_recovered_history_context_prompt(
+                hass,
+                conversation_id=conversation_id,
+                conv_history=get_conversation_history(),
+            )
             return _fit_base_prompt(
                 bp,
-                [extra_system_prompt] if extra_system_prompt else [],
+                [
+                    section
+                    for section in (extra_system_prompt, recovered_context)
+                    if section
+                ],
             )
         extra_system_prompt = await hass.async_add_executor_job(_build_prompt)
 
@@ -578,6 +593,7 @@ async def _execute_conversation_turn_inner(
                     tool_results=direct_tool_results,
                     language=language,
                     original_async_converse=original_async_converse,
+                    title_agent_ids=title_agent_ids,
                 )
                 if _goal_cont and hasattr(direct_result, 'continue_conversation'):
                     direct_result.continue_conversation = True
@@ -626,6 +642,7 @@ async def _execute_conversation_turn_inner(
                         tool_results=list(get_tool_results_state(hass)),
                         language=language,
                         original_async_converse=original_async_converse,
+                        title_agent_ids=title_agent_ids,
                     )
                     if _goal_cont and hasattr(summary_result, 'continue_conversation'):
                         summary_result.continue_conversation = True

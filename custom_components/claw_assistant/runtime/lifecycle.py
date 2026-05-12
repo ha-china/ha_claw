@@ -51,6 +51,8 @@ from .patches import (
     unpatch_aihub_dynamic_max_tokens,
     async_patch_openai_allow_empty_key,
     unpatch_openai_allow_empty_key,
+    patch_aihub_image_url_retry,
+    unpatch_aihub_image_url_retry,
 )
 from .skill_store import async_setup_prompt_store
 from .tmp_cleanup import async_setup_tmp_cleanup, async_unload_tmp_cleanup
@@ -89,6 +91,7 @@ async def async_setup_runtime(hass: HomeAssistant, entry: ConfigEntry) -> None:
     patch_aihub_provider_timeout(hass)
     patch_aihub_markdown_filter(hass)
     patch_aihub_dynamic_max_tokens(hass)
+    patch_aihub_image_url_retry(hass)
     await async_patch_openai_allow_empty_key(hass)
     install_official_websocket_process_hook(hass)
     setup_ai_coordinator(hass, entry)
@@ -144,6 +147,7 @@ async def async_unload_runtime(hass: HomeAssistant) -> None:
     unpatch_pipeline_timeout()
     unpatch_aihub_provider_timeout()
     unpatch_aihub_dynamic_max_tokens()
+    unpatch_aihub_image_url_retry()
     unpatch_openai_allow_empty_key()
     unpatch_aihub_markdown_filter()
     async_unload_internal_llm(hass)
