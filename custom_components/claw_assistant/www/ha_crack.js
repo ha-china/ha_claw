@@ -1,7 +1,7 @@
 (function() {
     'use strict';
     
-    const HACRACK_VERSION = '7.8.0';
+    const HACRACK_VERSION = '7.9.0';
     if (window.__hacrackVersion && window.__hacrackVersion !== HACRACK_VERSION) {
         window.__hacrackVersion = HACRACK_VERSION;
         location.reload();
@@ -21,6 +21,77 @@
         }
         return null;
     }
+
+    const HISTORY_TEXT = {
+        en: {
+            history: 'History',
+            back: 'Back',
+            unableLoad: 'Unable to load history',
+            empty: 'No conversations yet',
+            search: 'Search conversations...',
+            conversation: 'Conversation',
+            delete: 'Delete',
+            messages: 'messages',
+        },
+        zh: {
+            history: '历史消息',
+            back: '返回',
+            unableLoad: '无法加载您的历史消息',
+            empty: '还没有对话',
+            search: '搜索最近对话...',
+            conversation: '对话',
+            delete: '删除',
+            messages: '条消息',
+        },
+    };
+
+    function getFrontendLanguage(hass) {
+        const liveHass = document.querySelector('home-assistant')?.hass;
+        hass = liveHass || hass || hassRef;
+        return String(
+            hass?.locale?.language ||
+            hass?.selectedLanguage ||
+            hass?.language ||
+            hass?.config?.language ||
+            navigator.language ||
+            'en'
+        ).toLowerCase();
+    }
+
+    function historyText(key) {
+        const language = getFrontendLanguage();
+        const bundle = language.startsWith('zh') ? HISTORY_TEXT.zh : HISTORY_TEXT.en;
+        return bundle[key] || HISTORY_TEXT.en[key] || key;
+    }
+
+    function getHistoryWindowId() {
+        if (!window.__clawHistoryWindowId) {
+            const rand = window.crypto?.randomUUID?.() || Math.random().toString(36).slice(2);
+            window.__clawHistoryWindowId = 'claw-window-' + Date.now().toString(36) + '-' + rand;
+        }
+        return window.__clawHistoryWindowId;
+    }
+
+    function registerHistoryWindow(hass) {
+        if (!hass?.connection) return;
+        try {
+            hass.connection.sendMessagePromise({
+                type: 'ha_crack/chat_history_window',
+                window_id: getHistoryWindowId()
+            }).catch(() => {});
+        } catch(e) {}
+    }
+
+    function bindHistoryWindow(hass, conversationId) {
+        if (!hass?.connection || !conversationId) return;
+        try {
+            hass.connection.sendMessagePromise({
+                type: 'ha_crack/chat_history_resume',
+                conversation_id: conversationId,
+                window_id: getHistoryWindowId()
+            }).catch(() => {});
+        } catch(e) {}
+    }
     
     function getMainPanel() {
         return document.querySelector('home-assistant')?.shadowRoot?.querySelector('home-assistant-main')?.shadowRoot;
@@ -30,7 +101,11 @@
         return getMainPanel()?.querySelector('ha-sidebar')?.shadowRoot;
     }
     
+    let _dockedChat = null;
     function deepQuery(selector, root = document) {
+        if (selector === 'ha-assist-chat' && _dockedChat && _dockedChat.isConnected && root === document) {
+            return _dockedChat;
+        }
         let result = root.querySelector(selector);
         if (result) return result;
         const allElements = root.querySelectorAll('*');
@@ -110,6 +185,7 @@
         pollPendingJS(hass);
         exposeGlobalAPI();
         setupGoalContinuationStream(hass);
+        registerHistoryWindow(hass);
         setupContinuousConversation(hass);
         setupAssistRightDock(hass);
         setupContextStatusBar(hass);
@@ -172,19 +248,54 @@
             await sendResult(task.id, result);
         }
 
+        let _subActive = false;
+        let _subUnsupported = false;
+        let _pollTimer = null;
+        let _pollDelay = 2000;
+        const pollExec = async () => {
+            if (_subActive || _subUnsupported === false && !_pollTimer) return;
+            try {
+                const c = getConn();
+                const r = await c.sendMessagePromise({ type: 'ha_crack/frontend_exec_poll' });
+                const tasks = r?.tasks || [];
+                for (const task of tasks) await runTask(task);
+                _pollDelay = tasks.length ? 250 : 2000;
+            } catch(_) {
+                _pollDelay = 5000;
+            } finally {
+                if (_subUnsupported) _pollTimer = setTimeout(pollExec, _pollDelay);
+            }
+        };
+        const startPollFallback = () => {
+            if (_pollTimer) return;
+            _subUnsupported = true;
+            _pollDelay = 250;
+            _pollTimer = setTimeout(pollExec, 0);
+        };
+        const startSubscription = () => {
+            if (_subActive || _subUnsupported) return;
+            _subActive = true;
+            const c = getConn();
+            c.subscribeMessage(
+                (msg) => {
+                    if (msg?.type === 'exec' && msg?.task) runTask(msg.task);
+                },
+                { type: 'ha_crack/frontend_exec_subscribe' }
+            ).catch(() => {
+                _subActive = false;
+                startPollFallback();
+            });
+        };
+        startSubscription();
+
         conn.subscribeEvents(ev => {
             const d = ev.data;
             if (d?.id && d?.code) runTask(d);
         }, 'claw_frontend_exec').catch(() => {});
 
-        setInterval(async () => {
-            try {
-                const c = getConn();
-                const r = await c.sendMessagePromise({ type: 'ha_crack/frontend_exec_poll' });
-                if (!r?.tasks?.length) return;
-                for (const task of r.tasks) await runTask(task);
-            } catch(_) {}
-        }, 5000);
+        setInterval(() => {
+            if (!_subActive) startSubscription();
+        }, 10000);
 
         (function setupDialogObserver() {
             if (window.__clawDialogObsInstalled) return;
@@ -371,24 +482,432 @@
 
     function setupGoalContinuationStream() {}
 
-    const _patchMarkdownIndent = () => {
+    const _MARKED_CDN = 'https://cdn.jsdelivr.net/npm/marked@15.0.7/lib/marked.esm.js';
+    let _markedReady = null;
+    const _ensureMarked = () => {
+        if (_markedReady) return _markedReady;
+        _markedReady = import(_MARKED_CDN).then(mod => {
+            const { marked } = mod;
+            marked.setOptions({ gfm: true, breaks: true });
+            window.__clawMarked = marked;
+            return marked;
+        }).catch(e => { console.warn('[Claw] marked load failed:', e); _markedReady = null; return null; });
+        return _markedReady;
+    };
+    _ensureMarked();
+
+    const _MD_CSS = `
+        ha-markdown-element { word-break: break-word; overflow-wrap: break-word; overflow: hidden; font-size: 16px; line-height: 1.6; }
+        .claw-md { font-size: 16px; line-height: 1.6; color: var(--primary-text-color, #1d1d1f); word-wrap: break-word; overflow-wrap: break-word; }
+        .claw-md > :first-child { margin-top: 0; }
+        .claw-md > :last-child { margin-bottom: 0; }
+        .claw-md p { margin: 0.5em 0; }
+        .claw-md h1, .claw-md h2, .claw-md h3, .claw-md h4, .claw-md h5, .claw-md h6 {
+            margin: 0.8em 0 0.4em; font-weight: 600; line-height: 1.3;
+        }
+        .claw-md h1 { font-size: 1.25em; }
+        .claw-md h2 { font-size: 1.15em; }
+        .claw-md h3 { font-size: 1.05em; }
+        .claw-md strong { font-weight: 600; }
+        .claw-md em { font-style: italic; }
+        .claw-md a { color: var(--primary-color, #03a9f4); text-decoration: none; }
+        .claw-md a:hover { text-decoration: underline; }
+        .claw-md ul, .claw-md ol { padding-left: 1.8em; margin: 0.4em 0; }
+        .claw-md li { margin: 0.15em 0; }
+        .claw-md li > p { margin: 0.2em 0; }
+        .claw-md blockquote {
+            margin: 0.5em 0; padding: 0.35em 0.75em;
+            border-left: 3px solid var(--accent-color, var(--primary-color, #03a9f4));
+            color: var(--secondary-text-color, #6b7280);
+            background: var(--secondary-background-color, rgba(128,128,128,0.06));
+            border-radius: 0 4px 4px 0;
+        }
+        .claw-md blockquote > :first-child { margin-top: 0; }
+        .claw-md blockquote > :last-child { margin-bottom: 0; }
+        .claw-md blockquote p { margin: 0.25em 0; }
+        .claw-md code {
+            font-family: 'SF Mono', 'Fira Code', 'Cascadia Code', 'JetBrains Mono', ui-monospace, monospace;
+            font-size: 0.88em; padding: 0.15em 0.35em;
+            background: var(--code-editor-background-color, rgba(0,0,0,0.06));
+            border-radius: 4px; color: var(--primary-text-color);
+        }
+        .claw-md pre {
+            max-width: 100%; min-width: 0; box-sizing: border-box;
+            margin: 0.5em 0; padding: 0.75em 1em; overflow-x: hidden;
+            white-space: pre-wrap; overflow-wrap: anywhere; word-break: break-word;
+            background: var(--code-editor-background-color, #1e1e1e);
+            color: #d4d4d4; border-radius: 6px; font-size: 0.85em; line-height: 1.5;
+        }
+        .claw-md pre code {
+            display: block; max-width: 100%; white-space: inherit;
+            overflow-wrap: anywhere; word-break: break-word;
+            background: none; padding: 0; border-radius: 0;
+            color: inherit; font-size: inherit;
+        }
+        .claw-md .table-wrap {
+            max-width: 100%;
+            min-width: 0;
+            overflow-x: hidden;
+            margin: 0.5em 0;
+            -webkit-overflow-scrolling: touch;
+        }
+        .claw-md table {
+            table-layout: fixed;
+            border-collapse: collapse; width: 100%; max-width: 100%; min-width: 0;
+            font-size: 0.9em; border: 1px solid var(--divider-color, #e0e0e0);
+            border-radius: 4px;
+        }
+        .claw-md thead { background: var(--table-header-background-color, rgba(128,128,128,0.08)); }
+        .claw-md th, .claw-md td {
+            border: 1px solid var(--divider-color, #e0e0e0);
+            padding: 0.45em 0.75em; text-align: left; white-space: normal;
+            overflow-wrap: anywhere; word-break: break-word;
+        }
+        .claw-md th { font-weight: 600; font-size: 0.88em; }
+        .claw-md tr:nth-child(even) { background: rgba(128,128,128,0.04); }
+        .claw-md hr { border: none; border-top: 1px solid var(--divider-color, #e0e0e0); margin: 0.8em 0; }
+        .claw-md img { max-width: 100%; border-radius: 6px; }
+        .claw-user-md {
+            max-width: 100%;
+            min-width: 0;
+            box-sizing: border-box;
+            white-space: pre-wrap;
+            overflow-wrap: anywhere;
+            word-break: break-word;
+            line-height: 1.45;
+        }
+        .claw-user-md code {
+            font-family: 'SF Mono', 'Fira Code', 'Cascadia Code', 'JetBrains Mono', ui-monospace, monospace;
+            font-size: 0.88em;
+            padding: 0.08em 0.28em;
+            border-radius: 4px;
+            white-space: pre-wrap;
+            overflow-wrap: anywhere;
+            word-break: break-word;
+        }
+        .claw-user-md pre {
+            max-width: 100%;
+            min-width: 0;
+            box-sizing: border-box;
+            margin: 0.35em 0;
+            padding: 0.6em 0.75em;
+            border-radius: 6px;
+            overflow-x: hidden;
+            white-space: pre-wrap;
+            overflow-wrap: anywhere;
+            word-break: break-word;
+        }
+        .claw-user-md pre code {
+            display: block;
+            padding: 0;
+            background: none;
+            border-radius: 0;
+            color: inherit;
+            font-size: inherit;
+            white-space: inherit;
+            overflow-wrap: anywhere;
+            word-break: break-word;
+        }
+    `;
+
+    let _mdRenderTimer = null;
+    let _mdStreamActive = false;
+
+    const _STREAM_CSS = ``;
+
+    const _injectMdStyles = (msr) => {
+        if (msr.getElementById('claw-md-rich')) return;
+        const s = document.createElement('style');
+        s.id = 'claw-md-rich';
+        s.textContent = _MD_CSS + _STREAM_CSS;
+        msr.appendChild(s);
+    };
+
+    const _normalize = (s) => s.replace(/\s+/g, '').replace(/[|>*#`~\[\]\-_]/g, '').slice(0, 80);
+
+    const _escapeHtml = (s) => String(s).replace(/[&<>"']/g, (c) => ({
+        '&': '&amp;',
+        '<': '&lt;',
+        '>': '&gt;',
+        '"': '&quot;',
+        "'": '&#39;',
+    }[c]));
+
+    const _sanitizeUserText = (s) => String(s)
+        .replace(/(^|\n)[ \t]{0,3}#{1,6}[ \t]*/g, '$1')
+        .replace(/#{3,}/g, '')
+        .replace(/\*\*/g, '')
+        .replace(/__/g, '');
+
+    const _countMarkdownTableCells = (line) => {
+        const trimmed = String(line || '').trim();
+        if (!trimmed.includes('|')) return 0;
+        return trimmed.split('|').slice(1, -1).length;
+    };
+
+    const _isMarkdownTableSeparator = (line) => /^\s*\|?\s*:?-{3,}:?\s*(?:\|\s*:?-{3,}:?\s*)*\|?\s*$/.test(line || '');
+    const _splitLooseTableRow = (line) => String(line || '').trim().split(/\t+| {2,}/).filter(Boolean);
+    const _isLooseTableSeparator = (line) => {
+        const cells = _splitLooseTableRow(line);
+        return cells.length > 1 && cells.every((cell) => /^:?-{1,}:?$/.test(cell));
+    };
+
+    const _normalizeAssistantTables = (raw) => {
+        const lines = String(raw || '').replace(/\r\n?/g, '\n').split('\n');
+        for (let i = 1; i < lines.length; i++) {
+            const separator = lines[i].trim();
+            const header = lines[i - 1].trim();
+            if (_isLooseTableSeparator(separator) && !header.includes('|')) {
+                const headerCells = _splitLooseTableRow(header);
+                const columnCount = Math.max(headerCells.length, _splitLooseTableRow(separator).length);
+                if (columnCount > 1) {
+                    const fillCells = (cells) => Array.from({ length: columnCount }, (_, idx) => cells[idx] || (idx === 0 ? '项目' : '内容'));
+                    lines[i - 1] = '| ' + fillCells(headerCells).join(' | ') + ' |';
+                    lines[i] = '| ' + Array.from({ length: columnCount }, () => '---').join(' | ') + ' |';
+                    for (let j = i + 1; j < lines.length; j++) {
+                        const rowCells = _splitLooseTableRow(lines[j]);
+                        if (rowCells.length < 2) break;
+                        lines[j] = '| ' + fillCells(rowCells).join(' | ') + ' |';
+                    }
+                }
+                continue;
+            }
+            if (!header.includes('|') || !_isMarkdownTableSeparator(separator)) continue;
+
+            let columnCount = Math.max(_countMarkdownTableCells(header), _countMarkdownTableCells(separator));
+            for (let j = i + 1; j < lines.length; j++) {
+                const row = lines[j].trim();
+                if (!row.includes('|') || _isMarkdownTableSeparator(row)) break;
+                columnCount = Math.max(columnCount, _countMarkdownTableCells(row));
+            }
+            if (columnCount < 1) continue;
+
+            const headerCells = _countMarkdownTableCells(header);
+            if (/^\|+\s*$/.test(header) || headerCells !== columnCount) {
+                lines[i - 1] = '| ' + Array.from({ length: columnCount }, (_, idx) => idx === 0 ? '项目' : '内容').join(' | ') + ' |';
+            }
+            if (_countMarkdownTableCells(separator) !== columnCount) {
+                lines[i] = '| ' + Array.from({ length: columnCount }, () => '---').join(' | ') + ' |';
+            }
+        }
+        return lines.join('\n');
+    };
+
+    const _renderUserInline = (text) => {
+        const clean = _sanitizeUserText(text);
+        let html = '';
+        let last = 0;
+        const re = /`([^`\n]+)`/g;
+        let match;
+        while ((match = re.exec(clean))) {
+            html += _escapeHtml(clean.slice(last, match.index));
+            html += '<code>' + _escapeHtml(match[1]) + '</code>';
+            last = re.lastIndex;
+        }
+        html += _escapeHtml(clean.slice(last));
+        return html;
+    };
+
+    const _renderUserMessageHtml = (raw) => {
+        const text = String(raw || '').replace(/\r\n?/g, '\n');
+        const fenceRe = /```([^\n`]*)\n?([\s\S]*?)(?:```|$)/g;
+        let html = '';
+        let last = 0;
+        let match;
+        while ((match = fenceRe.exec(text))) {
+            const before = text.slice(last, match.index);
+            if (_sanitizeUserText(before).trim()) {
+                html += '<div>' + _renderUserInline(before) + '</div>';
+            }
+            html += '<pre><code>' + _escapeHtml(match[2]) + '</code></pre>';
+            last = fenceRe.lastIndex;
+        }
+        const rest = text.slice(last);
+        if (_sanitizeUserText(rest).trim() || !html) {
+            html += '<div>' + _renderUserInline(rest) + '</div>';
+        }
+        return '<div class="claw-user-md">' + html + '</div>';
+    };
+
+    const _findRawText = (mdContent, hassTexts, used) => {
+        if (!mdContent || !hassTexts.length) return null;
+        const needle = _normalize(mdContent);
+        if (!needle) return null;
+        let bestIdx = -1, bestScore = 0;
+        for (let i = 0; i < hassTexts.length; i++) {
+            if (used.has(i)) continue;
+            const hay = _normalize(hassTexts[i]);
+            if (!hay) continue;
+            if (hay === needle) { bestIdx = i; bestScore = Infinity; break; }
+            const short = needle.length < hay.length ? needle : hay;
+            const long = needle.length < hay.length ? hay : needle;
+            let score = 0;
+            for (let j = 0; j < short.length && j < 60; j++) {
+                if (short[j] === long[j]) score++;
+            }
+            if (score > bestScore) { bestScore = score; bestIdx = i; }
+        }
+        if (bestIdx >= 0 && bestScore >= Math.min(needle.length, 8)) {
+            used.add(bestIdx);
+            return hassTexts[bestIdx];
+        }
+        return null;
+    };
+
+    let _renderLock = false;
+
+    const _renderFinal = async () => {
+        if (_renderLock) return;
         const chat = deepQuery('ha-assist-chat');
         const sr = chat?.shadowRoot;
         if (!sr) return;
-        sr.querySelectorAll('ha-markdown').forEach(md => {
-            if (md.shadowRoot && !md.shadowRoot.getElementById('claw-md-fix')) {
-                const s = document.createElement('style');
-                s.id = 'claw-md-fix';
-                s.textContent = 'ha-markdown-element > :is(ol, ul) { padding-inline-start: 2.15em !important; }';
-                md.shadowRoot.appendChild(s);
+        const marked = window.__clawMarked || await _ensureMarked();
+        const conv = chat._conversation;
+        const hassTexts = [];
+        if (Array.isArray(conv)) {
+            for (const m of conv) {
+                if (m.who === 'hass' && m.text) hassTexts.push(m.text);
             }
+        }
+        const used = new Set();
+        const msgEls = sr.querySelectorAll('.message');
+        let isFirst = true;
+        const obs = sr.__clawMdObs;
+        _renderLock = true;
+        if (obs) obs.disconnect();
+        try {
+        msgEls.forEach(msgEl => {
+            const isHass = msgEl.classList.contains('hass');
+            const isUser = msgEl.classList.contains('user');
+            const md = msgEl.querySelector('ha-markdown');
+            if (!md) return;
+            const msr = md.shadowRoot;
+            if (!msr) return;
+            if (isHass && isFirst) {
+                isFirst = false;
+                return;
+            }
+            const el = msr.querySelector('ha-markdown-element');
+            if (!el) return;
+            if (isUser) {
+                const rawContent = md.content;
+                if (!rawContent || typeof rawContent !== 'string') return;
+                const sig = rawContent.length + '_' + rawContent.slice(0, 120);
+                if (el.__clawUserMdSig === sig) return;
+                el.__clawUserMdSig = sig;
+                _injectMdStyles(msr);
+                el.innerHTML = _renderUserMessageHtml(rawContent);
+                return;
+            }
+            if (!isHass) return;
+            if (!marked) return;
+            const displayContent = md.content;
+            const rawContent = _findRawText(displayContent, hassTexts, used) || displayContent;
+            if (!rawContent || typeof rawContent !== 'string') return;
+            if (rawContent.length < 60 && !rawContent.includes('\n') && !rawContent.includes('|') && !/[#*`|~\[\]>-]{2}/.test(rawContent)) return;
+            const sig = rawContent.length + '_' + rawContent.slice(0, 120);
+            if (el.__clawMdSig === sig) return;
+            el.__clawMdSig = sig;
+            _injectMdStyles(msr);
+            try {
+                let html = marked.parse(_normalizeAssistantTables(rawContent));
+                html = html.replace(/<table>/g, '<div class="table-wrap"><table>').replace(/<\/table>/g, '</table></div>');
+                el.innerHTML = '<div class="claw-md">' + html + '</div>';
+            } catch(e) {}
         });
+        } finally {
+            if (obs) obs.observe(sr, { childList: true, subtree: true });
+            _renderLock = false;
+        }
+    };
+
+    const _markStreaming = () => {
+        const chat = deepQuery('ha-assist-chat');
+        const sr = chat?.shadowRoot;
+        if (!sr) return;
+        const mdList = sr.querySelectorAll('ha-markdown');
+        if (!mdList.length) return;
+        const last = mdList[mdList.length - 1];
+        const msr = last.shadowRoot;
+        if (!msr) return;
+        _injectMdStyles(msr);
+        const el = msr.querySelector('ha-markdown-element');
+        if (el) el.classList.add('claw-streaming');
+    };
+
+    const _scheduleRender = () => {
+        if (_mdRenderTimer) clearTimeout(_mdRenderTimer);
+        if (_mdStreamActive) {
+            _markStreaming();
+            _mdRenderTimer = setTimeout(() => _renderFinal(), 600);
+        } else {
+            _mdRenderTimer = setTimeout(() => _renderFinal(), 80);
+        }
+    };
+
+    const _injectOnce = (root, id, css) => {
+        if (!root || root.getElementById(id)) return;
+        const s = document.createElement('style'); s.id = id; s.textContent = css;
+        root.appendChild(s);
+    };
+
+    const _patchMarkdown = () => {
+        const chat = deepQuery('ha-assist-chat');
+        const sr = chat?.shadowRoot;
+        if (!sr) return;
+        _injectOnce(sr, 'claw-chat-font', `
+            #message-input::part(wa-input) { font-size: 16px !important; }
+            .message { font-size: 16px !important; }
+            .message.user {
+                min-width: 0 !important;
+                max-width: 100% !important;
+                overflow-wrap: anywhere !important;
+                word-break: break-word !important;
+            }
+            .message.user ha-markdown {
+                min-width: 0 !important;
+                max-width: 100% !important;
+                overflow: hidden !important;
+                overflow-wrap: anywhere !important;
+                word-break: break-word !important;
+            }
+        `);
+        _scheduleRender();
         if (!sr.__clawMdObs) {
-            sr.__clawMdObs = new MutationObserver(() => _patchMarkdownIndent());
+            sr.__clawMdObs = new MutationObserver(() => {
+                if (_mdStreamActive) {
+                    _markStreaming();
+                    if (_mdRenderTimer) clearTimeout(_mdRenderTimer);
+                    _mdRenderTimer = setTimeout(() => _renderFinal(), 600);
+                } else {
+                    _scheduleRender();
+                }
+            });
             sr.__clawMdObs.observe(sr, { childList: true, subtree: true });
         }
     };
-    window.addEventListener('claw-chat-updated', () => _patchMarkdownIndent());
+
+    window.addEventListener('claw-chat-updated', () => _patchMarkdown());
+
+    const _origStreamHook = window.__clawOnStreamDelta;
+    window.__clawOnStreamDelta = (delta) => {
+        _mdStreamActive = true;
+        if (_mdRenderTimer) clearTimeout(_mdRenderTimer);
+        _mdRenderTimer = setTimeout(() => {
+            _mdStreamActive = false;
+            _renderFinal();
+        }, 600);
+        _markStreaming();
+        if (typeof _origStreamHook === 'function') _origStreamHook(delta);
+    };
+
+    const _origStreamEnd = window.__clawOnStreamEnd;
+    window.__clawOnStreamEnd = () => {
+        _mdStreamActive = false;
+        if (_mdRenderTimer) clearTimeout(_mdRenderTimer);
+        setTimeout(() => _renderFinal(), 150);
+        if (typeof _origStreamEnd === 'function') _origStreamEnd();
+    };
 
     function setupAssistRightDock(hass) {
         if (window.__clawAssistDockInstalled) return;
@@ -495,10 +1014,25 @@
                         white-space: nowrap;
                         overflow: hidden;
                     }
-                    #${DOCK_ID} .dock-header .dock-title ha-dropdown {
+                    #${DOCK_ID} .dock-header .dock-title.dock-history-title-visible,
+                    #${DOCK_ID} .dock-header .dock-title.dock-history-title-visible > [slot="title"] {
+                        overflow: visible;
+                    }
+                    #${DOCK_ID} .dock-header .dock-title ha-dropdown,
+                    #${DOCK_ID} .dock-header .dock-title ha-button-menu,
+                    #${DOCK_ID} .dock-header .dock-title wa-dropdown {
                         --ha-select-height: 32px;
                     }
-                    #${DOCK_ID} .dock-header .dock-close {
+                    #${DOCK_ID} .dock-header .dock-title .claw-history-menu-item {
+                        color: var(--primary-text-color);
+                        text-decoration: underline;
+                        text-underline-offset: 3px;
+                    }
+                    #${DOCK_ID} .dock-header .dock-title .claw-history-menu-item ha-svg-icon,
+                    #${DOCK_ID} .dock-header .dock-title .claw-history-menu-item ha-icon-next {
+                        color: var(--secondary-text-color);
+                    }
+                    #${DOCK_ID} .dock-header .dock-btn {
                         flex: 0 0 auto;
                         width: 40px;
                         height: 40px;
@@ -511,15 +1045,211 @@
                         opacity: 0.85;
                         transition: opacity .15s, background .15s;
                         -webkit-tap-highlight-color: transparent;
+                        border: none;
+                        background: none;
+                        padding: 0;
                     }
-                    #${DOCK_ID} .dock-header .dock-close:hover {
+                    #${DOCK_ID} .dock-header .dock-btn:hover {
                         opacity: 1;
-                        background: rgba(255,255,255,.12);
+                        background: var(--secondary-background-color, rgba(255,255,255,.12));
                     }
-                    #${DOCK_ID} .dock-header .dock-close svg {
+                    #${DOCK_ID} .dock-header .dock-back-btn {
+                        transform: translateX(-8px);
+                        position: relative;
+                        z-index: 3;
+                    }
+                    #${DOCK_ID} .dock-header .dock-btn svg {
                         width: 20px;
                         height: 20px;
                         fill: var(--icon-primary-color, currentColor);
+                    }
+                    #${DOCK_ID} .dock-history-panel {
+                        flex: 1 1 auto;
+                        min-height: 0;
+                        display: flex;
+                        flex-direction: column;
+                        overflow: hidden;
+                    }
+                    #${DOCK_ID} .dock-history-panel .hist-search {
+                        padding: 16px 18px 10px;
+                        flex: 0 0 auto;
+                    }
+                    #${DOCK_ID} .dock-history-panel .hist-search input {
+                        width: 100%;
+                        box-sizing: border-box;
+                        padding: 10px 14px 10px 40px;
+                        border: 1px solid var(--divider-color, rgba(0,0,0,.12));
+                        border-radius: 22px;
+                        background: var(--input-fill-color, var(--secondary-background-color, #f5f5f5));
+                        color: var(--primary-text-color);
+                        font-size: 15px;
+                        outline: none;
+                        font-family: inherit;
+                        transition: border-color .2s;
+                    }
+                    #${DOCK_ID} .dock-history-panel .hist-search input:focus {
+                        border-color: var(--primary-color, #03a9f4);
+                    }
+                    #${DOCK_ID} .dock-history-panel .hist-search-wrap {
+                        position: relative;
+                    }
+                    #${DOCK_ID} .dock-history-panel .hist-search-wrap svg {
+                        position: absolute;
+                        left: 13px;
+                        top: 50%;
+                        transform: translateY(-50%);
+                        width: 18px;
+                        height: 18px;
+                        fill: var(--secondary-text-color, #666);
+                        pointer-events: none;
+                    }
+                    #${DOCK_ID} .dock-history-panel .hist-list {
+                        flex: 1 1 auto;
+                        overflow-y: auto;
+                        overscroll-behavior: contain;
+                        padding: 8px 12px 18px;
+                    }
+                    #${DOCK_ID} .dock-history-panel .hist-section-label {
+                        padding: 16px 10px 8px;
+                        font-size: 12px;
+                        font-weight: 500;
+                        text-transform: uppercase;
+                        letter-spacing: 0.05em;
+                        color: var(--secondary-text-color, #666);
+                    }
+                    #${DOCK_ID} .dock-history-panel .hist-item {
+                        padding: 14px 14px;
+                        margin: 4px 0;
+                        cursor: pointer;
+                        position: relative;
+                        display: flex;
+                        align-items: flex-start;
+                        gap: 14px;
+                        border-radius: 14px;
+                    }
+                    #${DOCK_ID} .dock-history-panel .hist-item::before {
+                        content: "";
+                        position: absolute;
+                        inset: 0;
+                        border-radius: 14px;
+                        background: transparent;
+                        transition: background .15s;
+                        pointer-events: none;
+                    }
+                    #${DOCK_ID} .dock-history-panel .hist-item:hover::before {
+                        background: color-mix(in srgb, var(--secondary-background-color, rgba(0,0,0,.04)) 88%, var(--primary-color, #03a9f4) 12%);
+                    }
+                    #${DOCK_ID} .dock-history-panel .hist-item.active::before {
+                        background: var(--sidebar-selected-background-color, var(--secondary-background-color));
+                    }
+                    #${DOCK_ID} .dock-history-panel .hist-item-icon,
+                    #${DOCK_ID} .dock-history-panel .hist-item-content,
+                    #${DOCK_ID} .dock-history-panel .hist-item-actions {
+                        position: relative;
+                        z-index: 1;
+                    }
+                    #${DOCK_ID} .dock-history-panel .hist-item-icon {
+                        flex: 0 0 auto;
+                        width: 20px;
+                        height: 42px;
+                        display: flex;
+                        align-items: center;
+                        justify-content: center;
+                        position: relative;
+                        color: var(--secondary-text-color, #666);
+                        opacity: .68;
+                    }
+                    #${DOCK_ID} .dock-history-panel .hist-item-icon::before {
+                        content: "";
+                        width: 2px;
+                        height: 28px;
+                        border-radius: 999px;
+                        background: color-mix(in srgb, var(--primary-color, #03a9f4) 34%, var(--divider-color, rgba(0,0,0,.14)));
+                    }
+                    #${DOCK_ID} .dock-history-panel .hist-item:hover .hist-item-icon,
+                    #${DOCK_ID} .dock-history-panel .hist-item.active .hist-item-icon {
+                        opacity: 1;
+                    }
+                    #${DOCK_ID} .dock-history-panel .hist-item.active .hist-item-icon::before {
+                        width: 3px;
+                        background: var(--sidebar-selected-icon-color, var(--primary-color));
+                    }
+                    #${DOCK_ID} .dock-history-panel .hist-item-icon svg {
+                        display: none;
+                    }
+                    #${DOCK_ID} .dock-history-panel .hist-item-content {
+                        flex: 1 1 auto;
+                        min-width: 0;
+                    }
+                    #${DOCK_ID} .dock-history-panel .hist-item-title {
+                        font-size: 15px;
+                        font-weight: 400;
+                        color: var(--primary-text-color);
+                        white-space: nowrap;
+                        overflow: hidden;
+                        text-overflow: ellipsis;
+                    }
+                    #${DOCK_ID} .dock-history-panel .hist-item.active .hist-item-title {
+                        color: var(--sidebar-selected-text-color, var(--primary-text-color));
+                    }
+                    #${DOCK_ID} .dock-history-panel .hist-item-meta {
+                        font-size: 13px;
+                        color: var(--secondary-text-color, #999);
+                        margin-top: 4px;
+                    }
+                    #${DOCK_ID} .dock-history-panel .hist-item.active .hist-item-meta {
+                        color: var(--sidebar-selected-text-color, var(--secondary-text-color));
+                        opacity: .72;
+                    }
+                    #${DOCK_ID} .dock-history-panel .hist-item-actions {
+                        flex: 0 0 auto;
+                        opacity: 0;
+                        align-self: stretch;
+                        display: flex;
+                        align-items: center;
+                        justify-content: center;
+                        transition: opacity .15s, transform .15s;
+                    }
+                    #${DOCK_ID} .dock-history-panel .hist-item:hover .hist-item-actions {
+                        opacity: 1;
+                    }
+                    #${DOCK_ID} .dock-history-panel .hist-item-actions button {
+                        width: 34px;
+                        height: 34px;
+                        background: transparent;
+                        border: none;
+                        cursor: pointer;
+                        padding: 0;
+                        border-radius: 50%;
+                        color: var(--secondary-text-color, #999);
+                        display: flex;
+                        align-items: center;
+                        justify-content: center;
+                        transition: background .15s, color .15s;
+                    }
+                    #${DOCK_ID} .dock-history-panel .hist-item-actions button:hover {
+                        background: color-mix(in srgb, var(--error-color, #db4437) 8%, transparent);
+                        color: var(--error-color, #db4437);
+                    }
+                    #${DOCK_ID} .dock-history-panel .hist-item-actions button svg {
+                        width: 17px;
+                        height: 17px;
+                        fill: currentColor;
+                    }
+                    #${DOCK_ID} .dock-history-panel .hist-empty {
+                        display: flex;
+                        flex-direction: column;
+                        align-items: center;
+                        justify-content: center;
+                        padding: 48px 16px;
+                        color: var(--secondary-text-color, #999);
+                        text-align: center;
+                        gap: 8px;
+                    }
+                    #${DOCK_ID} .dock-history-panel .hist-empty svg {
+                        width: 48px;
+                        height: 48px;
+                        fill: var(--disabled-text-color, #ccc);
                     }
                     #${DOCK_ID} .dock-body {
                         flex: 1 1 auto;
@@ -600,7 +1330,7 @@
             if (!dock) {
                 dock = document.createElement('div');
                 dock.id = DOCK_ID;
-                dock.innerHTML = '<div class="dock-resize"></div><div class="dock-header"><div class="dock-title">Assist</div><div class="dock-close" title="Close"><svg viewBox="0 0 24 24"><path d="M19,6.41L17.59,5L12,10.59L6.41,5L5,6.41L10.59,12L5,17.59L6.41,19L12,13.41L17.59,19L19,17.59L13.41,12L19,6.41Z"/></svg></div></div><div class="dock-body"></div>';
+                dock.innerHTML = '<div class="dock-resize"></div><div class="dock-header"><div class="dock-title">Assist</div><button class="dock-btn dock-close" title="Close"><svg viewBox="0 0 24 24"><path d="M19,6.41L17.59,5L12,10.59L6.41,5L5,6.41L10.59,12L5,17.59L6.41,19L12,13.41L17.59,19L19,17.59L13.41,12L19,6.41Z"/></svg></button></div><div class="dock-body"></div><div class="dock-history-panel" style="display:none"></div>';
                 msr.appendChild(dock);
 
                 const handle = dock.querySelector('.dock-resize');
@@ -661,6 +1391,56 @@
         let _dockVoiceEl = null;
         let _userClose = false;
 
+        let _fabSyncTimer = null;
+        let _historySelectionHighlightConsumed = false;
+        let _historySelectedConversationId = '';
+
+        const _nudgeFabs = (offset) => {
+            const val = offset ? offset + 'px' : '';
+            const msr = getMainSR();
+            if (!msr) return;
+            const walk = (node) => {
+                if (!node?.shadowRoot) return;
+                try {
+                    const fab = node.shadowRoot.getElementById('fab');
+                    if (fab) {
+                        fab.style.transition = 'right .25s cubic-bezier(.4,0,.2,1), inset-inline-end .25s cubic-bezier(.4,0,.2,1)';
+                        fab.style.right = val || '';
+                        fab.style.insetInlineEnd = val || '';
+                    }
+                    node.shadowRoot.querySelectorAll('*').forEach(c => {
+                        if (c.shadowRoot) walk(c);
+                    });
+                } catch(_) {}
+            };
+            try {
+                msr.querySelectorAll('hass-tabs-subpage, *').forEach(el => {
+                    if (el.localName === 'hass-tabs-subpage' || el.shadowRoot) walk(el);
+                });
+            } catch(_) {}
+        };
+
+        const _startFabSync = () => {
+            const dockEl = getMainSR()?.getElementById(DOCK_ID);
+            const w = (dockEl?.offsetWidth || parseInt(DOCK_W) || 460) + 10;
+            _nudgeFabs(w);
+            if (_fabSyncTimer) clearInterval(_fabSyncTimer);
+            _fabSyncTimer = setInterval(() => {
+                if (!_dockActive) return;
+                const d = getMainSR()?.getElementById(DOCK_ID);
+                _nudgeFabs((d?.offsetWidth || (w - 10)) + 10);
+            }, 1500);
+        };
+
+        const _stopFabSync = () => {
+            if (_fabSyncTimer) { clearInterval(_fabSyncTimer); _fabSyncTimer = null; }
+            _nudgeFabs(0);
+        };
+
+        window.addEventListener('location-changed', () => {
+            if (_dockActive) setTimeout(_startFabSync, 500);
+        });
+
         const neutralizeVoiceDialog = (voiceEl) => {
             const sr = voiceEl?.shadowRoot;
             if (!sr) return;
@@ -679,6 +1459,41 @@
             }
         };
 
+        const _installHistoryMenuItem = (dock, voiceEl) => {
+            const titleEl = dock.querySelector('.dock-title');
+            const menu = titleEl?.querySelector('wa-dropdown, ha-button-menu, ha-dropdown');
+            if (!menu || menu.__clawHistoryMenuBound) return;
+            menu.__clawHistoryMenuBound = true;
+
+            let item;
+            if (menu.localName === 'ha-dropdown') {
+                item = document.createElement('ha-dropdown-item');
+                item.setAttribute('variant', 'default');
+                item.setAttribute('size', 'medium');
+                item.setAttribute('type', 'normal');
+                item.innerHTML = historyText('history') + ' <ha-icon-next slot="details"></ha-icon-next>';
+            } else if (menu.localName === 'wa-dropdown') {
+                item = document.createElement('wa-dropdown-item');
+                item.textContent = historyText('history');
+            } else {
+                item = document.createElement('ha-list-item');
+                item.setAttribute('graphic', 'icon');
+                item.innerHTML = '<ha-svg-icon slot="graphic" path="M13,3A9,9 0 0,0 4,12H1L4.89,15.89L4.96,16.03L9,12H6A7,7 0 0,1 13,5A7,7 0 0,1 20,12A7,7 0 0,1 13,19C11.07,19 9.32,18.21 8.06,16.94L6.64,18.36C8.27,19.99 10.51,21 13,21A9,9 0 0,0 22,12A9,9 0 0,0 13,3M12.5,8V12.25L16.5,14.33L17.21,13.06L13.75,11.33V8H12.5Z"></ha-svg-icon>' + historyText('history');
+            }
+            item.classList.add('claw-history-menu-item');
+            item.addEventListener('click', (e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                menu.open = false;
+                _toggleHistoryPanel(dock, voiceEl);
+            });
+            item.addEventListener('selected', (e) => e.stopPropagation());
+            item.addEventListener('request-selected', (e) => e.stopPropagation());
+            item.addEventListener('wa-select', (e) => e.stopPropagation());
+
+            menu.append(item);
+        };
+
         const grabChat = (voiceEl) => {
             const dock = ensureDock();
             if (!dock) return false;
@@ -686,26 +1501,47 @@
             if (!sr) return false;
             const chat = sr.querySelector('ha-assist-chat');
             if (!chat) return false;
+            _historyVisible = false;
 
             const dockHeader = dock.querySelector('.dock-header');
             const titleEl = dockHeader.querySelector('.dock-title');
-            if (titleEl && !titleEl.querySelector('[slot="title"]')) {
+            titleEl?.classList.remove('dock-history-title-visible');
+            if (titleEl && titleEl.__clawOrigTitleNodes) {
+                titleEl.replaceChildren(...titleEl.__clawOrigTitleNodes);
+            }
+            if (titleEl && !titleEl.__clawOrigTitleNodes && !titleEl.querySelector('[slot="title"]')) {
                 const dialogHeader = sr.querySelector('ha-dialog-header');
                 if (dialogHeader) {
                     const titleSlot = dialogHeader.querySelector('[slot="title"]');
                     if (titleSlot) {
-                        titleEl.innerHTML = '';
-                        titleEl.appendChild(titleSlot);
+                        titleEl.replaceChildren(titleSlot);
                     }
                 }
             }
+            _installHistoryMenuItem(dock, voiceEl);
 
             const dockBody = dock.querySelector('.dock-body');
-            dockBody.innerHTML = '';
-            dockBody.appendChild(chat);
+            const historyPanel = dock.querySelector('.dock-history-panel');
+            if (historyPanel) historyPanel.style.display = 'none';
+            if (dockBody) dockBody.style.display = '';
+            if (dockBody && dockBody.firstElementChild !== chat) {
+                dockBody.innerHTML = '';
+                dockBody.appendChild(chat);
+            }
+            _dockedChat = chat;
             dock.setAttribute('open', '');
 
-            _patchMarkdownIndent();
+            if (dock.__clawHassSync) clearInterval(dock.__clawHassSync);
+            dock.__clawHassSync = setInterval(() => {
+                const ha = document.querySelector('home-assistant');
+                const h = ha?.hass;
+                if (h && chat.hass !== h) chat.hass = h;
+                if (voiceEl._pipelineId && chat._pipelineId !== voiceEl._pipelineId) {
+                    chat._pipelineId = voiceEl._pipelineId;
+                }
+            }, 500);
+
+            _patchMarkdown();
 
             neutralizeVoiceDialog(voiceEl);
             voiceEl.style.display = 'none';
@@ -717,6 +1553,8 @@
             }
             document.body.style.overflow = '';
 
+            _startFabSync();
+
             const closeBtn = dock.querySelector('.dock-close');
             if (closeBtn && !closeBtn.__clawBound) {
                 closeBtn.__clawBound = true;
@@ -725,6 +1563,7 @@
                     voiceEl.closeDialog?.();
                 });
             }
+
             return true;
         };
 
@@ -736,15 +1575,248 @@
             }, 50);
         };
 
+        let _historyVisible = false;
+
+        const _formatTimeAgo = (seconds) => {
+            if (seconds < 60) return 'Just now';
+            if (seconds < 3600) return Math.floor(seconds / 60) + 'm ago';
+            if (seconds < 86400) return Math.floor(seconds / 3600) + 'h ago';
+            const days = Math.floor(seconds / 86400);
+            if (days === 1) return 'Yesterday';
+            if (days < 7) return days + 'd ago';
+            return new Date(Date.now() - seconds * 1000).toLocaleDateString();
+        };
+
+        const _groupConversations = (convs) => {
+            const now = Date.now() / 1000;
+            const groups = { today: [], yesterday: [], week: [], older: [] };
+            for (const c of convs) {
+                const age = now - c.last_message_at;
+                if (age < 86400) groups.today.push(c);
+                else if (age < 172800) groups.yesterday.push(c);
+                else if (age < 604800) groups.week.push(c);
+                else groups.older.push(c);
+            }
+            return groups;
+        };
+
+        const _renderHistoryPanel = async (dock) => {
+            const panel = dock.querySelector('.dock-history-panel');
+            if (!panel) return;
+            const h = getHass();
+            if (!h?.connection) return;
+
+            let convs = [];
+            try {
+                const r = await h.connection.sendMessagePromise({ type: 'ha_crack/chat_history_list' });
+                convs = r?.conversations || [];
+            } catch (e) {
+                panel.innerHTML = '<div class="hist-empty"><svg viewBox="0 0 24 24"><path d="M12,2C6.48,2 2,6.48 2,12C2,17.52 6.48,22 12,22C17.52,22 22,17.52 22,12C22,6.48 17.52,2 12,2M13,17H11V15H13V17M13,13H11V7H13V13Z"/></svg><span>' + historyText('unableLoad') + '</span></div>';
+                return;
+            }
+
+            if (!convs.length) {
+                panel.innerHTML = '<div class="hist-empty"><svg viewBox="0 0 24 24"><path d="M13,3A9,9 0 0,0 4,12H1L4.89,15.89L4.96,16.03L9,12H6A7,7 0 0,1 13,5A7,7 0 0,1 20,12A7,7 0 0,1 13,19C11.07,19 9.32,18.21 8.06,16.94L6.64,18.36C8.27,19.99 10.51,21 13,21A9,9 0 0,0 22,12A9,9 0 0,0 13,3M12.5,8V12.25L16.5,14.33L17.21,13.06L13.75,11.33V8H12.5Z"/></svg><span>' + historyText('empty') + '</span></div>';
+                return;
+            }
+
+            const groups = _groupConversations(convs);
+            let html = '<div class="hist-search"><div class="hist-search-wrap"><svg viewBox="0 0 24 24"><path d="M9.5,3A6.5,6.5 0 0,1 16,9.5C16,11.11 15.41,12.59 14.44,13.73L14.71,14H15.5L20.5,19L19,20.5L14,15.5V14.71L13.73,14.44C12.59,15.41 11.11,16 9.5,16A6.5,6.5 0 0,1 3,9.5A6.5,6.5 0 0,1 9.5,3M9.5,5C7,5 5,7 5,9.5C5,12 7,14 9.5,14C12,14 14,12 14,9.5C14,7 12,5 9.5,5Z"/></svg><input type="text" placeholder="' + historyText('search') + '" /></div></div><div class="hist-list">';
+
+            const chatIcon = '<svg viewBox="0 0 24 24"><path d="M12,3C6.5,3 2,6.58 2,11C2.05,13.15 3.06,15.17 4.75,16.5C4.75,17.1 4.33,18.67 2,21C4.97,20.3 7.58,18.67 8.5,17.65C9.64,17.88 10.82,18 12,18C17.5,18 22,14.42 22,10C22,6.58 17.5,3 12,3Z"/></svg>';
+            const deleteIcon = '<svg viewBox="0 0 24 24"><path d="M19,4H15.5L14.5,3H9.5L8.5,4H5V6H19M6,19A2,2 0 0,0 8,21H16A2,2 0 0,0 18,19V7H6V19Z"/></svg>';
+            const showActiveSelection = _historySelectedConversationId && !_historySelectionHighlightConsumed;
+
+            const renderGroup = (label, items) => {
+                if (!items.length) return '';
+                let g = '<div class="hist-section-label">' + label + '</div>';
+                for (const c of items) {
+                    const activeClass = showActiveSelection && c.conversation_id === _historySelectedConversationId ? ' active' : '';
+                    g += '<div class="hist-item' + activeClass + '" data-conv-id="' + c.conversation_id + '">'
+                        + '<div class="hist-item-icon">' + chatIcon + '</div>'
+                        + '<div class="hist-item-content">'
+                        + '<div class="hist-item-title">' + (c.summary || historyText('conversation')).replace(/</g, '&lt;') + '</div>'
+                        + '<div class="hist-item-meta">' + c.turn_count + ' ' + historyText('messages') + ' · ' + _formatTimeAgo(c.seconds_ago) + '</div>'
+                        + '</div>'
+                        + '<div class="hist-item-actions"><button class="hist-delete-btn" data-conv-id="' + c.conversation_id + '" title="' + historyText('delete') + '">' + deleteIcon + '</button></div>'
+                        + '</div>';
+                }
+                return g;
+            };
+
+            html += renderGroup('Today', groups.today);
+            html += renderGroup('Yesterday', groups.yesterday);
+            html += renderGroup('This Week', groups.week);
+            html += renderGroup('Older', groups.older);
+            html += '</div>';
+            panel.innerHTML = html;
+            if (showActiveSelection) _historySelectionHighlightConsumed = true;
+
+            const searchInput = panel.querySelector('.hist-search input');
+            if (searchInput) {
+                searchInput.addEventListener('input', () => {
+                    const q = searchInput.value.toLowerCase().trim();
+                    panel.querySelectorAll('.hist-item').forEach(item => {
+                        const title = item.querySelector('.hist-item-title')?.textContent?.toLowerCase() || '';
+                        item.style.display = (!q || title.includes(q)) ? '' : 'none';
+                    });
+                });
+            }
+
+            panel.querySelectorAll('.hist-item').forEach(item => {
+                item.addEventListener('click', (e) => {
+                    if (e.target.closest('.hist-delete-btn')) return;
+                    const convId = item.dataset.convId;
+                    _resumeConversation(dock, convId);
+                });
+            });
+
+            panel.querySelectorAll('.hist-delete-btn').forEach(btn => {
+                btn.addEventListener('click', async (e) => {
+                    e.stopPropagation();
+                    const convId = btn.dataset.convId;
+                    try {
+                        await h.connection.sendMessagePromise({ type: 'ha_crack/chat_history_delete', conversation_id: convId });
+                    } catch (_) {}
+                    _renderHistoryPanel(dock);
+                });
+            });
+        };
+
+        const _resumeConversation = async (dock, convId) => {
+            const h = getHass();
+            if (!h?.connection) return;
+            _historySelectedConversationId = convId;
+            _historySelectionHighlightConsumed = false;
+
+            let turns = [];
+            try {
+                const r = await h.connection.sendMessagePromise({ type: 'ha_crack/chat_history_get', conversation_id: convId });
+                turns = r?.turns || [];
+            } catch (_) {}
+
+            try {
+                await h.connection.sendMessagePromise({
+                    type: 'ha_crack/chat_history_resume',
+                    conversation_id: convId,
+                    window_id: getHistoryWindowId()
+                });
+            } catch (_) {}
+
+            const conversation = [];
+            for (const t of turns) {
+                if (t.user) {
+                    conversation.push({ who: 'user', text: t.user, tool_calls: {} });
+                }
+                if (t.assistant) {
+                    conversation.push({
+                        who: 'hass',
+                        text: t.assistant_display || t.assistant,
+                        thinking: '',
+                        tool_calls: {},
+                        agent_id: t.agent_id || '',
+                        agent_name: t.agent_name || '',
+                    });
+                }
+            }
+
+            if (!conversation.length) {
+                _toggleHistoryPanel(dock, _dockVoiceEl, true);
+                return;
+            }
+
+            const state = window.__clawAssistChatState;
+            if (state) {
+                state.resetting = true;
+                state.conversation = conversation;
+                state.conversationId = convId;
+                state.persist?.();
+            }
+
+            const chat = _dockedChat || deepQuery('ha-assist-chat');
+            if (chat) {
+                chat._conversation = conversation;
+                chat._conversationId = convId;
+                chat.requestUpdate?.('_conversation');
+                setTimeout(() => {
+                    if (state) state.resetting = false;
+                }, 100);
+            } else if (state) {
+                state.resetting = false;
+            }
+
+            _toggleHistoryPanel(dock, _dockVoiceEl, true);
+        };
+
+        const _toggleHistoryPanel = (dock, voiceEl, forceChat) => {
+            const body = dock.querySelector('.dock-body');
+            const panel = dock.querySelector('.dock-history-panel');
+            const titleEl = dock.querySelector('.dock-title');
+            if (!body || !panel) return;
+
+            const showChat = () => {
+                _historyVisible = false;
+                body.style.display = '';
+                panel.style.display = 'none';
+                if (titleEl && titleEl.__clawOrigTitleNodes) {
+                    titleEl.classList.remove('dock-history-title-visible');
+                    titleEl.replaceChildren(...titleEl.__clawOrigTitleNodes);
+                }
+            };
+
+            const showHistory = () => {
+                _historyVisible = true;
+                body.style.display = 'none';
+                panel.style.display = '';
+                if (titleEl) {
+                    titleEl.classList.add('dock-history-title-visible');
+                    if (!titleEl.__clawOrigTitleNodes) {
+                        titleEl.__clawOrigTitleNodes = Array.from(titleEl.childNodes);
+                    }
+                    const historyTitle = document.createElement('span');
+                    historyTitle.setAttribute('slot', 'title');
+                    historyTitle.style.cssText = 'display:flex;align-items:center;gap:4px;margin-left:5px';
+                    historyTitle.innerHTML = '<button class="dock-btn dock-back-btn" title="' + historyText('back') + '" style="width:32px;height:32px;margin-right:4px;flex:0 0 auto;display:flex;align-items:center;justify-content:center;cursor:pointer;border-radius:50%;border:none;padding:0;color:inherit"><svg viewBox="0 0 24 24" style="width:18px;height:18px;fill:currentColor"><path d="M20,11V13H8L13.5,18.5L12.08,19.92L4.16,12L12.08,4.08L13.5,5.5L8,11H20Z"/></svg></button>' + historyText('history');
+                    titleEl.replaceChildren(historyTitle);
+                    const backBtn = titleEl.querySelector('.dock-back-btn');
+                    if (backBtn) {
+                        backBtn.addEventListener('click', () => _toggleHistoryPanel(dock, voiceEl, true));
+                    }
+                }
+                _renderHistoryPanel(dock);
+            };
+
+            if (forceChat) {
+                showChat();
+            } else if (_historyVisible) {
+                showChat();
+            } else {
+                showHistory();
+            }
+        };
+
         const closeDock = () => {
             _dockActive = false;
             _dockVoiceEl = null;
+            _dockedChat = null;
+            _historyVisible = false;
+            _stopFabSync();
             const msr = getMainSR();
             if (!msr) return;
             const dock = msr.getElementById(DOCK_ID);
             if (dock) {
+                if (dock.__clawHassSync) { clearInterval(dock.__clawHassSync); dock.__clawHassSync = null; }
                 dock.removeAttribute('open');
                 dock.querySelector('.dock-body').innerHTML = '';
+                const hp = dock.querySelector('.dock-history-panel');
+                if (hp) hp.style.display = 'none';
+                const body = dock.querySelector('.dock-body');
+                if (body) body.style.display = '';
+                const titleEl = dock.querySelector('.dock-title');
+                titleEl?.classList.remove('dock-history-title-visible');
+                if (titleEl && titleEl.__clawOrigTitleNodes) {
+                    titleEl.replaceChildren(...titleEl.__clawOrigTitleNodes);
+                }
             }
             const mainEl = document.querySelector('home-assistant')?.shadowRoot?.querySelector('home-assistant-main');
             if (mainEl) {
@@ -858,6 +1930,9 @@
             };
         }
         const state = window.__clawAssistChatState;
+        if (state.conversationId && Array.isArray(state.conversation) && state.conversation.length > 0) {
+            bindHistoryWindow(hass, state.conversationId);
+        }
         state.persist = persist;
         if (!window.__clawPersistHookInstalled) {
             window.__clawPersistHookInstalled = true;
@@ -1292,11 +2367,13 @@
             pendingFiles.length = 0;
         };
 
+        let _lastUploadChat = null;
         const installUploadUI = () => {
             const chat = deepQuery('ha-assist-chat');
             if (!chat?.shadowRoot) return;
             const sr = chat.shadowRoot;
-            if (sr.querySelector('.claw-attach-btn')) return;
+            if (chat === _lastUploadChat && sr.querySelector('.claw-attach-btn')) return;
+            _lastUploadChat = chat;
             injectUploadCSS(sr);
 
             const haInput = sr.querySelector('ha-input#message-input');
@@ -1563,7 +2640,10 @@
                         if (t === 'intent-progress' && d?.chat_log_delta) {
                             const delta = d.chat_log_delta;
                             if (delta.role === 'assistant') phase = S_REPLYING;
-                            if (delta.content) totalChars += delta.content.length;
+                            if (delta.content) {
+                                totalChars += delta.content.length;
+                                if (typeof window.__clawOnStreamDelta === 'function') window.__clawOnStreamDelta(delta);
+                            }
                             if (delta.tool_calls) { phase = S_TOOL; totalChars += JSON.stringify(delta.tool_calls).length; }
                             if (delta.tool_result) { phase = S_TOOL; totalChars += JSON.stringify(delta.tool_result).length; }
                             if (delta.tool_call_id && !delta.tool_calls) phase = S_TOOL;
@@ -1572,6 +2652,7 @@
                             phase = S_THINKING;
                             render();
                         } else if (t === 'intent-end' || t === 'run-end' || t === 'error') {
+                            if (typeof window.__clawOnStreamEnd === 'function') window.__clawOnStreamEnd();
                             endTurn();
                         }
                         callback(ev);
@@ -1617,6 +2698,14 @@
             if (!bar) {
                 bar = document.createElement('div');
                 bar.id = BAR_ID;
+                bar.innerHTML =
+                    '<span class="sb-tok" data-r="tok"></span>' +
+                    '<span class="sb-sep">│</span>' +
+                    '<span class="sb-bar" data-r="bar"></span> <span class="sb-pct" data-r="pct"></span>' +
+                    '<span class="sb-sep">│</span>' +
+                    '<span class="sb-time" data-r="win"></span>' +
+                    '<span class="sb-sep">│</span>' +
+                    '⏲ <span class="sb-time" data-r="timer"></span>';
                 const inp = sr.querySelector('.input')||sr.querySelector('.chatbox')||sr.querySelector('[class*="input"]');
                 if (inp) inp.parentNode.insertBefore(bar, inp);
                 else { const m=sr.querySelector('.messages'); if(m) m.parentNode.insertBefore(bar,m.nextSibling); else sr.appendChild(bar); }
@@ -1632,20 +2721,20 @@
             let timer = '--';
             if (active && turnStart) timer = ftime(Math.round((Date.now()-turnStart)/1000));
             else if (turnStart && turnEnd) timer = ftime(Math.round((turnEnd-turnStart)/1000));
-            const tkLabel = hasTurn ? fmt(tk) : '--';
-            const pctLabel = hasTurn ? pct+'%' : '--%';
-            const winLabel = hasTurn ? windowTimeLabel : '--';
-            const barW=12, filled=Math.round(pct/100*barW);
+
+            const $ = (r) => bar.querySelector(`[data-r="${r}"]`);
+            $('tok').textContent = (hasTurn ? fmt(tk) : '--') + ' / ' + fmtR(ctxW);
+            const barW = 14, filled = Math.round(pct/100*barW);
             const barStr = hasTurn ? '█'.repeat(filled)+'░'.repeat(barW-filled) : '░'.repeat(barW);
             const barColor = hasTurn ? pc : 'var(--secondary-text-color)';
-            bar.innerHTML =
-                `<span class="sb-tok">${tkLabel} / ${fmtR(ctxW)}</span>` +
-                '<span class="sb-sep">│</span>' +
-                `<span class="sb-bar" style="color:${barColor}">${barStr}</span> <span class="sb-pct" style="color:${barColor}">${pctLabel}</span>` +
-                '<span class="sb-sep">│</span>' +
-                `<span class="sb-time">${winLabel}</span>` +
-                '<span class="sb-sep">│</span>' +
-                `⏲ <span class="sb-time">${timer}</span>`;
+            const barEl = $('bar');
+            barEl.textContent = barStr;
+            barEl.style.color = barColor;
+            const pctEl = $('pct');
+            pctEl.textContent = hasTurn ? pct+'%' : '--%';
+            pctEl.style.color = barColor;
+            $('win').textContent = hasTurn ? windowTimeLabel : '--';
+            $('timer').textContent = timer;
         };
 
         window.addEventListener('claw-chat-updated', () => {
