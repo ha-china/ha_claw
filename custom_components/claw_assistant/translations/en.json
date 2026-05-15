@@ -19,15 +19,12 @@
   "config": {
     "step": {
       "user": {
-        "title": "Initial setup",
-        "description": "## Welcome to Claw Assistant\n\nThis integration aggregates and manages Home Assistant conversation agents, giving you a single entry point, fallback routing, and more flexible response display.\n\nConfirm the integration name and submit to continue.",
-        "data": {
-          "name": "Integration Name"
-        }
+        "title": "Initial Setup",
+        "description": "## Welcome to Claw Assistant\n\nThe **AI orchestration hub and decision-making brain** for Home Assistant.\n\n**Plugin Architecture** — Every conversation agent you install (OpenAI, Google AI, Ollama, local models, etc.) plugs in as a capability module, with Claw Assistant handling unified orchestration, intelligent failover, and deep capability enhancement.\n\n**Natural Language Driven** — Turns the previously impossible into reality, endowing AI with autonomous evolution and persistent memory.\n\n**Zero Barrier to Use** — Supports any creative capability you envision. Simply speak to AI in the most straightforward language, it is fully capable of grasping your intent.\n\n**Synergy as Evolution** — Each capability alone is merely a tool. In concert, AI becomes an around-the-clock intelligent home operator: auditing logs, tracing history, repairing automations, reorganizing dashboards, distilling lessons learned, making every decision sharper than the last.\n\n---\n\nPlease **restart Home Assistant** after first install. Click **Submit** to begin setup."
       },
       "agent_settings": {
-        "title": "Agent Settings",
-        "description": "Configure the AI conversation routing chain. The system tries each agent in order until a valid reply is obtained.\n\n▸ **Primary AI** — The default agent used first\n▸ **Backup AI** — Automatically used when the primary AI fails\n▸ **Summary AI** — Optional. Both AIs answer separately, then this AI summarizes",
+        "title": "Configure AI Agents",
+        "description": "Select the conversation agents to use. The system tries each in order until a valid reply is obtained.\n\n▸ **Primary AI** — The default agent that responds first\n▸ **Backup AI** — Takes over automatically when the primary fails\n▸ **Summary AI** — Optional. Both AIs answer separately, then this one summarizes",
         "data": {
           "primary_agent": "Primary AI entity",
           "fallback_agent": "Backup AI entity",
@@ -61,17 +58,17 @@
         }
       },
       "conversation_settings": {
-        "title": "Conversation & Display",
-        "description": "Adjust AI reply behavior by category. Pick a sub-section to configure.",
+        "title": "Conversation Settings",
+        "description": "Adjust AI conversation strategy, chat experience, and execution control.",
         "menu_options": {
-          "conv_dialog": "Dialogue | Reply behavior",
-          "conv_display": "Display | Frontend presentation",
-          "conv_runtime": "Runtime | Execution limits"
+          "conv_dialog": "Conversation Strategy | How Replies Are Generated",
+          "conv_display": "Chat Experience | How Chat Is Used",
+          "conv_runtime": "Execution Control | How Tasks Run"
         }
       },
       "conv_dialog": {
-        "title": "Dialogue Mode",
-        "description": "Tune how AI replies are attributed and whether to enrich them with online context.",
+        "title": "Conversation Strategy",
+        "description": "Configure how AI decides and generates replies.",
         "data": {
           "back": "Back to previous menu",
           "save_and_exit": "Save and complete",
@@ -85,8 +82,8 @@
         }
       },
       "conv_display": {
-        "title": "Display Settings",
-        "description": "Control how the chat window paces output and whether the session persists across opens.",
+        "title": "Chat Experience",
+        "description": "Configure chat interaction and display behavior.",
         "data": {
           "back": "Back to previous menu",
           "save_and_exit": "Save and complete",
@@ -94,6 +91,7 @@
           "enable_sidebar_dock": "AI Sidebar",
           "enable_tool_progress": "Tool Call Progress",
           "continuous_conversation": "Continuous Chat Window",
+          "enable_sound_notifications": "Sound Notifications",
           "enable_context_status_bar": "Context Status Bar",
           "enable_file_upload": "File Upload",
           "enable_rich_markdown": "Rich Markdown"
@@ -102,14 +100,55 @@
           "enable_sidebar_dock": "When enabled, AI conversations are displayed as a fixed right sidebar alongside the main interface; when disabled, the default floating dialog is used.",
           "enable_tool_progress": "When enabled, shows live tool execution progress in the chat (e.g. querying devices, searching). When disabled, tools run silently — ideal for voice pipelines.",
           "continuous_conversation": "When enabled, reopening or activating the frontend chat keeps using the same conversation until /new is sent. Disabled keeps the current per-window behavior.",
+          "enable_sound_notifications": "When enabled, plays notification sounds on key events like reply completion and errors. When disabled, all sounds are muted.",
           "enable_context_status_bar": "When enabled, shows context tokens, window age, and current reply elapsed time above the chat input.",
           "enable_file_upload": "When enabled, shows an attach button in the chat input for uploading images, videos, and documents via drag, paste, or click.",
           "enable_rich_markdown": "When enabled, Markdown formatting (bold, tables, code blocks, etc.) is preserved and rendered as rich text; when disabled, all formatting is stripped back to plain text."
+        },
+        "sections": {
+          "chat_window": {
+            "name": "Chat Window",
+            "description": "Configure chat window presentation and session behavior.",
+            "data": {
+              "enable_sidebar_dock": "AI Sidebar",
+              "continuous_conversation": "Continuous Chat Window",
+              "enable_sound_notifications": "Sound Notifications"
+            },
+            "data_description": {
+              "enable_sidebar_dock": "When enabled, AI conversations are displayed as a fixed right sidebar alongside the main interface; when disabled, the default floating dialog is used.",
+              "continuous_conversation": "When enabled, reopening or activating the frontend chat keeps using the same conversation until /new is sent. Disabled keeps the current per-window behavior.",
+              "enable_sound_notifications": "When enabled, plays notification sounds on key events like reply completion and errors. When disabled, all sounds are muted."
+            }
+          },
+          "message_display": {
+            "name": "Input & Display",
+            "description": "Configure chat input and message display capabilities.",
+            "data": {
+              "enable_file_upload": "File Upload",
+              "enable_rich_markdown": "Rich Markdown"
+            },
+            "data_description": {
+              "enable_file_upload": "When enabled, shows an attach button in the chat input for uploading images, videos, and documents via drag, paste, or click.",
+              "enable_rich_markdown": "When enabled, Markdown formatting (bold, tables, code blocks, etc.) is preserved and rendered as rich text; when disabled, all formatting is stripped back to plain text."
+            }
+          },
+          "diagnostics": {
+            "name": "Advanced Diagnostics",
+            "description": "Configure display of runtime, context, and diagnostic state.",
+            "data": {
+              "enable_tool_progress": "Tool Call Progress",
+              "enable_context_status_bar": "Context Status Bar"
+            },
+            "data_description": {
+              "enable_tool_progress": "When enabled, shows live tool execution progress in the chat (e.g. querying devices, searching). When disabled, tools run silently — ideal for voice pipelines.",
+              "enable_context_status_bar": "When enabled, shows context tokens, window age, and current reply elapsed time above the chat input."
+            }
+          }
         }
       },
       "conv_runtime": {
-        "title": "Runtime Settings",
-        "description": "Tune how long and how persistently the AI may iterate on a task.",
+        "title": "Execution Control",
+        "description": "Configure control rules for AI task execution.",
         "data": {
           "back": "Back to previous menu",
           "save_and_exit": "Save and complete",

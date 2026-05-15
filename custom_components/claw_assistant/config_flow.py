@@ -7,11 +7,9 @@ from typing import Any
 import voluptuous as vol
 
 from homeassistant import config_entries
-from homeassistant.const import CONF_NAME
 from homeassistant.core import callback, HomeAssistant
-from homeassistant.data_entry_flow import FlowResult
+from homeassistant.data_entry_flow import FlowResult, section
 from homeassistant.helpers import entity_registry as er
-from homeassistant.loader import async_get_integration
 from homeassistant.helpers.selector import (
     BooleanSelector,
     NumberSelector,
@@ -31,11 +29,14 @@ from .const import (
     CONF_ENABLE_FILE_UPLOAD,
     CONF_ENABLE_RICH_MARKDOWN,
     CONF_ENABLE_SIDEBAR_DOCK,
+    CONF_ENABLE_SOUND_NOTIFICATIONS,
     CONF_ENABLE_STREAMING_EFFECT,
     CONF_ENABLE_TOOL_PROGRESS,
     CONF_ENABLE_WEB_SEARCH,
     CONF_ERROR_RESPONSES,
     CONF_FALLBACK_AGENT,
+    CONF_IDENTICAL_CALL_STOP,
+    CONF_IDENTICAL_CALL_WARN,
     CONF_MAX_TOOL_REPEAT,
     CONF_PIPELINE_TIMEOUT,
     CONF_PRIMARY_AGENT,
@@ -45,6 +46,8 @@ from .const import (
     CONVERSATION_MODE_NO_NAME,
     DEFAULT_CONVERSATION_MODE,
     DEFAULT_FALLBACK_AGENT,
+    DEFAULT_IDENTICAL_CALL_STOP,
+    DEFAULT_IDENTICAL_CALL_WARN,
     DEFAULT_MAX_TOOL_REPEAT,
     DEFAULT_PIPELINE_TIMEOUT,
     DEFAULT_PRIMARY_AGENT,
@@ -140,20 +143,13 @@ class ClawAssistantConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         self._title: str = ""
 
     async def async_step_user(self, user_input: dict[str, Any] | None = None) -> FlowResult:
-        await self.async_set_unique_id(DOMAIN, raise_on_progress=False)
-        self._abort_if_unique_id_configured()
-        if user_input is None:
-            integration = await async_get_integration(self.hass, DOMAIN)
-            return self.async_show_form(
-                step_id="user",
-                data_schema=vol.Schema(
-                    {
-                        vol.Required(CONF_NAME, default=integration.name): str,
-                    }
-                ),
-            )
-        self._title = user_input[CONF_NAME]
-        return await self.async_step_agent_settings()
+        self._title = "Claw Assistant"
+        if user_input is not None:
+            return await self.async_step_agent_settings()
+        return self.async_show_form(
+            step_id="user",
+            data_schema=vol.Schema({}),
+        )
 
     async def async_step_agent_settings(self, user_input: dict[str, Any] | None = None) -> FlowResult:
         errors: dict[str, str] = {}
@@ -207,7 +203,7 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
             current_options = dict(self._config_entry.options)
 
             agent_keys = [CONF_PRIMARY_AGENT, CONF_FALLBACK_AGENT, CONF_SECONDARY_FALLBACK_AGENT]
-            conversation_keys = [CONF_CONVERSATION_MODE, CONF_ENABLE_WEB_SEARCH, CONF_ENABLE_STREAMING_EFFECT, CONF_ENABLE_TOOL_PROGRESS, CONF_CONTINUOUS_CONVERSATION, CONF_ENABLE_CONTEXT_STATUS_BAR, CONF_ENABLE_FILE_UPLOAD, CONF_ENABLE_RICH_MARKDOWN, CONF_ENABLE_SIDEBAR_DOCK, CONF_MAX_TOOL_REPEAT, CONF_PIPELINE_TIMEOUT]
+            conversation_keys = [CONF_CONVERSATION_MODE, CONF_ENABLE_WEB_SEARCH, CONF_ENABLE_STREAMING_EFFECT, CONF_ENABLE_TOOL_PROGRESS, CONF_CONTINUOUS_CONVERSATION, CONF_ENABLE_SOUND_NOTIFICATIONS, CONF_ENABLE_CONTEXT_STATUS_BAR, CONF_ENABLE_FILE_UPLOAD, CONF_ENABLE_RICH_MARKDOWN, CONF_ENABLE_SIDEBAR_DOCK, CONF_MAX_TOOL_REPEAT, CONF_PIPELINE_TIMEOUT]
 
             if not allow_agent_changes:
                 for key in agent_keys:
@@ -219,7 +215,7 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
                     if key in current_options:
                         self._user_input[key] = current_options[key]
 
-            bool_keys = [CONF_ENABLE_WEB_SEARCH, CONF_ENABLE_STREAMING_EFFECT, CONF_ENABLE_TOOL_PROGRESS, CONF_CONTINUOUS_CONVERSATION, CONF_ENABLE_CONTEXT_STATUS_BAR, CONF_ENABLE_FILE_UPLOAD, CONF_ENABLE_RICH_MARKDOWN, CONF_ENABLE_SIDEBAR_DOCK]
+            bool_keys = [CONF_ENABLE_WEB_SEARCH, CONF_ENABLE_STREAMING_EFFECT, CONF_ENABLE_TOOL_PROGRESS, CONF_CONTINUOUS_CONVERSATION, CONF_ENABLE_SOUND_NOTIFICATIONS, CONF_ENABLE_CONTEXT_STATUS_BAR, CONF_ENABLE_FILE_UPLOAD, CONF_ENABLE_RICH_MARKDOWN, CONF_ENABLE_SIDEBAR_DOCK]
 
             for key, value in user_input.items():
                 if key not in exclude_keys:
@@ -560,22 +556,45 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
         if user_input is not None:
             if user_input.get("back"):
                 return await self.async_step_conversation_settings()
+            user_input = {
+                key: value
+                for section_input in user_input.values()
+                if isinstance(section_input, dict)
+                for key, value in section_input.items()
+            }
             return self._save_conversation_subform(user_input)
 
         current_tool_progress = self._config_entry.options.get(CONF_ENABLE_TOOL_PROGRESS, True)
         current_continuous_conversation = self._config_entry.options.get(CONF_CONTINUOUS_CONVERSATION, False)
-        current_context_status_bar = self._config_entry.options.get(CONF_ENABLE_CONTEXT_STATUS_BAR, False)
-        current_file_upload = self._config_entry.options.get(CONF_ENABLE_FILE_UPLOAD, False)
+        current_sound_notifications = self._config_entry.options.get(CONF_ENABLE_SOUND_NOTIFICATIONS, True)
+        current_context_status_bar = self._config_entry.options.get(CONF_ENABLE_CONTEXT_STATUS_BAR, True)
+        current_file_upload = self._config_entry.options.get(CONF_ENABLE_FILE_UPLOAD, True)
         current_rich_markdown = self._config_entry.options.get(CONF_ENABLE_RICH_MARKDOWN, True)
         current_sidebar_dock = self._config_entry.options.get(CONF_ENABLE_SIDEBAR_DOCK, True)
 
         schema = vol.Schema({
-            vol.Optional(CONF_ENABLE_SIDEBAR_DOCK, default=current_sidebar_dock): BooleanSelector(),
-            vol.Optional(CONF_ENABLE_TOOL_PROGRESS, default=current_tool_progress): BooleanSelector(),
-            vol.Optional(CONF_CONTINUOUS_CONVERSATION, default=current_continuous_conversation): BooleanSelector(),
-            vol.Optional(CONF_ENABLE_CONTEXT_STATUS_BAR, default=current_context_status_bar): BooleanSelector(),
-            vol.Optional(CONF_ENABLE_FILE_UPLOAD, default=current_file_upload): BooleanSelector(),
-            vol.Optional(CONF_ENABLE_RICH_MARKDOWN, default=current_rich_markdown): BooleanSelector(),
+            vol.Required("chat_window"): section(
+                vol.Schema({
+                    vol.Optional(CONF_ENABLE_SIDEBAR_DOCK, default=current_sidebar_dock): BooleanSelector(),
+                    vol.Optional(CONF_CONTINUOUS_CONVERSATION, default=current_continuous_conversation): BooleanSelector(),
+                    vol.Optional(CONF_ENABLE_SOUND_NOTIFICATIONS, default=current_sound_notifications): BooleanSelector(),
+                }),
+                {"collapsed": False},
+            ),
+            vol.Required("message_display"): section(
+                vol.Schema({
+                    vol.Optional(CONF_ENABLE_FILE_UPLOAD, default=current_file_upload): BooleanSelector(),
+                    vol.Optional(CONF_ENABLE_RICH_MARKDOWN, default=current_rich_markdown): BooleanSelector(),
+                }),
+                {"collapsed": True},
+            ),
+            vol.Required("diagnostics"): section(
+                vol.Schema({
+                    vol.Optional(CONF_ENABLE_TOOL_PROGRESS, default=current_tool_progress): BooleanSelector(),
+                    vol.Optional(CONF_ENABLE_CONTEXT_STATUS_BAR, default=current_context_status_bar): BooleanSelector(),
+                }),
+                {"collapsed": True},
+            ),
             vol.Optional("back", default=False): bool,
         })
 
@@ -592,12 +611,20 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
             return self._save_conversation_subform(user_input)
 
         current_max_tool_repeat = self._config_entry.options.get(CONF_MAX_TOOL_REPEAT, DEFAULT_MAX_TOOL_REPEAT)
+        current_identical_warn = self._config_entry.options.get(CONF_IDENTICAL_CALL_WARN, DEFAULT_IDENTICAL_CALL_WARN)
+        current_identical_stop = self._config_entry.options.get(CONF_IDENTICAL_CALL_STOP, DEFAULT_IDENTICAL_CALL_STOP)
         current_pipeline_timeout = self._config_entry.options.get(CONF_PIPELINE_TIMEOUT, DEFAULT_PIPELINE_TIMEOUT)
         display_timeout = current_pipeline_timeout // 60 if current_pipeline_timeout else 5
 
         schema = vol.Schema({
             vol.Optional(CONF_MAX_TOOL_REPEAT, default=current_max_tool_repeat): NumberSelector(
                 NumberSelectorConfig(min=3, max=50, step=1, unit_of_measurement="loop", mode=NumberSelectorMode.SLIDER)
+            ),
+            vol.Optional(CONF_IDENTICAL_CALL_WARN, default=current_identical_warn): NumberSelector(
+                NumberSelectorConfig(min=5, max=30, step=1, unit_of_measurement="times", mode=NumberSelectorMode.SLIDER)
+            ),
+            vol.Optional(CONF_IDENTICAL_CALL_STOP, default=current_identical_stop): NumberSelector(
+                NumberSelectorConfig(min=5, max=30, step=1, unit_of_measurement="times", mode=NumberSelectorMode.SLIDER)
             ),
             vol.Optional(CONF_PIPELINE_TIMEOUT, default=display_timeout): NumberSelector(
                 NumberSelectorConfig(min=5, max=360, step=5, unit_of_measurement="min", mode=NumberSelectorMode.SLIDER)

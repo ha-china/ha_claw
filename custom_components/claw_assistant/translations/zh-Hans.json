@@ -19,15 +19,12 @@
   "config": {
     "step": {
       "user": {
-        "title": "首次设置",
-        "description": "## 欢迎使用 Claw Assistant\n\n本集成用于聚合和管理 Home Assistant 中的对话代理，提供统一入口、回退链路和更灵活的回复展示方式。\n\n请确认集成名称后提交，随后进入详细配置。",
-        "data": {
-          "name": "集成名称"
-        }
+        "title": "初始化配置",
+        "description": "## 欢迎使用 Claw Assistant 集成\n\nHome Assistant 的 **AI 调度中枢与决策大脑**。\n\n**插件化架构** — 所安装的任何对话代理（OpenAI、Google AI、Ollama、本地模型等）均可作为能力插件接入，由 Claw Assistant 编排调度、智能容灾切换与深度能力增强。\n\n**自然语言驱动** — 将原本不可能的操作化为现实，赋予 AI 自主进化与持久记忆的能力。\n\n**零门槛使用** — 支持任何富有创造力的能力诉求，只需以最直白的语言与 AI 对话，它足以理解你的意图。\n\n**协同即进化** — 每项能力独立来看只是工具，协同运作时 AI 便化身为全天候智能家庭运维：审阅日志、追溯历史、修复自动化、重整仪表盘、沉淀经验教训，让每一次决策都比上一次更精准。\n\n---\n\n⚠️首次安装后请 **重启 Home Assistant**，点击 **提交** 开始配置。"
       },
       "agent_settings": {
-        "title": "对话代理设置",
-        "description": "配置 AI 对话的调度链路，系统按顺序尝试各代理直到获得有效回复。\n\n▸ **首要 AI** — 默认优先使用的对话代理\n▸ **后备 AI** — 首要 AI 无法完成任务时自动切换\n▸ **总结 AI** — 可选，配置后前两个 AI 分别回答，由该 AI 汇总",
+        "title": "配置 AI 代理",
+        "description": "选择你要使用的对话代理。系统按顺序尝试，直到获得有效回复。\n\n▸ **首要 AI** — 默认优先响应的代理\n▸ **后备 AI** — 首要 AI 失败时自动接管\n▸ **总结 AI** — 可选，让两个 AI 分别回答后由它汇总",
         "data": {
           "primary_agent": "首要 AI 实体",
           "fallback_agent": "后备 AI 实体",
@@ -61,17 +58,17 @@
         }
       },
       "conversation_settings": {
-        "title": "对话与显示设置",
-        "description": "按功能维度调整 AI 回复行为，选择需要修改的子项进行配置。",
+        "title": "对话设置",
+        "description": "调整 AI 的对话策略、聊天体验和执行控制。",
         "menu_options": {
-          "conv_dialog": "对话 ｜ 回复呈现相关",
-          "conv_display": "界面 ｜ 前端展示相关",
-          "conv_runtime": "运行 ｜ 执行节点相关"
+          "conv_dialog": "对话策略 ｜ 回复如何生成",
+          "conv_display": "聊天体验 ｜ 窗口如何使用",
+          "conv_runtime": "执行控制 ｜ 任务如何运行"
         }
       },
       "conv_dialog": {
-        "title": "对话模式设置",
-        "description": "调整 AI 回复的署名方式和外部信息增强能力。",
+        "title": "对话策略",
+        "description": "设置 AI 生成回复时使用的策略。",
         "data": {
           "back": "返回上级菜单",
           "save_and_exit": "保存并完成",
@@ -85,8 +82,8 @@
         }
       },
       "conv_display": {
-        "title": "界面显示设置",
-        "description": "控制聊天窗口的呈现节奏与会话连续性。",
+        "title": "聊天体验",
+        "description": "设置聊天界面的交互和显示方式。",
         "data": {
           "back": "返回上级菜单",
           "save_and_exit": "保存并完成",
@@ -94,6 +91,7 @@
           "enable_sidebar_dock": "AI 侧边栏",
           "enable_tool_progress": "工具调用进度",
           "continuous_conversation": "连续聊天窗口",
+          "enable_sound_notifications": "提示音",
           "enable_context_status_bar": "上下文状态栏",
           "enable_file_upload": "文件上传",
           "enable_rich_markdown": "富文本增强"
@@ -102,23 +100,68 @@
           "enable_sidebar_dock": "启用后，AI 对话将以右侧固定侧边栏形式展示，与主界面并排显示；关闭则使用默认浮动弹窗。",
           "enable_tool_progress": "启用后，AI 调用工具时在聊天窗口实时显示执行进度（如正在查询设备、正在搜索等）；关闭则静默执行，适合语音管道等不需要进度展示的场景。",
           "continuous_conversation": "启用后，前端聊天框重新打开或激活仍沿用同一个对话，直到发送 /new 才切换新窗口；关闭则保持当前每个窗口独立上下文。",
+          "enable_sound_notifications": "启用后，AI 回复完成、发生错误等关键时刻播放提示音；关闭则静音。",
           "enable_context_status_bar": "启用后，在聊天输入框上方显示上下文 token、窗口时间与当前回复耗时。",
           "enable_file_upload": "启用后，在聊天输入框显示附件按钮，支持拖拽、粘贴、点击上传图片/视频/文档。",
           "enable_rich_markdown": "启用后保留 Markdown 格式（加粗、表格、代码块等）并转为富文本显示；关闭则剥离所有格式标记，回退为纯文本。"
+        },
+        "sections": {
+          "chat_window": {
+            "name": "聊天窗口",
+            "description": "设置聊天窗口的呈现方式与会话行为。",
+            "data": {
+              "enable_sidebar_dock": "AI 侧边栏",
+              "continuous_conversation": "连续聊天窗口",
+              "enable_sound_notifications": "提示音"
+            },
+            "data_description": {
+              "enable_sidebar_dock": "启用后，AI 对话将以右侧固定侧边栏形式展示，与主界面并排显示；关闭则使用默认浮动弹窗。",
+              "continuous_conversation": "启用后，前端聊天框重新打开或激活仍沿用同一个对话，直到发送 /new 才切换新窗口；关闭则保持当前每个窗口独立上下文。",
+              "enable_sound_notifications": "启用后，AI 回复完成、发生错误等关键时刻播放提示音；关闭则静音。"
+            }
+          },
+          "message_display": {
+            "name": "输入与显示",
+            "description": "设置聊天输入与消息显示能力。",
+            "data": {
+              "enable_file_upload": "文件上传",
+              "enable_rich_markdown": "富文本增强"
+            },
+            "data_description": {
+              "enable_file_upload": "启用后，在聊天输入框显示附件按钮，支持拖拽、粘贴、点击上传图片/视频/文档。",
+              "enable_rich_markdown": "启用后保留 Markdown 格式（加粗、表格、代码块等）并转为富文本显示；关闭则剥离所有格式标记，回退为纯文本。"
+            }
+          },
+          "diagnostics": {
+            "name": "高级诊断",
+            "description": "设置运行过程、上下文与调试状态的显示。",
+            "data": {
+              "enable_tool_progress": "工具调用进度",
+              "enable_context_status_bar": "上下文状态栏"
+            },
+            "data_description": {
+              "enable_tool_progress": "启用后，AI 调用工具时在聊天窗口实时显示执行进度（如正在查询设备、正在搜索等）；关闭则静默执行，适合语音管道等不需要进度展示的场景。",
+              "enable_context_status_bar": "启用后，在聊天输入框上方显示上下文 token、窗口时间与当前回复耗时。"
+            }
+          }
         }
       },
       "conv_runtime": {
-        "title": "运行节点设置",
-        "description": "调节 AI 在执行任务时的循环上限与等待容忍度。",
+        "title": "执行节点",
+        "description": "设置 AI 执行任务时的控制规则。",
         "data": {
           "back": "返回上级菜单",
           "save_and_exit": "保存并完成",
           "next_step": "下一步",
           "max_tool_repeat": "工具重复上限",
+          "identical_call_warn": "相同调用警告阈值",
+          "identical_call_stop": "相同调用终止阈值",
           "pipeline_timeout": "等待时长 (分钟)"
         },
         "data_description": {
           "max_tool_repeat": "AI 对同一工具的最大重复调用次数。超过此限制后，AI 将被强制终止当前方案，转而尝试其他方法或坦诚告知用户暂时无法解决",
+          "identical_call_warn": "当 AI 使用完全相同的参数调用同一工具达到此次数时，系统会警告 AI 换一种思路",
+          "identical_call_stop": "当 AI 使用完全相同的参数调用同一工具达到此次数时，系统会要求 AI 停止并向用户解释情况",
           "pipeline_timeout": "对话窗口等待 AI 完成的时长。处理复杂任务或多 AI 对话时，请调大以免 AI 被中途打断。"
         }
       },
