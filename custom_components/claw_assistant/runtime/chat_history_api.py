@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import re
 import time
 from typing import Any
 
@@ -34,13 +35,20 @@ def clear_resume_history_binding(hass: HomeAssistant) -> None:
     status.pop(_RESUME_HISTORY_WINDOW_ID_KEY, None)
 
 
+_INTERNAL_TAG_RE = re.compile(r"\[- \w+:.*?\]", re.DOTALL)
+
+
+def _strip_internal_tags(text: str) -> str:
+    return _INTERNAL_TAG_RE.sub("", text).strip()
+
+
 def _summarize_conversation(turns: list, max_len: int = 60) -> str:
     title = str((turns[0].metadata or {}).get("title", "") or "").strip() if turns else ""
     if title:
         return title
 
     for t in turns:
-        msg = (t.user_message or "").strip()
+        msg = _strip_internal_tags((t.user_message or "").strip())
         if msg and not msg.startswith("/"):
             return msg[:max_len] + ("..." if len(msg) > max_len else "")
     for t in turns:
@@ -65,8 +73,30 @@ async def websocket_chat_history_list(
     now = time.time()
     conversations = []
 
+    seen_fingerprints: dict[str, str] = {}
+    shadow_ids: set[str] = set()
+
     for conv_id, turns in history._histories.items():
         if not turns:
+            continue
+        first_msg = (turns[0].user_message or "").strip()[:120]
+        first_ts = turns[0].timestamp
+        if first_msg:
+            fp = f"{int(first_ts // 20)}:{first_msg}"
+            if fp in seen_fingerprints:
+                existing_id = seen_fingerprints[fp]
+                existing_turns = history._histories.get(existing_id, [])
+                if len(turns) <= len(existing_turns):
+                    shadow_ids.add(conv_id)
+                    continue
+                else:
+                    shadow_ids.add(existing_id)
+                    seen_fingerprints[fp] = conv_id
+            else:
+                seen_fingerprints[fp] = conv_id
+
+    for conv_id, turns in history._histories.items():
+        if not turns or conv_id in shadow_ids:
             continue
         first_ts = turns[0].timestamp
         last_ts = turns[-1].timestamp
@@ -130,7 +160,7 @@ async def websocket_chat_history_get(
             total_chars += len(json.dumps(tool_calls_normalized, ensure_ascii=False))
 
         result_turns.append({
-            "user": user_msg,
+            "user": _strip_internal_tags(user_msg),
             "assistant": assistant_msg,
             "assistant_display": metadata.get("assistant_display", ""),
             "agent_id": metadata.get("agent_id", ""),
