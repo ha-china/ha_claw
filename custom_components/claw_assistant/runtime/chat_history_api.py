@@ -22,11 +22,8 @@ def get_active_resume_history_id(hass: HomeAssistant) -> str:
     from .state import get_conversation_status
 
     status = get_conversation_status(hass)
-    window_id = str(status.get(_HISTORY_WINDOW_ID_KEY) or "")
-    resume_window_id = str(status.get(_RESUME_HISTORY_WINDOW_ID_KEY) or "")
-    if not window_id or resume_window_id != window_id:
-        return ""
-    return str(status.get(_RESUME_HISTORY_ID_KEY) or "")
+    resume_id = str(status.get(_RESUME_HISTORY_ID_KEY) or "")
+    return resume_id
 
 
 def clear_resume_history_binding(hass: HomeAssistant) -> None:
@@ -88,11 +85,16 @@ async def websocket_chat_history_list(
     connection.send_result(msg["id"], {"conversations": conversations})
 
 
+DEFAULT_DISPLAY_DEPTH = 10
+MAX_TOOL_CALLS_DISPLAY = 3
+
+
 @websocket_api.websocket_command(
     {
         vol.Required("type"): "ha_crack/chat_history_get",
         vol.Required("conversation_id"): str,
         vol.Optional("max_turns", default=50): int,
+        vol.Optional("display_depth", default=DEFAULT_DISPLAY_DEPTH): int,
     }
 )
 @websocket_api.async_response
@@ -104,24 +106,51 @@ async def websocket_chat_history_get(
     history = get_conversation_history()
     conv_id = msg["conversation_id"]
     max_turns = msg.get("max_turns", 50)
+    display_depth = msg.get("display_depth", DEFAULT_DISPLAY_DEPTH)
     turns = history.get_history(conv_id)
 
     result_turns = []
+    total_chars = 0
     for t in turns[-max_turns:]:
         metadata = t.metadata or {}
+        user_msg = t.user_message or ""
+        assistant_msg = t.assistant_response or ""
+        raw_tool_calls = t.tool_calls or []
+        total_chars += len(user_msg) + len(assistant_msg)
+
+        tool_calls_normalized = []
+        for tc in raw_tool_calls:
+            if isinstance(tc, dict):
+                tool_calls_normalized.append(tc)
+            elif isinstance(tc, str):
+                tool_calls_normalized.append({"tool_name": tc})
+
+        if tool_calls_normalized:
+            import json
+            total_chars += len(json.dumps(tool_calls_normalized, ensure_ascii=False))
+
         result_turns.append({
-            "user": t.user_message,
-            "assistant": t.assistant_response,
+            "user": user_msg,
+            "assistant": assistant_msg,
             "assistant_display": metadata.get("assistant_display", ""),
             "agent_id": metadata.get("agent_id", ""),
             "agent_name": metadata.get("agent_name", ""),
             "timestamp": t.timestamp,
-            "tool_calls": t.tool_calls or [],
+            "tool_calls": tool_calls_normalized,
         })
+
+    display_turns = result_turns[-display_depth:] if display_depth > 0 else result_turns
+    for dt in display_turns:
+        dt["tool_calls"] = dt["tool_calls"][:MAX_TOOL_CALLS_DISPLAY]
+
+    display_chars = sum(len(t["user"]) + len(t["assistant"]) for t in display_turns)
+    tokens_estimate = int(display_chars / 3.5) + 500 if display_chars else 0
 
     connection.send_result(msg["id"], {
         "conversation_id": conv_id,
-        "turns": result_turns,
+        "turns": display_turns,
+        "total_turns": len(result_turns),
+        "tokens_used": tokens_estimate,
     })
 
 
