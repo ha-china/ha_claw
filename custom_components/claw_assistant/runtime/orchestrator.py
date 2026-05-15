@@ -70,6 +70,46 @@ def _neutralize_user_markdown(text: str) -> str:
     out = _MD_HR_RE.sub("———", out)
     out = _MD_BLOCKQUOTE_RE.sub("", out)
     return out
+
+
+_LARGE_TEXT_THRESHOLD = 1500
+
+
+def _write_large_text_file(filepath: Path, text: str) -> None:
+    """Blocking write for async executor."""
+    filepath.parent.mkdir(parents=True, exist_ok=True)
+    filepath.write_text(text, encoding="utf-8")
+
+
+async def _segment_large_text(text: str, hass: HomeAssistant | None = None) -> tuple[str, bool]:
+    """For large text (>1500 chars), save to temp file and return instruction for AI to read it."""
+    if not text or len(text) <= _LARGE_TEXT_THRESHOLD:
+        return text, False
+
+    if hass is None:
+        return text[:_LARGE_TEXT_THRESHOLD] + f"\n\n[TRUNCATED, original: {len(text)} chars]", True
+
+    import hashlib
+    import time
+    _tmp_dir = tmp_dir_path(hass)
+    file_hash = hashlib.md5(text[:500].encode()).hexdigest()[:8]
+    filename = f"user_input_{int(time.time())}_{file_hash}.txt"
+    filepath = _tmp_dir / filename
+
+    try:
+        await hass.async_add_executor_job(_write_large_text_file, filepath, text)
+        LOGGER.info("Large text saved to %s (%d chars)", filepath, len(text))
+        instruction = (
+            f"[LARGE_TEXT] User sent large text ({len(text)} chars), saved to temp file.\n"
+            f"Use ReadFile(path=\"{filepath}\") to read full content before responding.\n"
+            f"Preview (first 500 chars): {text[:500]}..."
+        )
+        return instruction, True
+    except Exception as e:
+        LOGGER.warning("Failed to save large text: %s", e)
+        return text[:_LARGE_TEXT_THRESHOLD] + f"\n\n[TRUNCATED, original: {len(text)} chars]", True
+
+
 _PENDING_ATTACHMENTS: ContextVar[list[tuple[str, str]] | None] = ContextVar(
     "claw_pending_attachments",
     default=None,
@@ -396,6 +436,9 @@ async def _execute_conversation_turn_inner(
                 len(pending_attachments),
             )
     text = _neutralize_user_markdown(text)
+    text, was_segmented = await _segment_large_text(text, hass)
+    if was_segmented:
+        LOGGER.info("Large text saved to file: %d chars", len(text))
     task_loop = record_user_turn(hass, text=text)
     LOGGER.info("Task loop turn %s: %s...", task_loop["turn_count"], text[:50])
 
@@ -409,6 +452,28 @@ async def _execute_conversation_turn_inner(
         user_prefix = get_user_context_prefix()
         if user_prefix:
             text = f"{user_prefix}\n\n{text}"
+    else:
+        # First turn only: inject blueprint_studio editor selection context if available
+        editor_selection = hass.data.get("blueprint_studio_editor_selection")
+        if editor_selection and isinstance(editor_selection, dict):
+            sel_text = editor_selection.get("selected_text", "")
+            if sel_text:
+                sel_file = editor_selection.get("file_path", "")
+                sel_start = editor_selection.get("start_line", "?")
+                sel_end = editor_selection.get("end_line", "?")
+                lines_before = editor_selection.get("lines_before", [])
+                lines_after = editor_selection.get("lines_after", [])
+                ctx_block = (
+                    "[Editor context — user has code selected in Blueprint Studio. "
+                    "Use as background knowledge only; do NOT echo back unless asked. "
+                    f"File: {sel_file}, lines {sel_start}-{sel_end}]\n"
+                )
+                if lines_before:
+                    ctx_block += "\n".join(lines_before) + "\n"
+                ctx_block += f">>> {sel_text} <<<\n"
+                if lines_after:
+                    ctx_block += "\n".join(lines_after)
+                text = f"{ctx_block}\n\n{text}"
 
     runtime_config = build_conversation_runtime_config_for_hass(entry, hass)
     fallback_agents = runtime_config.fallback_agents
