@@ -1,7 +1,7 @@
 (function() {
     'use strict';
     
-    const HACRACK_VERSION = '7.9.0';
+    const HACRACK_VERSION = '8.0.0';
     if (window.__hacrackVersion && window.__hacrackVersion !== HACRACK_VERSION) {
         window.__hacrackVersion = HACRACK_VERSION;
         location.reload();
@@ -32,6 +32,15 @@
             conversation: 'Conversation',
             delete: 'Delete',
             messages: 'messages',
+            pin: 'Pin',
+            unpin: 'Unpin',
+            today_night: 'Today · Early Morning',
+            today_morning: 'Today · Morning',
+            today_afternoon: 'Today · Afternoon',
+            today_evening: 'Today · Evening',
+            yesterday: 'Yesterday',
+            this_week: 'This Week',
+            this_month: 'This Month',
         },
         zh: {
             history: '历史消息',
@@ -42,6 +51,15 @@
             conversation: '对话',
             delete: '删除',
             messages: '条消息',
+            pin: '置顶',
+            unpin: '取消置顶',
+            today_night: '今天 · 凌晨',
+            today_morning: '今天 · 上午',
+            today_afternoon: '今天 · 下午',
+            today_evening: '今天 · 晚上',
+            yesterday: '昨天',
+            this_week: '本周',
+            this_month: '本月',
         },
     };
 
@@ -191,11 +209,62 @@
         setupContextStatusBar(hass);
         setupFileUpload(hass);
         setupFrontendBridge(hass);
+        setupSoundNotifications(hass);
         setTimeout(() => {
             if (window.HACrack?.preventAssistDialogClose) {
                 window.HACrack.preventAssistDialogClose();
             }
         }, 100);
+    }
+
+    function setupSoundNotifications(hass) {
+        if (!hass?.connection) return;
+        if (window.__clawSoundSetup) return;
+        window.__clawSoundSetup = true;
+
+        const MEDIA_BASE = '/local/claw_assistant/media/';
+        const SOUNDS = {
+            'stream-complete': MEDIA_BASE + 'stream-complete.mp3',
+            'permission-required': MEDIA_BASE + 'permission-required.mp3',
+            'error': MEDIA_BASE + 'error.mp3',
+        };
+
+        let _soundEnabled = true;
+        const refreshSoundSetting = async () => {
+            try {
+                const r = await hass.connection.sendMessagePromise({ type: 'ha_crack/get_settings' });
+                _soundEnabled = r?.enable_sound_notifications !== false;
+            } catch(e) {}
+        };
+        refreshSoundSetting();
+        hass.connection.subscribeEvents(() => refreshSoundSetting(), 'ha_crack_settings_changed').catch(() => {});
+
+        let _audioCache = {};
+        function playSound(name) {
+            if (!_soundEnabled) return;
+            const url = SOUNDS[name];
+            if (!url) return;
+            setTimeout(() => {
+                try {
+                    if (!_audioCache[name]) {
+                        _audioCache[name] = new Audio(url);
+                        _audioCache[name].volume = 0.5;
+                    }
+                    const audio = _audioCache[name];
+                    audio.currentTime = 0;
+                    audio.play().catch(() => {});
+                } catch(e) {}
+            }, 400);
+        }
+
+        // Expose globally so other hooks can call it
+        window.__clawPlaySound = playSound;
+
+        // Listen for backend-fired sound events
+        hass.connection.subscribeEvents(ev => {
+            const sound = ev.data?.sound;
+            if (sound && SOUNDS[sound]) playSound(sound);
+        }, 'claw_assistant_sound').catch(() => {});
     }
 
     function setupFrontendBridge(hass) {
@@ -907,6 +976,7 @@
         if (_mdRenderTimer) clearTimeout(_mdRenderTimer);
         setTimeout(() => _renderFinal(), 150);
         if (typeof _origStreamEnd === 'function') _origStreamEnd();
+        if (typeof window.__clawPlaySound === 'function') window.__clawPlaySound('stream-complete');
     };
 
     function setupAssistRightDock(hass) {
@@ -1023,10 +1093,13 @@
                     #${DOCK_ID} .dock-header .dock-title wa-dropdown {
                         --ha-select-height: 32px;
                     }
-                    #${DOCK_ID} .dock-header .dock-title .claw-history-menu-item {
+                    #${DOCK_ID} .dock-header .dock-title a.claw-history-menu-item {
+                        text-decoration: none;
                         color: var(--primary-text-color);
-                        text-decoration: underline;
-                        text-underline-offset: 3px;
+                    }
+                    #${DOCK_ID} .dock-header .dock-title a {
+                        text-decoration: none;
+                        color: var(--primary-text-color);
                     }
                     #${DOCK_ID} .dock-header .dock-title .claw-history-menu-item ha-svg-icon,
                     #${DOCK_ID} .dock-header .dock-title .claw-history-menu-item ha-icon-next {
@@ -1109,13 +1182,53 @@
                         overscroll-behavior: contain;
                         padding: 8px 12px 18px;
                     }
+                    #${DOCK_ID} .dock-history-panel .hist-section {
+                        margin-bottom: 4px;
+                    }
                     #${DOCK_ID} .dock-history-panel .hist-section-label {
-                        padding: 16px 10px 8px;
+                        padding: 12px 10px 8px;
                         font-size: 12px;
                         font-weight: 500;
+                        cursor: pointer;
+                        display: flex;
+                        align-items: center;
+                        gap: 6px;
+                        user-select: none;
                         text-transform: uppercase;
                         letter-spacing: 0.05em;
                         color: var(--secondary-text-color, #666);
+                        transition: color .15s;
+                    }
+                    #${DOCK_ID} .dock-history-panel .hist-section-label:hover {
+                        color: var(--primary-text-color);
+                    }
+                    #${DOCK_ID} .dock-history-panel .hist-section-chevron {
+                        width: 18px;
+                        height: 18px;
+                        fill: currentColor;
+                        transition: transform .2s ease;
+                        flex-shrink: 0;
+                    }
+                    #${DOCK_ID} .dock-history-panel .hist-section.collapsed .hist-section-chevron {
+                        transform: rotate(-90deg);
+                    }
+                    #${DOCK_ID} .dock-history-panel .hist-section-count {
+                        font-weight: 400;
+                        opacity: 0.7;
+                    }
+                    #${DOCK_ID} .dock-history-panel .hist-section-items {
+                        overflow: hidden;
+                        transition: max-height .25s ease;
+                        max-height: 2000px;
+                    }
+                    #${DOCK_ID} .dock-history-panel .hist-section.collapsed .hist-section-items {
+                        max-height: 0;
+                    }
+                    #${DOCK_ID} .dock-history-panel .hist-item.search-match .hist-item-title {
+                        color: var(--primary-color, #03a9f4);
+                    }
+                    #${DOCK_ID} .dock-history-panel .hist-item.search-match .hist-item-icon::before {
+                        background: var(--primary-color, #03a9f4);
                     }
                     #${DOCK_ID} .dock-history-panel .hist-item {
                         padding: 14px 14px;
@@ -1204,37 +1317,56 @@
                     #${DOCK_ID} .dock-history-panel .hist-item-actions {
                         flex: 0 0 auto;
                         opacity: 0;
-                        align-self: stretch;
                         display: flex;
                         align-items: center;
-                        justify-content: center;
-                        transition: opacity .15s, transform .15s;
+                        justify-content: flex-end;
+                        gap: 2px;
+                        margin-left: 8px;
+                        transition: opacity .15s;
                     }
                     #${DOCK_ID} .dock-history-panel .hist-item:hover .hist-item-actions {
                         opacity: 1;
                     }
                     #${DOCK_ID} .dock-history-panel .hist-item-actions button {
-                        width: 34px;
-                        height: 34px;
-                        background: transparent;
-                        border: none;
+                        width: 30px;
+                        height: 30px;
+                        background: var(--card-background-color, rgba(255,255,255,.06));
+                        border: 1px solid var(--divider-color, rgba(0,0,0,.08));
                         cursor: pointer;
                         padding: 0;
-                        border-radius: 50%;
-                        color: var(--secondary-text-color, #999);
-                        display: flex;
+                        border-radius: 8px;
+                        color: var(--secondary-text-color, #888);
+                        display: inline-flex;
                         align-items: center;
                         justify-content: center;
-                        transition: background .15s, color .15s;
+                        transition: all .15s ease;
+                        box-shadow: 0 1px 2px rgba(0,0,0,.04);
                     }
-                    #${DOCK_ID} .dock-history-panel .hist-item-actions button:hover {
-                        background: color-mix(in srgb, var(--error-color, #db4437) 8%, transparent);
+                    #${DOCK_ID} .dock-history-panel .hist-item-actions button:active {
+                        transform: scale(0.92);
+                    }
+                    #${DOCK_ID} .dock-history-panel .hist-item-actions .hist-delete-btn:hover {
+                        background: color-mix(in srgb, var(--error-color, #db4437) 12%, var(--card-background-color, #fff));
+                        border-color: color-mix(in srgb, var(--error-color, #db4437) 30%, transparent);
                         color: var(--error-color, #db4437);
                     }
+                    #${DOCK_ID} .dock-history-panel .hist-item-actions .hist-pin-btn:hover {
+                        background: color-mix(in srgb, var(--primary-color, #03a9f4) 12%, var(--card-background-color, #fff));
+                        border-color: color-mix(in srgb, var(--primary-color, #03a9f4) 30%, transparent);
+                        color: var(--primary-color, #03a9f4);
+                    }
+                    #${DOCK_ID} .dock-history-panel .hist-item-actions .hist-pin-btn.pinned {
+                        color: var(--primary-color, #03a9f4);
+                        opacity: 1;
+                    }
+                    #${DOCK_ID} .dock-history-panel .hist-item.pinned .hist-item-icon::before {
+                        background: var(--primary-color, #03a9f4);
+                    }
                     #${DOCK_ID} .dock-history-panel .hist-item-actions button svg {
-                        width: 17px;
-                        height: 17px;
+                        width: 16px;
+                        height: 16px;
                         fill: currentColor;
+                        flex-shrink: 0;
                     }
                     #${DOCK_ID} .dock-history-panel .hist-empty {
                         display: flex;
@@ -1467,31 +1599,50 @@
 
             let item;
             if (menu.localName === 'ha-dropdown') {
+                const wrapper = document.createElement('a');
+                wrapper.href = 'javascript:void(0)';
+                wrapper.classList.add('claw-history-menu-item');
                 item = document.createElement('ha-dropdown-item');
                 item.setAttribute('variant', 'default');
                 item.setAttribute('size', 'medium');
                 item.setAttribute('type', 'normal');
                 item.innerHTML = historyText('history') + ' <ha-icon-next slot="details"></ha-icon-next>';
+                wrapper.appendChild(item);
+                wrapper.addEventListener('click', (e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    menu.open = false;
+                    _toggleHistoryPanel(dock, voiceEl);
+                });
+                wrapper.addEventListener('wa-select', (e) => e.stopPropagation());
+                menu.append(wrapper);
             } else if (menu.localName === 'wa-dropdown') {
                 item = document.createElement('wa-dropdown-item');
                 item.textContent = historyText('history');
+                item.classList.add('claw-history-menu-item');
+                item.addEventListener('click', (e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    menu.open = false;
+                    _toggleHistoryPanel(dock, voiceEl);
+                });
+                item.addEventListener('wa-select', (e) => e.stopPropagation());
+                menu.append(item);
             } else {
                 item = document.createElement('ha-list-item');
                 item.setAttribute('graphic', 'icon');
                 item.innerHTML = '<ha-svg-icon slot="graphic" path="M13,3A9,9 0 0,0 4,12H1L4.89,15.89L4.96,16.03L9,12H6A7,7 0 0,1 13,5A7,7 0 0,1 20,12A7,7 0 0,1 13,19C11.07,19 9.32,18.21 8.06,16.94L6.64,18.36C8.27,19.99 10.51,21 13,21A9,9 0 0,0 22,12A9,9 0 0,0 13,3M12.5,8V12.25L16.5,14.33L17.21,13.06L13.75,11.33V8H12.5Z"></ha-svg-icon>' + historyText('history');
+                item.classList.add('claw-history-menu-item');
+                item.addEventListener('click', (e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    menu.open = false;
+                    _toggleHistoryPanel(dock, voiceEl);
+                });
+                item.addEventListener('selected', (e) => e.stopPropagation());
+                item.addEventListener('request-selected', (e) => e.stopPropagation());
+                menu.append(item);
             }
-            item.classList.add('claw-history-menu-item');
-            item.addEventListener('click', (e) => {
-                e.preventDefault();
-                e.stopPropagation();
-                menu.open = false;
-                _toggleHistoryPanel(dock, voiceEl);
-            });
-            item.addEventListener('selected', (e) => e.stopPropagation());
-            item.addEventListener('request-selected', (e) => e.stopPropagation());
-            item.addEventListener('wa-select', (e) => e.stopPropagation());
-
-            menu.append(item);
         };
 
         const grabChat = (voiceEl) => {
@@ -1587,17 +1738,43 @@
             return new Date(Date.now() - seconds * 1000).toLocaleDateString();
         };
 
-        const _groupConversations = (convs) => {
-            const now = Date.now() / 1000;
-            const groups = { today: [], yesterday: [], week: [], older: [] };
-            for (const c of convs) {
-                const age = now - c.last_message_at;
-                if (age < 86400) groups.today.push(c);
-                else if (age < 172800) groups.yesterday.push(c);
-                else if (age < 604800) groups.week.push(c);
-                else groups.older.push(c);
+        const _getDateLabel = (timestamp) => {
+            const d = new Date(timestamp * 1000);
+            const now = new Date();
+            const isToday = d.toDateString() === now.toDateString();
+            const yesterday = new Date(now);
+            yesterday.setDate(yesterday.getDate() - 1);
+            const isYesterday = d.toDateString() === yesterday.toDateString();
+            
+            if (isToday) {
+                const h = d.getHours();
+                if (h < 6) return { key: 'today_night', label: historyText('today_night'), order: 0 };
+                if (h < 12) return { key: 'today_morning', label: historyText('today_morning'), order: 1 };
+                if (h < 18) return { key: 'today_afternoon', label: historyText('today_afternoon'), order: 2 };
+                return { key: 'today_evening', label: historyText('today_evening'), order: 3 };
             }
-            return groups;
+            if (isYesterday) return { key: 'yesterday', label: historyText('yesterday'), order: 10 };
+            
+            const diffDays = Math.floor((now - d) / 86400000);
+            if (diffDays < 7) return { key: 'week', label: historyText('this_week'), order: 20 };
+            if (diffDays < 30) return { key: 'month', label: historyText('this_month'), order: 30 };
+            
+            const lang = getFrontendLanguage();
+            const isZh = lang.startsWith('zh');
+            const monthNamesEn = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
+            const monthKey = `${d.getFullYear()}_${d.getMonth()}`;
+            const label = isZh ? `${d.getFullYear()}年${d.getMonth() + 1}月` : `${monthNamesEn[d.getMonth()]} ${d.getFullYear()}`;
+            return { key: monthKey, label, order: 100 + (2100 - d.getFullYear()) * 12 + (11 - d.getMonth()) };
+        };
+
+        const _groupConversationsByDate = (convs) => {
+            const groups = {};
+            for (const c of convs) {
+                const { key, label, order } = _getDateLabel(c.last_message_at);
+                if (!groups[key]) groups[key] = { label, order, items: [] };
+                groups[key].items.push(c);
+            }
+            return Object.values(groups).sort((a, b) => a.order - b.order);
         };
 
         const _renderHistoryPanel = async (dock) => {
@@ -1620,54 +1797,126 @@
                 return;
             }
 
-            const groups = _groupConversations(convs);
+            const pinnedIds = JSON.parse(localStorage.getItem('claw_pinned_conversations') || '[]');
+            const groups = _groupConversationsByDate(convs.filter(c => !pinnedIds.includes(c.conversation_id)));
+            const pinned = convs.filter(c => pinnedIds.includes(c.conversation_id));
+
             let html = '<div class="hist-search"><div class="hist-search-wrap"><svg viewBox="0 0 24 24"><path d="M9.5,3A6.5,6.5 0 0,1 16,9.5C16,11.11 15.41,12.59 14.44,13.73L14.71,14H15.5L20.5,19L19,20.5L14,15.5V14.71L13.73,14.44C12.59,15.41 11.11,16 9.5,16A6.5,6.5 0 0,1 3,9.5A6.5,6.5 0 0,1 9.5,3M9.5,5C7,5 5,7 5,9.5C5,12 7,14 9.5,14C12,14 14,12 14,9.5C14,7 12,5 9.5,5Z"/></svg><input type="text" placeholder="' + historyText('search') + '" /></div></div><div class="hist-list">';
 
             const chatIcon = '<svg viewBox="0 0 24 24"><path d="M12,3C6.5,3 2,6.58 2,11C2.05,13.15 3.06,15.17 4.75,16.5C4.75,17.1 4.33,18.67 2,21C4.97,20.3 7.58,18.67 8.5,17.65C9.64,17.88 10.82,18 12,18C17.5,18 22,14.42 22,10C22,6.58 17.5,3 12,3Z"/></svg>';
+            const pinIcon = '<svg viewBox="0 0 24 24"><path d="M16,12V4H17V2H7V4H8V12L6,14V16H11.2V22H12.8V16H18V14L16,12Z"/></svg>';
             const deleteIcon = '<svg viewBox="0 0 24 24"><path d="M19,4H15.5L14.5,3H9.5L8.5,4H5V6H19M6,19A2,2 0 0,0 8,21H16A2,2 0 0,0 18,19V7H6V19Z"/></svg>';
+            const chevronIcon = '<svg class="hist-section-chevron" viewBox="0 0 24 24"><path d="M7.41,8.58L12,13.17L16.59,8.58L18,10L12,16L6,10L7.41,8.58Z"/></svg>';
             const showActiveSelection = _historySelectedConversationId && !_historySelectionHighlightConsumed;
 
-            const renderGroup = (label, items) => {
-                if (!items.length) return '';
-                let g = '<div class="hist-section-label">' + label + '</div>';
-                for (const c of items) {
-                    const activeClass = showActiveSelection && c.conversation_id === _historySelectedConversationId ? ' active' : '';
-                    g += '<div class="hist-item' + activeClass + '" data-conv-id="' + c.conversation_id + '">'
-                        + '<div class="hist-item-icon">' + chatIcon + '</div>'
-                        + '<div class="hist-item-content">'
-                        + '<div class="hist-item-title">' + (c.summary || historyText('conversation')).replace(/</g, '&lt;') + '</div>'
-                        + '<div class="hist-item-meta">' + c.turn_count + ' ' + historyText('messages') + ' · ' + _formatTimeAgo(c.seconds_ago) + '</div>'
-                        + '</div>'
-                        + '<div class="hist-item-actions"><button class="hist-delete-btn" data-conv-id="' + c.conversation_id + '" title="' + historyText('delete') + '">' + deleteIcon + '</button></div>'
-                        + '</div>';
-                }
-                return g;
+            const renderItem = (c, isPinned) => {
+                const activeClass = showActiveSelection && c.conversation_id === _historySelectedConversationId ? ' active' : '';
+                const pinnedClass = isPinned ? ' pinned' : '';
+                return '<div class="hist-item' + activeClass + pinnedClass + '" data-conv-id="' + c.conversation_id + '">'
+                    + '<div class="hist-item-icon">' + chatIcon + '</div>'
+                    + '<div class="hist-item-content">'
+                    + '<div class="hist-item-title">' + (c.summary || historyText('conversation')).replace(/</g, '&lt;') + '</div>'
+                    + '<div class="hist-item-meta">' + c.turn_count + ' ' + historyText('messages') + ' · ' + _formatTimeAgo(c.seconds_ago) + '</div>'
+                    + '</div>'
+                    + '<div class="hist-item-actions">'
+                    + '<button class="hist-pin-btn' + (isPinned ? ' pinned' : '') + '" data-conv-id="' + c.conversation_id + '" title="' + (isPinned ? historyText('unpin') : historyText('pin')) + '">' + pinIcon + '</button>'
+                    + '<button class="hist-delete-btn" data-conv-id="' + c.conversation_id + '" title="' + historyText('delete') + '">' + deleteIcon + '</button>'
+                    + '</div>'
+                    + '</div>';
             };
 
-            html += renderGroup('Today', groups.today);
-            html += renderGroup('Yesterday', groups.yesterday);
-            html += renderGroup('This Week', groups.week);
-            html += renderGroup('Older', groups.older);
+            if (pinned.length) {
+                for (const c of pinned) {
+                    html += renderItem(c, true);
+                }
+            }
+
+            const currentHour = new Date().getHours();
+            let currentPeriodOrder = 3;
+            if (currentHour < 6) currentPeriodOrder = 0;
+            else if (currentHour < 12) currentPeriodOrder = 1;
+            else if (currentHour < 18) currentPeriodOrder = 2;
+
+            groups.forEach((group, idx) => {
+                const shouldExpand = group.order === currentPeriodOrder;
+                const collapsed = !shouldExpand ? ' collapsed' : '';
+                html += '<div class="hist-section' + collapsed + '" data-section="' + idx + '">'
+                    + '<div class="hist-section-label">' + chevronIcon + group.label + ' <span class="hist-section-count">(' + group.items.length + ')</span></div>'
+                    + '<div class="hist-section-items">';
+                for (const c of group.items) {
+                    html += renderItem(c, pinnedIds.includes(c.conversation_id));
+                }
+                html += '</div></div>';
+            });
+
             html += '</div>';
             panel.innerHTML = html;
             if (showActiveSelection) _historySelectionHighlightConsumed = true;
+
+            panel.querySelectorAll('.hist-section-label').forEach(label => {
+                label.addEventListener('click', () => {
+                    const section = label.closest('.hist-section');
+                    if (section) section.classList.toggle('collapsed');
+                });
+            });
 
             const searchInput = panel.querySelector('.hist-search input');
             if (searchInput) {
                 searchInput.addEventListener('input', () => {
                     const q = searchInput.value.toLowerCase().trim();
-                    panel.querySelectorAll('.hist-item').forEach(item => {
+                    
+                    panel.querySelectorAll('.hist-section').forEach(section => {
+                        let hasMatch = false;
+                        section.querySelectorAll('.hist-item').forEach(item => {
+                            const title = item.querySelector('.hist-item-title')?.textContent?.toLowerCase() || '';
+                            const match = !q || title.includes(q);
+                            item.style.display = match ? '' : 'none';
+                            if (match && q) {
+                                hasMatch = true;
+                                item.classList.add('search-match');
+                            } else {
+                                item.classList.remove('search-match');
+                            }
+                        });
+                        if (q && hasMatch) {
+                            section.classList.remove('collapsed');
+                        }
+                        section.style.display = (q && !hasMatch) ? 'none' : '';
+                    });
+
+                    panel.querySelectorAll('.hist-list > .hist-item').forEach(item => {
                         const title = item.querySelector('.hist-item-title')?.textContent?.toLowerCase() || '';
-                        item.style.display = (!q || title.includes(q)) ? '' : 'none';
+                        const match = !q || title.includes(q);
+                        item.style.display = match ? '' : 'none';
+                        if (match && q) {
+                            item.classList.add('search-match');
+                        } else {
+                            item.classList.remove('search-match');
+                        }
                     });
                 });
             }
 
             panel.querySelectorAll('.hist-item').forEach(item => {
                 item.addEventListener('click', (e) => {
-                    if (e.target.closest('.hist-delete-btn')) return;
+                    if (e.target.closest('.hist-delete-btn') || e.target.closest('.hist-pin-btn')) return;
                     const convId = item.dataset.convId;
                     _resumeConversation(dock, convId);
+                });
+            });
+
+            panel.querySelectorAll('.hist-pin-btn').forEach(btn => {
+                btn.addEventListener('click', (e) => {
+                    e.stopPropagation();
+                    const convId = btn.dataset.convId;
+                    let pins = JSON.parse(localStorage.getItem('claw_pinned_conversations') || '[]');
+                    if (pins.includes(convId)) {
+                        pins = pins.filter(id => id !== convId);
+                    } else {
+                        pins.unshift(convId);
+                    }
+                    localStorage.setItem('claw_pinned_conversations', JSON.stringify(pins));
+                    _renderHistoryPanel(dock);
                 });
             });
 
@@ -1677,6 +1926,9 @@
                     const convId = btn.dataset.convId;
                     try {
                         await h.connection.sendMessagePromise({ type: 'ha_crack/chat_history_delete', conversation_id: convId });
+                        let pins = JSON.parse(localStorage.getItem('claw_pinned_conversations') || '[]');
+                        pins = pins.filter(id => id !== convId);
+                        localStorage.setItem('claw_pinned_conversations', JSON.stringify(pins));
                     } catch (_) {}
                     _renderHistoryPanel(dock);
                 });
@@ -1690,9 +1942,11 @@
             _historySelectionHighlightConsumed = false;
 
             let turns = [];
+            let historyTokens = 0;
             try {
                 const r = await h.connection.sendMessagePromise({ type: 'ha_crack/chat_history_get', conversation_id: convId });
                 turns = r?.turns || [];
+                historyTokens = r?.tokens_used || 0;
             } catch (_) {}
 
             try {
@@ -1706,14 +1960,12 @@
             const conversation = [];
             for (const t of turns) {
                 if (t.user) {
-                    conversation.push({ who: 'user', text: t.user, tool_calls: {} });
+                    conversation.push({ who: 'user', text: t.user });
                 }
                 if (t.assistant) {
                     conversation.push({
                         who: 'hass',
                         text: t.assistant_display || t.assistant,
-                        thinking: '',
-                        tool_calls: {},
                         agent_id: t.agent_id || '',
                         agent_name: t.agent_name || '',
                     });
@@ -1733,6 +1985,10 @@
                 state.persist?.();
             }
 
+            if (historyTokens > 0 && typeof window.__clawSetHistoryTokens === 'function') {
+                window.__clawSetHistoryTokens(historyTokens);
+            }
+
             const chat = _dockedChat || deepQuery('ha-assist-chat');
             if (chat) {
                 chat._conversation = conversation;
@@ -1740,6 +1996,7 @@
                 chat.requestUpdate?.('_conversation');
                 setTimeout(() => {
                     if (state) state.resetting = false;
+                    window.dispatchEvent(new CustomEvent('claw-chat-updated'));
                 }, 100);
             } else if (state) {
                 state.resetting = false;
@@ -2504,7 +2761,7 @@
         const BAR_ID = 'claw-context-status-bar';
         const S_IDLE = 'idle', S_THINKING = 'thinking', S_TOOL = 'tool_call', S_REPLYING = 'replying';
         const settings = window.__clawSettings = window.__clawSettings || {};
-        settings.enable_context_status_bar = false;
+        settings.enable_context_status_bar = true;
 
         let phase = S_IDLE;
         let turnStart = null;
@@ -2516,14 +2773,16 @@
         let hasTurn = false;
         let statusLoop = null;
 
-        const resetState = (removeBar) => {
+        const resetState = (removeBar, keepTokens = false) => {
             phase = S_IDLE;
             turnStart = null;
             turnEnd = null;
-            totalChars = 0;
-            windowStart = Date.now();
-            windowTimeLabel = '0s';
-            hasTurn = false;
+            if (!keepTokens) {
+                totalChars = 0;
+                windowStart = Date.now();
+                windowTimeLabel = '0s';
+                hasTurn = false;
+            }
             if (tickTimer) { clearInterval(tickTimer); tickTimer = null; }
             if (removeBar) {
                 deepQuery('ha-assist-chat')?.shadowRoot?.getElementById(BAR_ID)?.remove();
@@ -2608,6 +2867,14 @@
         let backendTokens = 0;
         let backendCtx = 0;
 
+        window.__clawSetHistoryTokens = (tokens) => {
+            if (tokens > 0) {
+                backendTokens = tokens;
+                hasTurn = true;
+                render();
+            }
+        };
+
         const fetchBackendTokens = async () => {
             try {
                 const r = await hass.connection.sendMessagePromise({ type: 'ha_crack/get_context_status' });
@@ -2645,15 +2912,39 @@
                                 if (typeof window.__clawOnStreamDelta === 'function') window.__clawOnStreamDelta(delta);
                             }
                             if (delta.tool_calls) { phase = S_TOOL; totalChars += JSON.stringify(delta.tool_calls).length; }
-                            if (delta.tool_result) { phase = S_TOOL; totalChars += JSON.stringify(delta.tool_result).length; }
+                            if (delta.tool_result) {
+                                phase = S_TOOL;
+                                totalChars += JSON.stringify(delta.tool_result).length;
+                                try {
+                                    const result = typeof delta.tool_result === 'string' ? JSON.parse(delta.tool_result) : delta.tool_result;
+                                    if (result?._navigate_to) {
+                                        setTimeout(() => softNavigate(result._navigate_to), 500);
+                                    }
+                                } catch(e) {}
+                            }
                             if (delta.tool_call_id && !delta.tool_calls) phase = S_TOOL;
                             render();
                         } else if (t === 'run-start') {
                             phase = S_THINKING;
                             render();
                         } else if (t === 'intent-end' || t === 'run-end' || t === 'error') {
-                            if (typeof window.__clawOnStreamEnd === 'function') window.__clawOnStreamEnd();
-                            endTurn();
+                            if (!this.__clawSoundPlayed) {
+                                let isError = (t === 'error');
+                                if (!isError && t === 'intent-end' && d?.intent_output?.response?.response_type === 'error') {
+                                    isError = true;
+                                }
+                                if (isError) {
+                                    this.__clawSoundPlayed = true;
+                                    if (typeof window.__clawPlaySound === 'function') window.__clawPlaySound('error');
+                                } else if (t === 'intent-end' || t === 'run-end') {
+                                    this.__clawSoundPlayed = true;
+                                    if (typeof window.__clawOnStreamEnd === 'function') window.__clawOnStreamEnd();
+                                }
+                            }
+                            if (t === 'run-end' || t === 'error') {
+                                this.__clawSoundPlayed = false;
+                                endTurn();
+                            }
                         }
                         callback(ev);
                     };
@@ -2678,9 +2969,9 @@
                 }
                 #${BAR_ID} .sb-sep { opacity:0.3; }
                 #${BAR_ID} .sb-tok { font-variant-numeric:tabular-nums; }
-                #${BAR_ID} .sb-bar { letter-spacing:-0.5px; font-size:10px; }
-                #${BAR_ID} .sb-pct { font-variant-numeric:tabular-nums; font-weight:600; font-size:10px; }
-                #${BAR_ID} .sb-time { font-variant-numeric:tabular-nums; opacity:0.6; }
+                #${BAR_ID} .sb-bar { display:inline-flex; align-items:center; vertical-align:middle; }
+                #${BAR_ID} .sb-pct { font-variant-numeric:tabular-nums; font-weight:500; font-size:10px; }
+                #${BAR_ID} .sb-time { font-variant-numeric:tabular-nums; opacity:0.35; }
             `;
             sr.appendChild(s);
         };
@@ -2705,14 +2996,14 @@
                     '<span class="sb-sep">│</span>' +
                     '<span class="sb-time" data-r="win"></span>' +
                     '<span class="sb-sep">│</span>' +
-                    '⏲ <span class="sb-time" data-r="timer"></span>';
+                    '<svg width="11" height="11" viewBox="0 0 16 16" style="vertical-align:middle;opacity:0.6"><circle cx="8" cy="8" r="6.5" fill="none" stroke="currentColor" stroke-width="2"/><path d="M8 4.5V8l2.5 1.5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg> <span class="sb-time" data-r="timer"></span>';
                 const inp = sr.querySelector('.input')||sr.querySelector('.chatbox')||sr.querySelector('[class*="input"]');
                 if (inp) inp.parentNode.insertBefore(bar, inp);
                 else { const m=sr.querySelector('.messages'); if(m) m.parentNode.insertBefore(bar,m.nextSibling); else sr.appendChild(bar); }
             }
 
             if (hasTurn) totalChars = calcCurrentChars();
-            const localTk = Math.round(totalChars/CPT) + (hasTurn ? BASE_PROMPT_TOKENS : 0);
+            const localTk = Math.round(totalChars/CPT * 1.25) + (hasTurn ? BASE_PROMPT_TOKENS : 0);
             const tk = backendTokens > localTk ? backendTokens : localTk;
             const ctxW = backendCtx || CTX;
             const pct = Math.min(100, Math.round(tk/ctxW*100));
@@ -2724,21 +3015,63 @@
 
             const $ = (r) => bar.querySelector(`[data-r="${r}"]`);
             $('tok').textContent = (hasTurn ? fmt(tk) : '--') + ' / ' + fmtR(ctxW);
-            const barW = 14, filled = Math.round(pct/100*barW);
-            const barStr = hasTurn ? '█'.repeat(filled)+'░'.repeat(barW-filled) : '░'.repeat(barW);
-            const barColor = hasTurn ? pc : 'var(--secondary-text-color)';
+            const barW = 14;
             const barEl = $('bar');
-            barEl.textContent = barStr;
-            barEl.style.color = barColor;
+            const cellW = 5, cellH = 9, dotSize = 1, dotGap = 2;
+            const svgW = barW * cellW;
+            let rects = '';
+            if (hasTurn) {
+                const totalHalf = barW * 2;
+                const filledHalf = pct > 0 ? Math.min(totalHalf, Math.max(1, Math.round(pct/100*totalHalf) * 2)) : 0;
+                for (let i = 0; i < barW; i++) {
+                    const x = i * cellW;
+                    const halfIdx = i * 2;
+                    if (halfIdx + 1 < filledHalf) {
+                        rects += `<rect x="${x}" y="0" width="${cellW}" height="${cellH}" fill="${pc}"/>`;
+                    } else if (halfIdx < filledHalf) {
+                        rects += `<rect x="${x}" y="0" width="${Math.floor(cellW/2)}" height="${cellH}" fill="${pc}"/>`;
+                        for (let py = 0; py < cellH; py += dotGap) {
+                            for (let px = Math.floor(cellW/2); px < cellW; px += dotGap) {
+                                rects += `<rect x="${x+px}" y="${py}" width="${dotSize}" height="${dotSize}" fill="${pc}" opacity="0.3"/>`;
+                            }
+                        }
+                    } else {
+                        for (let py = 0; py < cellH; py += dotGap) {
+                            for (let px = 0; px < cellW; px += dotGap) {
+                                rects += `<rect x="${x+px}" y="${py}" width="${dotSize}" height="${dotSize}" fill="${pc}" opacity="0.3"/>`;
+                            }
+                        }
+                    }
+                }
+            } else {
+                for (let i = 0; i < barW; i++) {
+                    const x = i * cellW;
+                    for (let py = 0; py < cellH; py += dotGap) {
+                        for (let px = 0; px < cellW; px += dotGap) {
+                            rects += `<rect x="${x+px}" y="${py}" width="${dotSize}" height="${dotSize}" fill="var(--secondary-text-color)" opacity="0.3"/>`;
+                        }
+                    }
+                }
+            }
+            barEl.innerHTML = `<svg width="${svgW}" height="${cellH}" viewBox="0 0 ${svgW} ${cellH}" style="display:block">${rects}</svg>`;
+            const barColor = hasTurn ? pc : 'var(--secondary-text-color)';
             const pctEl = $('pct');
-            pctEl.textContent = hasTurn ? pct+'%' : '--%';
+            pctEl.textContent = hasTurn ? Math.max(1, pct)+'%' : '--%';
             pctEl.style.color = barColor;
             $('win').textContent = hasTurn ? windowTimeLabel : '--';
             $('timer').textContent = timer;
         };
 
         window.addEventListener('claw-chat-updated', () => {
-            if (settings.enable_context_status_bar) { installHooks(); render(); }
+            if (settings.enable_context_status_bar) {
+                const chars = calcCurrentChars();
+                if (chars > 0) {
+                    hasTurn = true;
+                    totalChars = chars;
+                }
+                installHooks();
+                render();
+            }
         });
 
         const startStatusBar = () => {
