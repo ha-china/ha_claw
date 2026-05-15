@@ -242,25 +242,14 @@ Examples:
 
         return {"success": True, "helpers": result, "count": sum(len(v) for v in result.values())}
 
-    async def _create_collection(
-        self, hass: HomeAssistant, domain: str, name: str, config: dict
-    ) -> JsonObjectType:
-        path = _storage_path(hass, domain)
-        data = await hass.async_add_executor_job(_read_storage, path)
-        items = data.setdefault("data", {}).setdefault("items", [])
-
-        for item in items:
-            if item.get("name", "").lower() == name.lower():
-                return {"success": False, "error": f"Helper '{name}' already exists in {domain}"}
-
-        item: dict[str, Any] = {"id": _next_id(items), "name": name}
-
+    @staticmethod
+    def _build_create_data(domain: str, name: str, config: dict) -> dict[str, Any]:
+        item: dict[str, Any] = {"name": name}
         if domain == "input_boolean":
             if "initial" in config:
                 item["initial"] = _coerce_bool(config["initial"])
             if "icon" in config:
                 item["icon"] = config["icon"]
-
         elif domain == "input_number":
             item["min"] = float(config.get("min", 0))
             item["max"] = float(config.get("max", 100))
@@ -272,7 +261,6 @@ Examples:
                 item["unit_of_measurement"] = config["unit_of_measurement"]
             if "icon" in config:
                 item["icon"] = config["icon"]
-
         elif domain == "input_text":
             item["min"] = int(config.get("min", 0))
             item["max"] = int(config.get("max", 100))
@@ -283,30 +271,25 @@ Examples:
                 item["pattern"] = config["pattern"]
             if "icon" in config:
                 item["icon"] = config["icon"]
-
         elif domain == "input_select":
             item["options"] = _coerce_csv_list(config.get("options", []))
             if "initial" in config:
                 item["initial"] = config["initial"]
             if "icon" in config:
                 item["icon"] = config["icon"]
-
         elif domain == "input_datetime":
             item["has_date"] = _coerce_bool(config.get("has_date", True), default=True)
             item["has_time"] = _coerce_bool(config.get("has_time", True), default=True)
             if "icon" in config:
                 item["icon"] = config["icon"]
-
         elif domain == "input_button":
             if "icon" in config:
                 item["icon"] = config["icon"]
-
         elif domain == "timer":
             item["duration"] = config.get("duration", "0:00:00")
             item["restore"] = _coerce_bool(config.get("restore", False))
             if "icon" in config:
                 item["icon"] = config["icon"]
-
         elif domain == "counter":
             item["initial"] = int(config.get("initial", 0))
             item["step"] = int(config.get("step", 1))
@@ -318,14 +301,64 @@ Examples:
                 item["restore"] = _coerce_bool(config["restore"])
             if "icon" in config:
                 item["icon"] = config["icon"]
-
         elif domain == "schedule":
             for day in ("monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday"):
                 if day in config:
                     item[day] = config[day]
             if "icon" in config:
                 item["icon"] = config["icon"]
+        return item
 
+    @staticmethod
+    def _get_storage_collection(hass: HomeAssistant, domain: str):
+        ws_handlers = hass.data.get("websocket_api", {})
+        handler_tuple = ws_handlers.get(f"{domain}/create")
+        if not handler_tuple:
+            return None
+        fn = handler_tuple[0]
+        for _ in range(10):
+            ws_crud = getattr(fn, "__self__", None)
+            if ws_crud:
+                sc = getattr(ws_crud, "storage_collection", None)
+                if sc is not None:
+                    return sc
+            fn = getattr(fn, "__wrapped__", None)
+            if fn is None:
+                break
+        return None
+
+    async def _create_collection(
+        self, hass: HomeAssistant, domain: str, name: str, config: dict
+    ) -> JsonObjectType:
+        create_data = self._build_create_data(domain, name, config)
+
+        sc = self._get_storage_collection(hass, domain)
+        if sc is not None:
+            for existing in sc.async_items():
+                if existing.get("name", "").lower() == name.lower():
+                    return {"success": False, "error": f"Helper '{name}' already exists in {domain}"}
+            try:
+                item = await sc.async_create_item(create_data)
+                runtime_status = _helper_runtime_status(hass, domain, name)
+                return {
+                    "success": True,
+                    "message": f"Created {domain} helper: {name}",
+                    "method": "collection_api",
+                    **runtime_status,
+                    "item": item,
+                }
+            except Exception as err:
+                _LOGGER.warning("Collection API create failed for %s, falling back to storage: %s", domain, err)
+
+        path = _storage_path(hass, domain)
+        data = await hass.async_add_executor_job(_read_storage, path)
+        items = data.setdefault("data", {}).setdefault("items", [])
+
+        for existing in items:
+            if existing.get("name", "").lower() == name.lower():
+                return {"success": False, "error": f"Helper '{name}' already exists in {domain}"}
+
+        item = {"id": _next_id(items), **create_data}
         items.append(item)
         await hass.async_add_executor_job(_write_storage, path, data)
 
@@ -338,6 +371,7 @@ Examples:
         return {
             "success": True,
             "message": f"Created {domain} helper: {name}",
+            "method": "storage_fallback",
             **runtime_status,
             "item": item,
         }
@@ -404,10 +438,32 @@ Examples:
             return {"success": False, "error": f"Template helper not found: {entity_id or name}"}
 
         if domain in _COLLECTION_DOMAINS:
+            slug = entity_id.split(".", 1)[1] if "." in entity_id else ""
+            sc = self._get_storage_collection(hass, domain)
+            if sc is not None:
+                target_item = None
+                for item in sc.async_items():
+                    item_slug = _slugify(item.get("name", ""))
+                    item_id = item.get("id", "")
+                    if (slug and item_slug == slug) or (name and item.get("name", "").lower() == name.lower()) or (entity_id and item_id == entity_id):
+                        target_item = item
+                        break
+                if target_item:
+                    try:
+                        await sc.async_delete_item(target_item["id"])
+                        runtime_status = _helper_delete_status(hass, domain, target_item.get("name", ""))
+                        return {
+                            "success": True,
+                            "message": f"Deleted {domain} helper: {target_item.get('name', '')}",
+                            "method": "collection_api",
+                            **runtime_status,
+                        }
+                    except Exception as err:
+                        _LOGGER.warning("Collection API delete failed for %s: %s", domain, err)
+
             path = _storage_path(hass, domain)
             data = await hass.async_add_executor_job(_read_storage, path)
             items = data.get("data", {}).get("items", [])
-            slug = entity_id.split(".", 1)[1] if "." in entity_id else ""
 
             new_items = []
             removed = None
@@ -437,6 +493,7 @@ Examples:
             return {
                 "success": True,
                 "message": f"Deleted {domain} helper: {removed.get('name', '')}",
+                "method": "storage_fallback",
                 **runtime_status,
             }
 
