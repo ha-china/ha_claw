@@ -25,11 +25,75 @@ from ..runtime.config_file_store import (
     stage_config_operation,
 )
 from ..runtime.text_patch import PatchError, apply_patches
-from ..runtime.data_path import output_dir_path
+from ..runtime.data_path import output_dir_path, tmp_dir_path
 from ..runtime.im_transport import async_send_im_payload
 from ..entity_privacy import entity_is_exposed, privacy_blocked_response, domain_unexposed_response
 
 _LOGGER = logging.getLogger(__name__)
+
+
+def _read_text_file(path: Path, offset: int, max_chars: int) -> dict[str, Any]:
+    text = path.read_text(encoding="utf-8", errors="replace")
+    size = len(text)
+    start = max(0, offset)
+    end = size if max_chars > 0 else size
+    if max_chars > 0:
+        end = min(size, start + max_chars)
+    return {
+        "content": text[start:end],
+        "offset": start,
+        "returned_chars": end - start,
+        "total_chars": size,
+        "truncated": end < size,
+        "next_offset": end if end < size else None,
+    }
+
+
+def _search_text_file(path: Path, query: str, fuzzy: bool, context_chars: int) -> dict[str, Any]:
+    import re
+    text = path.read_text(encoding="utf-8", errors="replace")
+    size = len(text)
+    matches = []
+
+    if fuzzy:
+        keywords = [k.strip() for k in query.split() if k.strip()]
+        if not keywords:
+            return {"total_chars": size, "matches": [], "match_count": 0}
+        pattern = ".*?".join(re.escape(k) for k in keywords)
+        for m in re.finditer(pattern, text, re.IGNORECASE | re.DOTALL):
+            start = max(0, m.start() - context_chars)
+            end = min(size, m.end() + context_chars)
+            matches.append({
+                "offset": m.start(),
+                "matched": m.group()[:200],
+                "context": text[start:end],
+            })
+            if len(matches) >= 30:
+                break
+    else:
+        search_lower = query.lower()
+        text_lower = text.lower()
+        pos = 0
+        while True:
+            idx = text_lower.find(search_lower, pos)
+            if idx < 0:
+                break
+            start = max(0, idx - context_chars)
+            end = min(size, idx + len(query) + context_chars)
+            matches.append({
+                "offset": idx,
+                "matched": text[idx:idx + len(query)],
+                "context": text[start:end],
+            })
+            pos = idx + 1
+            if len(matches) >= 50:
+                break
+
+    return {
+        "total_chars": size,
+        "matches": matches,
+        "match_count": len(matches),
+    }
 
 
 async def _async_normalize_camera_service_paths(hass: HomeAssistant, domain: str, service: str, data: dict[str, object]) -> dict[str, object]:
@@ -647,6 +711,85 @@ The response includes available_agents so you always know who else is available.
         except Exception as exc:
             _LOGGER.warning("NextAgentHandoff failed for %s: %s", agent_id, exc)
             return {"success": False, "error": str(exc), "agent_id": agent_id, "available_agents": others}
+
+
+class ReadFileTool(llm.Tool):
+    name = "ReadFile"
+    description = """Read or search a text file created by Claw Assistant.
+
+Only files under Claw Assistant temp/output directories are allowed.
+
+Modes (controlled by action param):
+- action=read (default): Read file content with pagination.
+  Default reads first 1500 chars. Use offset + max_chars to paginate.
+  Response includes total_chars, returned_chars, truncated, next_offset
+  so you know how much remains and where to continue.
+- action=search: Exact case-insensitive search. Returns offset + context for each match.
+- action=search_fuzzy: Fuzzy multi-keyword match (space-separated keywords,
+  matched in order with gaps). Returns offset + context for each match.
+- action=info: File metadata only (total_chars, line_count, no content).
+
+Strategy for large files:
+1. First call with action=read (gets first 1500 chars + file stats)
+2. If truncated=true, use action=search/search_fuzzy to locate specific content
+3. Use offset+max_chars to read specific sections as needed
+4. Never read the entire file at once if total_chars > 5000
+
+Params: path(required), action(read/search/search_fuzzy/info, default read),
+offset(default 0), max_chars(default 1500, set 0 to read all — use sparingly),
+query(required for search/search_fuzzy), context_chars(default 200)."""
+    parameters = vol.Schema(
+        {
+            vol.Required("path"): str,
+            vol.Optional("action", default="read"): vol.In(["read", "search", "search_fuzzy", "info"]),
+            vol.Optional("offset", default=0): int,
+            vol.Optional("max_chars", default=1500): int,
+            vol.Optional("query", default=""): str,
+            vol.Optional("context_chars", default=200): int,
+        }
+    )
+
+    async def async_call(
+        self, hass: HomeAssistant, tool_input: llm.ToolInput, llm_context: llm.LLMContext
+    ) -> JsonObjectType:
+        raw_path = str(tool_input.tool_args.get("path", "")).strip()
+        action = str(tool_input.tool_args.get("action", "read")).strip()
+        offset = int(tool_input.tool_args.get("offset", 0) or 0)
+        max_chars = int(tool_input.tool_args.get("max_chars", 1500) or 1500)
+        query = str(tool_input.tool_args.get("query", "")).strip()
+        context_chars = int(tool_input.tool_args.get("context_chars", 200) or 200)
+
+        if not raw_path:
+            return {"success": False, "error": "'path' is required"}
+
+        target = Path(raw_path).expanduser().resolve()
+        allowed_roots = [
+            tmp_dir_path(hass).resolve(),
+            output_dir_path(hass).resolve(),
+        ]
+        if not any(target == root or root in target.parents for root in allowed_roots):
+            return {"success": False, "error": "ReadFile can only access Claw Assistant temp/output files"}
+        if not target.is_file():
+            return {"success": False, "error": f"File not found: {target}"}
+
+        if action == "info":
+            def _get_info(p):
+                text = p.read_text(encoding="utf-8", errors="replace")
+                return {"total_chars": len(text), "line_count": text.count("\n") + 1}
+            info = await hass.async_add_executor_job(_get_info, target)
+            return {"success": True, "path": str(target), **info}
+
+        if action in ("search", "search_fuzzy"):
+            if not query:
+                return {"success": False, "error": "'query' is required for search"}
+            fuzzy = action == "search_fuzzy"
+            result = await hass.async_add_executor_job(
+                _search_text_file, target, query, fuzzy, context_chars,
+            )
+            return {"success": True, "path": str(target), "action": action, "query": query, **result}
+
+        result = await hass.async_add_executor_job(_read_text_file, target, offset, max_chars)
+        return {"success": True, "path": str(target), **result}
 
 
 class ConfigFileTool(llm.Tool):
