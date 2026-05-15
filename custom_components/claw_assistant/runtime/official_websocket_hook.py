@@ -149,7 +149,8 @@ async def websocket_get_pending_js(
     pending = dd.setdefault(_PENDING_JS_KEY, [])
     cursors = dd.setdefault("_pending_js_cursors", {})
     conn_id = id(connection)
-    cursor = cursors.get(conn_id, 0)
+    is_new = conn_id not in cursors
+    cursor = cursors.get(conn_id, len(pending))
     unseen = pending[cursor:]
     cursors[conn_id] = len(pending)
     if len(pending) > 200:
@@ -978,7 +979,8 @@ async def websocket_frontend_exec_poll(hass, connection, msg):
     q = dd.setdefault(_FRONTEND_EXEC_QUEUE, [])
     cursors = dd.setdefault("_exec_poll_cursors", {})
     conn_id = id(connection)
-    cursor = cursors.get(conn_id, 0)
+    is_new = conn_id not in cursors
+    cursor = cursors.get(conn_id, len(q))
     unseen = q[cursor:]
     cursors[conn_id] = len(q)
     if len(q) > 200:
@@ -1006,17 +1008,11 @@ class _ExecSub:
 )
 @websocket_api.async_response
 async def websocket_frontend_exec_subscribe(hass, connection, msg):
-    from ..tools.frontend_tools import _domain_data, _FRONTEND_EXEC_SUBS, _FRONTEND_EXEC_QUEUE
+    from ..tools.frontend_tools import _domain_data, _FRONTEND_EXEC_SUBS
     dd = _domain_data(hass)
     subs: list = dd.setdefault(_FRONTEND_EXEC_SUBS, [])
     sub = _ExecSub(connection, msg["id"])
     subs.append(sub)
-    q = dd.get(_FRONTEND_EXEC_QUEUE, [])
-    for task in q[-20:]:
-        try:
-            connection.send_message({"id": msg["id"], "type": "event", "event": {"type": "exec", "task": task}})
-        except Exception:
-            pass
     def unsub():
         try:
             subs.remove(sub)
