@@ -271,21 +271,66 @@ TOOL_REPEAT_BAIL_PROMPT = (
     "You decide. Do NOT repeat the same tool."
 )
 
+IDENTICAL_CALL_WARN_PROMPT = (
+    "[WARNING — IDENTICAL TOOL CALLS DETECTED]\n"
+    "You have called '{tool_name}' with IDENTICAL arguments {count} times. "
+    "This is clearly not working. STOP and try a DIFFERENT approach or different parameters.\n"
+    "Do NOT repeat the same call again."
+)
+
+IDENTICAL_CALL_STOP_PROMPT = (
+    "[LOOP DETECTED — PLEASE STOP]\n"
+    "Tool '{tool_name}' has been called {count} times with identical arguments.\n"
+    "This indicates a loop that cannot be resolved automatically.\n"
+    "Please respond to the user with kind=final, explain what you tried, "
+    "why it didn't work, and suggest what they could do manually.\n"
+    "Do NOT call any more tools. Just reply to the user politely."
+)
+
+
+def _args_signature(tool_args: dict | None) -> str:
+    """Create a hashable signature from tool args."""
+    import json
+    return json.dumps(tool_args or {}, sort_keys=True, ensure_ascii=False)
+
 
 def check_tool_repeat(
     hass: HomeAssistant,
     *,
     tool_name: str,
+    tool_args: dict | None = None,
     max_repeat: int,
-) -> str | None:
+    identical_warn: int = 10,
+    identical_stop: int = 20,
+) -> tuple[str | None, bool]:
+    """
+    Check for tool repeat. Returns (prompt, should_stop).
+    - prompt: warning/error message to inject, or None
+    - should_stop: True if loop should be forcibly terminated
+    """
     task_loop = get_task_loop_state(hass)
     steps = task_loop.get("steps", [])
-    count = sum(1 for s in steps if s.get("tool_name") == tool_name)
-    if count < max_repeat:
-        return None
-    return TOOL_REPEAT_BAIL_PROMPT.format(
-        tool_name=tool_name, count=count, limit=max_repeat,
+
+    same_name_count = sum(1 for s in steps if s.get("tool_name") == tool_name)
+
+    current_sig = _args_signature(tool_args)
+    identical_count = sum(
+        1 for s in steps
+        if s.get("tool_name") == tool_name and _args_signature(s.get("tool_args")) == current_sig
     )
+
+    if identical_count >= identical_stop:
+        return IDENTICAL_CALL_STOP_PROMPT.format(tool_name=tool_name, count=identical_count), True
+
+    if identical_count >= identical_warn:
+        return IDENTICAL_CALL_WARN_PROMPT.format(tool_name=tool_name, count=identical_count), False
+
+    if same_name_count >= max_repeat:
+        return TOOL_REPEAT_BAIL_PROMPT.format(
+            tool_name=tool_name, count=same_name_count, limit=max_repeat,
+        ), False
+
+    return None, False
 
 
 def get_loop_status(hass: HomeAssistant) -> dict[str, Any]:
