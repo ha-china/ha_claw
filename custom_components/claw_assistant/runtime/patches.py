@@ -91,6 +91,9 @@ def patch_local_intents(hass: HomeAssistant) -> None:
         *,
         intent_filter=None,
     ):
+        text = getattr(user_input, "text", "") or ""
+        if len(text) > 200:
+            return None
         result = await original_async_handle_intents(
             hass_arg, user_input, chat_log, intent_filter=intent_filter
         )

@@ -20,7 +20,7 @@ from homeassistant.components.conversation.const import ChatLogEventType
 from homeassistant.core import callback
 from homeassistant.helpers.chat_session import async_get_chat_session
 
-from ..const import CONF_ENABLE_CONTEXT_STATUS_BAR, CONF_ENABLE_FILE_UPLOAD, CONF_ENABLE_SIDEBAR_DOCK, DOMAIN
+from ..const import CONF_ENABLE_CONTEXT_STATUS_BAR, CONF_ENABLE_FILE_UPLOAD, CONF_ENABLE_SIDEBAR_DOCK, CONF_ENABLE_SOUND_NOTIFICATIONS, DOMAIN
 from .continuous_conversation import (
     continuous_conversation_enabled,
     get_effective_conversation_id,
@@ -102,14 +102,14 @@ def _domain_data(hass) -> dict:
 
 def context_status_bar_enabled(hass) -> bool:
     for entry in hass.config_entries.async_entries(DOMAIN):
-        if entry.options.get(CONF_ENABLE_CONTEXT_STATUS_BAR, False):
+        if entry.options.get(CONF_ENABLE_CONTEXT_STATUS_BAR, True):
             return True
     return False
 
 
 def file_upload_enabled(hass) -> bool:
     for entry in hass.config_entries.async_entries(DOMAIN):
-        if entry.options.get(CONF_ENABLE_FILE_UPLOAD, False):
+        if entry.options.get(CONF_ENABLE_FILE_UPLOAD, True):
             return True
     return False
 
@@ -117,6 +117,13 @@ def file_upload_enabled(hass) -> bool:
 def sidebar_dock_enabled(hass) -> bool:
     for entry in hass.config_entries.async_entries(DOMAIN):
         if entry.options.get(CONF_ENABLE_SIDEBAR_DOCK, True):
+            return True
+    return False
+
+
+def sound_notifications_enabled(hass) -> bool:
+    for entry in hass.config_entries.async_entries(DOMAIN):
+        if entry.options.get(CONF_ENABLE_SOUND_NOTIFICATIONS, True):
             return True
     return False
 
@@ -188,6 +195,7 @@ async def websocket_get_settings(
             "enable_context_status_bar": context_status_bar_enabled(hass),
             "enable_file_upload": file_upload_enabled(hass),
             "enable_sidebar_dock": sidebar_dock_enabled(hass),
+            "enable_sound_notifications": sound_notifications_enabled(hass),
         },
     )
 
@@ -246,6 +254,10 @@ async def streaming_websocket_process(
             device_id=msg.get("device_id"),
             satellite_id=msg.get("satellite_id"),
         )
+    except Exception as err:
+        _LOGGER.error("conversation/process error: %s", err)
+        connection.send_error(msg["id"], "conversation_error", str(err))
+        return
     finally:
         unsubscribe()
 
@@ -593,6 +605,9 @@ def _install_local_intent_format_hook(hass) -> None:
     original_handle_intents = conv_module.async_handle_intents
 
     async def _patched_handle_intents(hass_inner, user_input, chat_log, **kwargs):
+        text = getattr(user_input, "text", "") or ""
+        if len(text) > 200:
+            return None
         response = await original_handle_intents(hass_inner, user_input, chat_log, **kwargs)
         if response is None:
             return None
