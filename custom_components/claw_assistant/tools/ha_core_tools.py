@@ -2465,7 +2465,9 @@ class IntentCallTool(llm.Tool):
     async def async_call(self, hass: HomeAssistant, tool_input: llm.ToolInput, llm_context: llm.LLMContext) -> JsonObjectType:
         from homeassistant.helpers import intent as intent_mod
 
-        action = tool_input.tool_args["action"]
+        action = tool_input.tool_args.get("action", "")
+        if not action:
+            return {"success": False, "error": "Missing required parameter: action. Use 'list' or 'call'."}
 
         if action == "list":
             handlers = intent_mod.async_get(hass)

@@ -24,7 +24,7 @@ from .evolution_review import async_schedule_evolution_review, consume_loaded_sk
 from .goals import get_goal_manager
 from .events import fire_ai_response
 from .i18n import t
-from .chat_history_api import clear_resume_history_binding, get_active_resume_history_id
+from .chat_history_api import clear_resume_history_binding, get_active_resume_history_id, _strip_internal_tags
 from .internal_llm import (
     _build_budgeted_prompt,
     _fit_head_section_to_required_suffix,
@@ -490,7 +490,12 @@ def _extract_response_error_reason(result: Any) -> str:
     return "error_response"
 
 
-def _schedule_transient_retry(
+_TRANSIENT_BACKOFF_BASE = 2.0
+_TRANSIENT_BACKOFF_CAP = 15.0
+_TRANSIENT_JITTER_MAX = 1.5
+
+
+async def _schedule_transient_retry(
     agent_queue: list[str],
     *,
     current_agent_id: str,
@@ -499,6 +504,7 @@ def _schedule_transient_retry(
     max_retries: int,
 ) -> tuple[bool, int]:
 
+    import random
     retries = transient_retry_counts.get(current_agent_id, 0)
     if retries >= max_retries:
         return False, retries
@@ -506,6 +512,14 @@ def _schedule_transient_retry(
     retries += 1
     transient_retry_counts[current_agent_id] = retries
     agent_queue.insert(0, current_agent_id)
+    backoff = min(_TRANSIENT_BACKOFF_CAP, _TRANSIENT_BACKOFF_BASE * (2 ** (retries - 1)))
+    jitter = random.uniform(0, _TRANSIENT_JITTER_MAX)
+    wait = backoff + jitter
+    LOGGER.info(
+        "Transient retry backoff: agent=%s attempt=%d/%d wait=%.1fs",
+        current_agent_id, retries, max_retries, wait,
+    )
+    await asyncio.sleep(wait)
     return True, retries
 
 
@@ -782,7 +796,7 @@ def _build_fallback_extra_prompt(
     previous_tool_results: list[dict[str, Any]],
 ) -> str | None:
     required_prefix_sections = [
-        "## Active User Task\n" + _compact_text(user_text, 2400),
+        "## Active User Task\n" + _compact_text(_strip_internal_tags(user_text), 2400),
     ]
     required_suffix_sections = [pending_handoff_context] if pending_handoff_context else []
     optional_tail_sections: list[str] = []
@@ -840,6 +854,38 @@ def get_agent_name(hass: HomeAssistant, agent_id: str) -> str:
     return "AI Assistant"
 
 
+_RECOVERABLE_TOOL_ERROR_HINTS = (
+    "missing required parameter",
+    "missing parameter",
+    "invalid parameter",
+    "unknown action",
+    "missing action",
+    "invalid action",
+    "expected type",
+    "not a valid value",
+    "extra keys not allowed",
+    "required key not provided",
+    "for dictionary value",
+    "'action'",
+    "keyerror",
+    "key error",
+    "got an unexpected keyword",
+    "unexpected keyword argument",
+    "missing 1 required",
+    "takes 0 positional",
+)
+
+
+def _is_recoverable_tool_failure(item: dict[str, Any]) -> bool:
+    error = str(item.get("error") or "").lower()
+    result = item.get("result")
+    result_error = ""
+    if isinstance(result, dict):
+        result_error = str(result.get("error") or "").lower()
+    combined = f"{error} {result_error}"
+    return any(hint in combined for hint in _RECOVERABLE_TOOL_ERROR_HINTS)
+
+
 def is_error_response(hass: HomeAssistant, result: Any) -> bool:
 
     if not result or not result.response:
@@ -851,6 +897,14 @@ def is_error_response(hass: HomeAssistant, result: Any) -> bool:
     if tool_results:
         failed_tools = [item for item in tool_results if not item.get("success", True)]
         if failed_tools:
+            all_recoverable = all(_is_recoverable_tool_failure(item) for item in failed_tools)
+            if all_recoverable:
+                LOGGER.info(
+                    "Tool call(s) failed with recoverable parameter errors, "
+                    "allowing AI to self-correct: %s",
+                    [item.get("tool_name") for item in failed_tools],
+                )
+                return False
             LOGGER.debug(
                 "Detected failed tool calls: %s",
                 [item["tool_name"] for item in failed_tools],
@@ -1107,7 +1161,7 @@ async def run_agent_fallback_chain(
                                  "error talking to api", "error code: 4", "error code: 5",
                                  "无法连接", "连接失败", "网络错误", "请检查网络", "连接超时", "服务器断开",
                                  "服务不可用", "请稍后再试", "ai 服务", "服务返回错误", "返回了错误")
-    _MAX_TRANSIENT_RETRIES = 1
+    _MAX_TRANSIENT_RETRIES = 2
     transient_retry_counts: dict[str, int] = {}
     primary_external_agent = ordered_agents[0] if ordered_agents else None
 
@@ -1281,7 +1335,7 @@ async def run_agent_fallback_chain(
                             tool_results=previous_tool_results,
                             task_loop=task_loop,
                         )
-                    retried_now, retries = _schedule_transient_retry(
+                    retried_now, retries = await _schedule_transient_retry(
                         agent_queue,
                         current_agent_id=current_agent_id,
                         primary_agent_id=primary_external_agent,
@@ -1310,7 +1364,7 @@ async def run_agent_fallback_chain(
                     tool_results=previous_tool_results,
                     task_loop=task_loop,
                 )
-                retried_now, retries = _schedule_transient_retry(
+                retried_now, retries = await _schedule_transient_retry(
                     agent_queue,
                     current_agent_id=current_agent_id,
                     primary_agent_id=primary_external_agent,
@@ -1521,7 +1575,7 @@ async def run_agent_fallback_chain(
                 conversation_id=conversation_id,
                 stage="exception",
             )
-            retried_now, retries = _schedule_transient_retry(
+            retried_now, retries = await _schedule_transient_retry(
                 agent_queue,
                 current_agent_id=current_agent_id,
                 primary_agent_id=primary_external_agent,
