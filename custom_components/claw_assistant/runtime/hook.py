@@ -70,6 +70,9 @@ def patch_pipeline_for_final_content(hass: HomeAssistant) -> None:
                 if _should_inject_final_assistant(self):
                     intent_output = (event.data or {}).get("intent_output") or {}
                     response = intent_output.get("response") or {}
+                    response_type = response.get("response_type")
+                    if response_type == "error":
+                        return original_process_event(self, event)
                     speech = response.get("speech") or {}
                     plain = speech.get("plain") or {}
                     final_text = plain.get("speech") or ""
@@ -191,7 +194,7 @@ def install_conversation_hook(hass: HomeAssistant, entry: ConfigEntry) -> None:
             except Exception:
                 pass
             return result
-        return await execute_conversation_turn(
+        result = await execute_conversation_turn(
             hass,
             entry,
             original_async_converse,
@@ -204,6 +207,12 @@ def install_conversation_hook(hass: HomeAssistant, entry: ConfigEntry) -> None:
             satellite_id=satellite_id,
             extra_system_prompt=extra_system_prompt,
         )
+        try:
+            from .patches import _maybe_apply_global_response_format
+            _maybe_apply_global_response_format(hass, result, agent_id or entry.entry_id)
+        except Exception:
+            pass
+        return result
 
     agent_manager.async_converse = hooked_async_converse
     conv_http.async_converse = hooked_async_converse
