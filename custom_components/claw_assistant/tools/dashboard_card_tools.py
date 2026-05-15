@@ -455,10 +455,10 @@ class DashboardCardTool(llm.Tool):
             try:
                 from .frontend_tools import queue_frontend_exec
                 import time as _t
-                path = f"/{dashboard_url or 'lovelace'}"
                 exec_id = f"ll_reload_{int(_t.time()*1000)}"
                 js = (
                     "(function(){"
+                    "var currentPath=window.location.pathname;"
                     "var ha=document.querySelector('home-assistant');"
                     "var main=ha&&ha.shadowRoot&&ha.shadowRoot.querySelector('home-assistant-main');"
                     "var msr=main&&main.shadowRoot;"
@@ -467,13 +467,13 @@ class DashboardCardTool(llm.Tool):
                     "var app=dsr&&dsr.querySelector('.mdc-drawer-app-content');"
                     "var pr=app&&app.querySelector('partial-panel-resolver');"
                     "var panel=pr&&pr.querySelector('ha-panel-lovelace');"
-                    "if(!panel){history.pushState(null,'','" + path + "');window.dispatchEvent(new CustomEvent('location-changed'));return {navigated:'" + path + "'}}"
+                    "if(!panel){return {no_panel:true}}"
                     "var ll=panel.lovelace||panel._lovelace||(panel.shadowRoot&&panel.shadowRoot.querySelector('hui-root')&&panel.shadowRoot.querySelector('hui-root').lovelace);"
-                    "if(ll&&ll.fetchConfig){ll.fetchConfig(true);return {reloaded:true}}"
-                    "if(ll&&ll.loadConfig){ll.loadConfig(true);return {reloaded:true}}"
+                    "if(ll&&ll.fetchConfig){ll.fetchConfig(true);setTimeout(function(){if(window.location.pathname!==currentPath){history.pushState(null,'',currentPath);window.dispatchEvent(new CustomEvent('location-changed'))}},100);return {reloaded:true}}"
+                    "if(ll&&ll.loadConfig){ll.loadConfig(true);setTimeout(function(){if(window.location.pathname!==currentPath){history.pushState(null,'',currentPath);window.dispatchEvent(new CustomEvent('location-changed'))}},100);return {reloaded:true}}"
                     "var conn=ha.hass&&ha.hass.connection;"
                     "if(conn){conn.sendMessagePromise({type:'lovelace/config',url_path:'" + (dashboard_url or 'lovelace') + "',force:true}).then(function(c){if(ll)ll.config=c;});return {ws_reload:true}}"
-                    "history.pushState(null,'','" + path + "');window.dispatchEvent(new CustomEvent('location-changed'));return {navigated:'" + path + "'}"
+                    "return {no_action:true}"
                     "})()"
                 )
                 queue_frontend_exec(hass, exec_id, js)
@@ -639,12 +639,16 @@ class DashboardCardTool(llm.Tool):
         views.append(new_view)
         await self._save_config(config_obj, ll_config, hass=hass, dashboard_url=dashboard_url)
 
+        dash_path = dashboard_url or "lovelace"
+        nav_path = f"/{dash_path}/{path}"
+
         return {
             "success": True,
             "message": f"View '{title}' created at index {len(views) - 1}",
             "view_index": len(views) - 1,
             "path": path,
-            "dashboard_url": dashboard_url or "lovelace",
+            "dashboard_url": dash_path,
+            "_navigate_to": nav_path,
             "_style_rules": STEP2_VISUAL,
             "_action_required": (
                 f"YOU MUST now call DashboardCard with action=add_card, "
@@ -701,14 +705,19 @@ class DashboardCardTool(llm.Tool):
         cards.append(card)
         await self._save_config(config_obj, ll_config, hass=hass, dashboard_url=dashboard_url)
 
+        dash_path = dashboard_url or "lovelace"
+        view_path = views[view_index].get("path", str(view_index))
+        nav_path = f"/{dash_path}/{view_path}"
+
         result: dict[str, Any] = {
             "success": True,
             "message": f"Card added to view {view_index} at card_index {len(cards) - 1}",
             "view_index": view_index,
             "card_index": len(cards) - 1,
-            "dashboard_url": dashboard_url or "lovelace",
+            "dashboard_url": dash_path,
             "card_type": card.get("type", ""),
             "card_yaml": yaml_dump(card),
+            "_navigate_to": nav_path,
             "_action_required": STEP_VERIFY,
         }
         if card.get("type") == CARD_TYPE:
@@ -760,11 +769,16 @@ class DashboardCardTool(llm.Tool):
 
         await self._save_config(config_obj, ll_config, hass=hass, dashboard_url=dashboard_url)
 
+        dash_path = dashboard_url or "lovelace"
+        view_path = views[view_index].get("path", str(view_index))
+        nav_path = f"/{dash_path}/{view_path}"
+
         return {
             "success": True,
             "message": f"Card updated at view {view_index}, card {card_index}",
             "current_card": cards[card_index],
             "card_yaml": yaml_dump(cards[card_index]),
+            "_navigate_to": nav_path,
             "_action_required": STEP_VERIFY,
         }
 
@@ -844,12 +858,17 @@ class DashboardCardTool(llm.Tool):
 
         await self._save_config(config_obj, ll_config, hass=hass, dashboard_url=dashboard_url)
 
+        dash_path = dashboard_url or "lovelace"
+        view_path = views[view_index].get("path", str(view_index))
+        nav_path = f"/{dash_path}/{view_path}"
+
         return {
             "success": True,
             "message": f"Patched card at view {view_index}, card {card_index} ({len(report.applied)} ops)",
             "target": target,
             "report": report.to_dict(),
             "current_card": card,
+            "_navigate_to": nav_path,
             "_action_required": STEP_VERIFY,
         }
 
@@ -901,7 +920,13 @@ class DashboardCardTool(llm.Tool):
         removed = views.pop(view_index)
         await self._save_config(config_obj, ll_config, hass=hass, dashboard_url=dashboard_url)
 
+        dash_path = dashboard_url or "lovelace"
+        fallback_index = max(0, view_index - 1)
+        fallback_path = views[fallback_index].get("path", str(fallback_index)) if views else ""
+        nav_path = f"/{dash_path}/{fallback_path}" if fallback_path else f"/{dash_path}"
+
         return {
             "success": True,
             "message": f"Removed view '{removed.get('title', '')}' (was index {view_index})",
+            "_navigate_to": nav_path,
         }

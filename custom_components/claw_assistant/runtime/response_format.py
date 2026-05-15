@@ -647,7 +647,15 @@ _AGENT_REPLY_PREFIX_RE = re.compile(
 )
 _ERROR_SIGNAL_PATTERNS = (
     "error getting response",
+    "error talking to api",
     "runtimeerror",
+    "typeerror",
+    "attributeerror",
+    "keyerror",
+    "valueerror",
+    "unexpected keyword argument",
+    "got an unexpected",
+    "missing required",
     "tool_failure:",
     "agent_not_found",
     "agent not found",
@@ -684,6 +692,8 @@ _ERROR_SIGNAL_PATTERNS = (
     "请稍后再试",
     "连接超时",
     "服务器断开",
+    "处理失败",
+    "请重试",
 )
 
 
@@ -808,6 +818,10 @@ def _classify_plaintext_error(text: str) -> str | None:
         return "err_context_too_long"
     if "content filter" in low or "content policy" in low:
         return "err_content_filtered"
+    if "unexpected keyword argument" in low or "got an unexpected" in low:
+        return "err_service_unavailable"
+    if "typeerror" in low or "attributeerror" in low or "keyerror" in low:
+        return "err_service_unavailable"
     return None
 
 
@@ -855,6 +869,8 @@ def prettify_agent_error(text: str, *, language: str | None = None) -> str | Non
     return t("err_generic_api", language).replace("{detail}", detail)
 
 
+_AGENT_ID_PREFIX_RE = re.compile(r"^(conversation\.[\w_]+)\s*:\s*(.*)$", re.DOTALL)
+
 def _rewrite_chained_agent_errors(text: str, *, language: str | None = None) -> str:
     if not text:
         return text
@@ -869,18 +885,34 @@ def _rewrite_chained_agent_errors(text: str, *, language: str | None = None) -> 
         segment = part.strip()
         if not segment:
             continue
-        head = ""
+
+        agent_prefix = ""
         body = segment
-        m = _AGENT_REPLY_PREFIX_RE.match(segment)
+
+        agent_match = _AGENT_ID_PREFIX_RE.match(segment)
+        if agent_match:
+            agent_prefix = agent_match.group(1)
+            body = agent_match.group(2).strip()
+
+        head = ""
+        m = _AGENT_REPLY_PREFIX_RE.match(body)
         if m:
             head, body = m.group(1), m.group(2)
+
         friendly = prettify_agent_error(body, language=language)
         if friendly is None:
             rewritten.append(segment)
             continue
+
         changed = True
-        combined = f"{head}{friendly}" if head else friendly
-        key = friendly
+        if agent_prefix:
+            combined = f"{agent_prefix}: {friendly}"
+        elif head:
+            combined = f"{head}{friendly}"
+        else:
+            combined = friendly
+
+        key = f"{agent_prefix}:{friendly}" if agent_prefix else friendly
         if key in seen:
             continue
         seen.add(key)
