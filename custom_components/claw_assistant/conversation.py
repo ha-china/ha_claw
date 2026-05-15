@@ -167,10 +167,11 @@ class FallbackConversationAgent(
                 "original_async_converse"
             )
             if not callable(original_async_converse):
+                error_msg = t("hook_not_ready", user_input.language)
                 intent_response = intent.IntentResponse(language=user_input.language)
                 intent_response.async_set_error(
                     intent.IntentResponseErrorCode.UNKNOWN,
-                    t("hook_not_ready", user_input.language),
+                    error_msg,
                 )
                 return self._finalize_result(
                     conversation.ConversationResult(
@@ -179,15 +180,16 @@ class FallbackConversationAgent(
                     )
                 )
 
-            native_result = await self._maybe_handle_native_intent(user_input)
-            if native_result is not None:
-                return self._finalize_result(native_result)
+            if len(user_input.text or "") <= 200:
+                native_result = await self._maybe_handle_native_intent(user_input)
+                if native_result is not None:
+                    return self._finalize_result(native_result)
 
             extra_system_prompt = getattr(user_input, "extra_system_prompt", None)
 
             delegated_agent_id = getattr(user_input, "agent_id", None)
             if delegated_agent_id == self.entry.entry_id:
-                delegated_agent_id = HOME_ASSISTANT_AGENT
+                delegated_agent_id = None
 
             result = await execute_conversation_turn(
                 self.hass,
@@ -224,9 +226,10 @@ class FallbackConversationAgent(
         text = (user_input.text or "").strip()
         if (
             not text
-            or len(text) > 80
+            or len(text) > 200
             or "\n" in text
             or text.startswith("/")
+            or "```" in text
         ):
             return None
 
@@ -266,10 +269,11 @@ class FallbackConversationAgent(
         self._last_active = datetime.now(UTC)
 
         if result and result.response and result.response.speech and "plain" in result.response.speech:
-            speech = sanitize_response_text(result.response.speech["plain"]["speech"])
+            lang = getattr(result.response, "language", None)
+            speech = sanitize_response_text(result.response.speech["plain"]["speech"], language=lang)
             result.response.speech["plain"]["speech"] = speech
             result.response.speech["plain"]["original_speech"] = sanitize_response_text(
-                result.response.speech["plain"].get("original_speech", speech)
+                result.response.speech["plain"].get("original_speech", speech), language=lang
             )
             self._attr_chat_response = speech
             self.last_used_agent = result.response.speech["plain"].get("agent_id")

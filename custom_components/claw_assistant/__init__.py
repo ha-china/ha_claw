@@ -75,6 +75,7 @@ async def _async_update_listener(hass: HomeAssistant, entry: ConfigEntry) -> Non
             "enable_context_status_bar": context_status_bar_enabled(hass),
             "enable_file_upload": file_upload_enabled(hass),
             "enable_sidebar_dock": sidebar_dock_enabled(hass),
+            "enable_sound_notifications": entry.options.get("enable_sound_notifications", True),
         },
     )
 

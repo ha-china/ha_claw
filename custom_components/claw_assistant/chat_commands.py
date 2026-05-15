@@ -797,7 +797,7 @@ def _clear_conversation_runtime(hass, conversation_id: str | None) -> None:
         if task is not None and not task.done():
             task.cancel("Cancelled by /new")
     try:
-        from .goals import get_goal_manager
+        from .runtime.goals import get_goal_manager
         for cid in (conversation_id, old_conv_id, "default"):
             if not cid:
                 continue
@@ -833,7 +833,6 @@ def _clear_conversation_runtime(hass, conversation_id: str | None) -> None:
     status.update(preserved)
     status["last_conversation_id"] = conversation_id
 
-    from .state import get_runtime_store
     runtime_store = get_runtime_store(hass)
     runtime_store.pop("pending_goal_continuations", None)
     runtime_store.get("completed_goal_conversations", set()).discard(str(conversation_id or "default"))
