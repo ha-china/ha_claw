@@ -1315,58 +1315,65 @@
                         opacity: .72;
                     }
                     #${DOCK_ID} .dock-history-panel .hist-item-actions {
-                        flex: 0 0 auto;
-                        opacity: 0;
+                        position: absolute;
+                        right: 8px;
+                        top: 50%;
+                        transform: translateY(-50%);
                         display: flex;
                         align-items: center;
-                        justify-content: flex-end;
-                        gap: 2px;
-                        margin-left: 8px;
-                        transition: opacity .15s;
+                        justify-content: center;
+                        gap: 4px;
+                        opacity: 0;
+                        transition: opacity .15s ease;
                     }
                     #${DOCK_ID} .dock-history-panel .hist-item:hover .hist-item-actions {
                         opacity: 1;
                     }
                     #${DOCK_ID} .dock-history-panel .hist-item-actions button {
-                        width: 30px;
-                        height: 30px;
-                        background: var(--card-background-color, rgba(255,255,255,.06));
-                        border: 1px solid var(--divider-color, rgba(0,0,0,.08));
+                        width: 28px;
+                        height: 28px;
+                        background: transparent;
+                        border: none;
                         cursor: pointer;
                         padding: 0;
-                        border-radius: 8px;
+                        margin: 0;
+                        border-radius: 6px;
                         color: var(--secondary-text-color, #888);
                         display: inline-flex;
                         align-items: center;
                         justify-content: center;
-                        transition: all .15s ease;
-                        box-shadow: 0 1px 2px rgba(0,0,0,.04);
+                        transition: background .15s ease, color .15s ease;
+                    }
+                    #${DOCK_ID} .dock-history-panel .hist-item-actions button:hover {
+                        background: transparent;
                     }
                     #${DOCK_ID} .dock-history-panel .hist-item-actions button:active {
-                        transform: scale(0.92);
+                        opacity: 0.7;
                     }
                     #${DOCK_ID} .dock-history-panel .hist-item-actions .hist-delete-btn:hover {
-                        background: color-mix(in srgb, var(--error-color, #db4437) 12%, var(--card-background-color, #fff));
-                        border-color: color-mix(in srgb, var(--error-color, #db4437) 30%, transparent);
+                        background: transparent;
                         color: var(--error-color, #db4437);
                     }
                     #${DOCK_ID} .dock-history-panel .hist-item-actions .hist-pin-btn:hover {
-                        background: color-mix(in srgb, var(--primary-color, #03a9f4) 12%, var(--card-background-color, #fff));
-                        border-color: color-mix(in srgb, var(--primary-color, #03a9f4) 30%, transparent);
+                        background: transparent;
                         color: var(--primary-color, #03a9f4);
                     }
                     #${DOCK_ID} .dock-history-panel .hist-item-actions .hist-pin-btn.pinned {
                         color: var(--primary-color, #03a9f4);
+                    }
+                    #${DOCK_ID} .dock-history-panel .hist-item:hover .hist-item-actions .hist-pin-btn.pinned {
                         opacity: 1;
                     }
                     #${DOCK_ID} .dock-history-panel .hist-item.pinned .hist-item-icon::before {
                         background: var(--primary-color, #03a9f4);
                     }
                     #${DOCK_ID} .dock-history-panel .hist-item-actions button svg {
-                        width: 16px;
-                        height: 16px;
+                        width: 18px;
+                        height: 18px;
                         fill: currentColor;
-                        flex-shrink: 0;
+                    }
+                    #${DOCK_ID} .dock-history-panel .hist-item-actions .hist-pin-btn svg {
+                        transform: translateY(1px);
                     }
                     #${DOCK_ID} .dock-history-panel .hist-empty {
                         display: flex;
@@ -1804,8 +1811,8 @@
             let html = '<div class="hist-search"><div class="hist-search-wrap"><svg viewBox="0 0 24 24"><path d="M9.5,3A6.5,6.5 0 0,1 16,9.5C16,11.11 15.41,12.59 14.44,13.73L14.71,14H15.5L20.5,19L19,20.5L14,15.5V14.71L13.73,14.44C12.59,15.41 11.11,16 9.5,16A6.5,6.5 0 0,1 3,9.5A6.5,6.5 0 0,1 9.5,3M9.5,5C7,5 5,7 5,9.5C5,12 7,14 9.5,14C12,14 14,12 14,9.5C14,7 12,5 9.5,5Z"/></svg><input type="text" placeholder="' + historyText('search') + '" /></div></div><div class="hist-list">';
 
             const chatIcon = '<svg viewBox="0 0 24 24"><path d="M12,3C6.5,3 2,6.58 2,11C2.05,13.15 3.06,15.17 4.75,16.5C4.75,17.1 4.33,18.67 2,21C4.97,20.3 7.58,18.67 8.5,17.65C9.64,17.88 10.82,18 12,18C17.5,18 22,14.42 22,10C22,6.58 17.5,3 12,3Z"/></svg>';
-            const pinIcon = '<svg viewBox="0 0 24 24"><path d="M16,12V4H17V2H7V4H8V12L6,14V16H11.2V22H12.8V16H18V14L16,12Z"/></svg>';
-            const deleteIcon = '<svg viewBox="0 0 24 24"><path d="M19,4H15.5L14.5,3H9.5L8.5,4H5V6H19M6,19A2,2 0 0,0 8,21H16A2,2 0 0,0 18,19V7H6V19Z"/></svg>';
+            const pinIcon = '<svg viewBox="0 0 24 24"><path d="M14 4v6.5l2 2V14H8v-1.5l2-2V4m4 0h-4m2 10v6" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>';
+            const deleteIcon = '<svg viewBox="0 0 24 24"><path d="M6 7h12m-9 0V5h6v2m-7 3v8m4-8v8m4-11-.8 13H8.8L8 7" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>';
             const chevronIcon = '<svg class="hist-section-chevron" viewBox="0 0 24 24"><path d="M7.41,8.58L12,13.17L16.59,8.58L18,10L12,16L6,10L7.41,8.58Z"/></svg>';
             const showActiveSelection = _historySelectedConversationId && !_historySelectionHighlightConsumed;
 
