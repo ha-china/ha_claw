@@ -77,7 +77,7 @@ class ConversationTurn:
     user_message: str
     assistant_response: str
     timestamp: float = field(default_factory=time.time)
-    tool_calls: List[str] = field(default_factory=list)
+    tool_calls: List[Dict[str, Any]] = field(default_factory=list)
     metadata: Dict[str, Any] = field(default_factory=dict)
 
 
@@ -100,7 +100,7 @@ class ConversationHistory:
         conversation_id: str,
         user_message: str,
         assistant_response: str,
-        tool_calls: List[str] = None,
+        tool_calls: List[Dict[str, Any]] = None,
         metadata: Dict[str, Any] = None,
     ) -> None:
 
@@ -164,7 +164,8 @@ class ConversationHistory:
             lines.append(f"[Turn {i}]")
             lines.append(f"User: {turn.user_message}")
             if include_tools and turn.tool_calls:
-                lines.append(f"Tool: {', '.join(turn.tool_calls)}")
+                tool_names = [tc.get("tool_name", str(tc)) if isinstance(tc, dict) else str(tc) for tc in turn.tool_calls]
+                lines.append(f"Tool: {', '.join(tool_names)}")
             response = sanitize_response_text(turn.assistant_response)
             if response:
                 if len(response) > 500:
@@ -340,12 +341,19 @@ class ConversationHistory:
                 ts = float(t.get("timestamp", 0) or 0)
                 if ts <= 0 or ts < cutoff:
                     continue
+                raw_tool_calls = t.get("tool_calls") or []
+                normalized_tool_calls = []
+                for tc in raw_tool_calls:
+                    if isinstance(tc, dict):
+                        normalized_tool_calls.append(tc)
+                    elif isinstance(tc, str):
+                        normalized_tool_calls.append({"tool_name": tc})
                 kept.append(
                     ConversationTurn(
                         user_message=str(t.get("user_message", "")),
                         assistant_response=str(t.get("assistant_response", "")),
                         timestamp=ts,
-                        tool_calls=list(t.get("tool_calls") or []),
+                        tool_calls=normalized_tool_calls,
                         metadata=dict(t.get("metadata") or {}),
                     )
                 )
