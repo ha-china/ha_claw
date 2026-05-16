@@ -786,7 +786,6 @@ def _clear_conversation_runtime(hass, conversation_id: str | None) -> None:
     old_conv_id = get_active_conversation_state(hass).get("id")
     if old_conv_id and old_conv_id != conversation_id:
         _purge_native_chat_log(hass, old_conv_id)
-        get_conversation_history().clear(old_conv_id)
     _purge_native_chat_log(hass, conversation_id)
 
     registry = _task_registry(hass)
@@ -809,7 +808,6 @@ def _clear_conversation_runtime(hass, conversation_id: str | None) -> None:
 
     token = set_active_conversation(conversation_id)
     try:
-        get_conversation_history().clear(conversation_id)
         task_loop = get_task_loop_state(hass)
         max_iterations = int(task_loop.get("max_iterations", 50) or 50)
         reset_loop_for_conversation(
@@ -827,7 +825,10 @@ def _clear_conversation_runtime(hass, conversation_id: str | None) -> None:
     active_conv["id"] = conversation_id
 
     status = get_conversation_status(hass)
-    preserve_keys = {"hook_installed", "llm_api_id", "user_language"}
+    preserve_keys = {"hook_installed", "llm_api_id", "user_language", "history_continuation_id"}
+    if old_conv_id and old_conv_id != conversation_id:
+        existing_cont_id = status.get("history_continuation_id") or old_conv_id
+        status["history_continuation_id"] = existing_cont_id
     preserved = {k: status[k] for k in preserve_keys if k in status}
     status.clear()
     status.update(preserved)
