@@ -502,7 +502,7 @@ def _tool_desc(name: str, a: dict, lang: str, hass=None) -> str:
         icon = "🕹️" if act in _ctl else "🪩"
         if zh:
             _FI_ZH = {
-                "snapshot": "观察页面", "navigate": "跳转页面",
+                "snapshot": "观察页面", "navigate": "确认页面",
                 "tap": "点击元素", "type": "输入内容",
                 "key": "按键操作", "scroll": "滚动页面",
                 "exec_js": "执行脚本", "search_cache": "检索缓存",

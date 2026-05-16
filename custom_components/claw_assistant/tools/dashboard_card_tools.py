@@ -32,7 +32,10 @@ STEP1_ROLE = (
     "Write real JS functions. Use hass.states[id] for entity data, hass.callService() for actions. "
     "For state display: use data-state-text / data-attr bindings (auto-updates, zero JS). "
     "data-* attributes for HA event bindings (toggle/turn_on/turn_off/more-info). "
-    "NEVER use onClick or inline event handlers for service calls — this DOES NOT WORK."
+    "NEVER use onClick or inline event handlers for service calls — this DOES NOT WORK. "
+    "SCRIPT RULES: document.currentScript is ALWAYS null (scripts run via new Function). "
+    "Use the injected 'root' or 'card' variable (= ha-card element), and $()/$$(). "
+    "NEVER use <ha-switch>/<ha-slider>/<ha-select> for controls — they don't auto-bind services."
 )
 
 STEP2_VISUAL = (
@@ -78,18 +81,30 @@ STEP2_VISUAL = (
     "(2) inline <svg> drawn with paths (stroke/fill using CSS vars). "
     "NO emoji, NO icon fonts other than mdi, NO image URLs for icons. "
     "FORBIDDEN: any background property, any box-shadow, backdrop-filter, glassmorphism, "
-    "custom font-family, fixed px widths, emoji characters."
+    "custom font-family, fixed px widths, emoji characters. "
+    "--- OVERLAY/POPUP STYLE --- "
+    "Overlay panels must feel premium: smooth open/close transitions (opacity + transform), "
+    "use rgba(var(--rgb-primary-background-color), 0.96) for backdrop, "
+    "inner sheet: position:absolute;inset:0;overflow:auto;padding:24px, "
+    "add transition: opacity 0.25s ease, transform 0.2s ease on wrapper. "
+    "Buttons inside overlay: same border style as card (1px solid var(--divider-color), border-radius:10px). "
+    "Grid layout for items, hover state with border-color:var(--primary-color). "
+    "Close button: top-right of header, same btn style. "
+    "Active/on state items: border-color:var(--accent-color) or var(--state-active-color)."
 )
 
 API_CARD_CONFIG = (
     "[html-card-pro CARD CONFIG] "
-    "type: custom:html-pro-card. content: HTML/CSS/JS string. "
+    "type: custom:html-pro-card. content: HTML/CSS/JS string (ALL code goes here). "
     "do_not_parse: true(recommended, pure HTML+JS). "
     "update_interval: ms (periodic re-render). ignore_line_breaks: true(default). "
-    "scripts: [CDN urls] for external JS libs (Chart.js, day.js, anime.js, etc.). "
-    "entities: [list] for domains not auto-detected (fan/cover/input_*). "
-    "Structure: <style> at top → <div> body → <script> at bottom. "
-    "Icons: <ha-icon icon='mdi:xxx'></ha-icon>. Content MUST NOT be empty."
+    "scripts: [CDN urls ONLY] for external JS libs (e.g. ['https://cdn.jsdelivr.net/npm/chart.js']). "
+    "CRITICAL: scripts:[] is for CDN URLs ONLY. NEVER put inline JS code in scripts. Inline JS goes in <script> inside content. "
+    "entities: [list] optional override — most domains are auto-detected from content. "
+    "Structure: <style> at top → <div> body → <script> at bottom — ALL inside the content field. "
+    "Icons: <ha-icon icon='mdi:xxx'></ha-icon>. Content MUST NOT be empty. "
+    "BANNED CONFIG: title (use HTML h2 instead), card_mod (external dependency). "
+    "Use data-entity (NOT data-entity-id) for entity binding."
 )
 
 API_DATA_BINDING = (
@@ -99,9 +114,12 @@ API_DATA_BINDING = (
     "data-action='toggle|turn_on|turn_off|more-info' on a child element → click triggers service call. "
     "SHORTCUT: data-entity + data-action='toggle' on SAME element also works (toggle ONLY).\n"
     "STATE DISPLAY (child of data-entity wrapper): "
-    "data-state-text → auto-updates textContent with entity state. "
+    "data-state-text → auto-updates textContent with entity state (raw string like 'on','off','locked'). "
+    "data-state-text + data-map='{\"on\":\"开\",\"off\":\"关\"}' → maps state to localized text. "
     "data-attr='brightness' → auto-updates textContent with attribute value. "
-    "data-friendly-name → auto-updates with friendly_name.\n"
+    "data-friendly-name → auto-updates with friendly_name. "
+    "data-brightness (non-input) → shows brightness as percentage text. "
+    "data-temperature (non-input) → shows temperature text.\n"
     "RANGE SLIDERS (child of data-entity wrapper): "
     "data-brightness on <input type='range'> → light brightness 0-100→0-255. "
     "data-temperature on <input type='range'> → climate.set_temperature. "
@@ -113,28 +131,44 @@ API_DATA_BINDING = (
     "data-value on <input type='number'> → input_number.\n"
     "LONG PRESS: data-long-press + data-entity → opens more-info dialog.\n"
     "CSS STATE: [data-entity] auto-gets dataset.state. Use [data-entity][data-state='on'] { ... } for conditional styling.\n"
-    "DOMAIN MAPPING: toggle auto-maps per domain (button→press, scene→turn_on, script→script.name, automation→trigger)."
+    "DOMAIN MAPPING: toggle auto-maps per domain (button→press, scene→turn_on, script→script.name, automation→trigger, lock→lock/unlock, cover→open_cover/close_cover).\n"
+    "CRITICAL: ONLY the attributes listed above are supported. DO NOT invent non-existent data-* attributes. "
+    "If you need functionality not covered above, use <script> with the JS API."
 )
 
 API_JS_REFERENCE = (
     "[html-card-pro JS API — use ONLY when data-* binding is insufficient] "
-    "Script globals: root(ha-card elem), $(sel), $$(sel), hass, config, overlay. "
+    "Script globals: root(ha-card elem), card(alias for root), $(sel), $$(sel), hass, config, overlay. "
     "hass.states is a plain Object (NOT array, NO .all(), NO .forEach()): "
-    "hass.states['sensor.temp'].state / .attributes.unit_of_measurement "
-    "Object.keys(hass.states).filter(id => id.startsWith('light.')) "
-    "hass.callService('light','toggle',{entity_id:'light.x'}) → Promise. "
+    "hass.states['entity_id'].state / .attributes.unit_of_measurement "
+    "Object.keys(hass.states).filter(id => id.startsWith('domain.')) "
+    "hass.callService('domain','service',{entity_id:'domain.object_id'}) → Promise. "
     "document.getElementById/querySelector are OVERRIDDEN to search inside ha-card. "
-    "overlay: position:fixed fullscreen div (z-index:2147483647, pointer-events:none, covers entire viewport). "
-    "To create popups/overlays/modals/tutorials/toasts: append child elements to overlay with pointer-events:auto. "
-    "overlay escapes ha-card and shadow DOM — content renders on top of EVERYTHING including HA panels, dialogs, sidebar. "
-    "Pattern: create a container div inside overlay with your own HTML/CSS, add pointer-events:auto to make it interactive. "
-    "To dismiss: remove the child element from overlay. "
-    "For full-screen mask: append a div with position:fixed;inset:0;background:rgba(0,0,0,.5);pointer-events:auto. "
-    "For step-by-step guides: manage step index in JS, re-render overlay children on each step. "
-    "All styling is YOUR responsibility — generate HTML/CSS freely, no built-in components. "
+    "OVERLAY (global fullscreen container, provided as 'overlay' variable): "
+    "overlay is position:fixed;inset:0;z-index:2147483647;pointer-events:none — already covers viewport. "
+    "NEVER use document.body.appendChild(). NEVER set overlay.style.* directly (shared by all cards). "
+    "PATTERN: create a wrapper div, set pointer-events:auto on it, append to overlay. "
+    "Children do NOT need position:fixed (overlay is already fixed). Use inset:0 + position:absolute if you need full coverage within overlay. "
+    "To show: overlay.appendChild(wrapper). To hide: wrapper.remove(). "
+    "For backdrop mask: add position:absolute;inset:0;background:rgba(var(--rgb-primary-background-color),0.96) as first child of wrapper. "
+    "For close: wrapper.remove() + document.body.style.overflow=''. "
+    "overlay is shared across ALL cards — NEVER clear overlay.innerHTML (destroys other cards' content). Only remove YOUR wrapper. "
+    "data-action + data-entity in overlay ARE auto-bound (event delegation) — toggle/turn_on/turn_off/more-info work automatically. "
+    "Cleanup is automatic: when card disconnects (view change), YOUR overlay children are auto-removed. "
+    "All styling is YOUR responsibility — define classes in <style> (they apply globally, no shadow DOM). "
     "<script> runs ONCE via new Function(). NO top-level await. Use (async()=>{...})(). "
+    "CRITICAL: document.currentScript is ALWAYS null inside html-pro-card scripts (they run via new Function, NOT as real script tags). "
+    "NEVER use document.currentScript. Use the provided 'root' or 'card' variable instead — it IS the ha-card element. "
+    "All querySelector/querySelectorAll calls should use root.querySelector() or the $ / $$ shorthand. "
+    "ALWAYS null-check querySelector results before accessing properties (element may not exist yet). "
     "For periodic JS updates: set update_interval in card_config. "
     "Store instances on root to avoid re-creating on re-run. "
+    "LIVE UPDATES (event-driven, zero polling): "
+    "1. root._watchedEntities = ['domain.', 'domain.specific_entity'] — declare what to watch. 'domain.' (trailing dot) = ALL entities in that domain. "
+    "2. root._onHassUpdate = (hass) => { render(); } — fires ONLY when a watched entity changes state/attributes. "
+    "Script runs ONCE, callback fires on real changes. Use this for any dynamic card that needs live state. "
+    "NOTE: 'hass' in scripts is a live proxy — hass.states always reflects the LATEST state, even in closures/callbacks. "
+    "So _onHassUpdate callback + re-reading hass.states gives you fresh data automatically. No manual state tracking needed. "
     "Canvas: CSS vars MUST be resolved via getComputedStyle(document.documentElement).getPropertyValue('--xxx').trim(). "
     "CDN libs: load via scripts:[], check existence before use (if(!window.Chart)return;). "
     "hass.connection.subscribeEntities DOES NOT EXIST — use data-* binding or update_interval instead.\n\n"
@@ -195,6 +229,10 @@ API_PITFALLS = (
     "[WRONG PATTERNS — STRICTLY BANNED]\n"
     "WRONG: onClick=\"Light.turnOff('light.4')\" or any inline onClick handler → "
     "No such JS function. Use data-action='toggle'.\n"
+    "WRONG: <ha-switch>, <ha-slider>, <ha-select>, <ha-textfield>, <ha-button-toggle-group> or any HA web component for controls → "
+    "These render visually but DO NOT auto-bind services inside html-pro-card. "
+    "Use native <input type='range'> + data-brightness/data-temperature/etc, native <select> + data-option, "
+    "native <button> + data-action, or <script> with hass.callService() for complex logic.\n"
     "WRONG: #fff, #1a1a1a, #eee, #666, any hardcoded hex/rgb for colors → "
     "Use var(--primary-text-color), var(--divider-color) etc.\n"
     "WRONG: background: anything / background-color: anything on any element → "
@@ -224,9 +262,21 @@ STEP4_EFFICIENCY = (
 )
 
 STEP_VERIFY = (
-    "Card saved. Call verify_card with same indexes to confirm rendering. "
-    "DO NOT use get_card or get_dashboard to verify — they waste tokens. "
-    "verify_card is the ONLY correct verification method."
+    "Card saved. Before calling verify_card, SELF-CHECK your code (answer internally, fix if wrong): "
+    "1. Does <script> use 'root'/'card' variable? (NEVER document.currentScript — it's null) "
+    "2. Are all querySelector results null-checked before accessing properties? "
+    "3. Entity IDs real (domain.object_with_underscore)? No JS property like button.type? "
+    "4. All colors from CSS vars? No hex/rgb? "
+    "5. No <ha-switch>/<ha-slider>/<ha-select>? (use native HTML + data-* or JS) "
+    "6. Is inline JS in <script> inside content (NOT in scripts:[] config)? scripts:[] is CDN URLs ONLY. "
+    "7. Using data-entity (NOT data-entity-id) for entity binding? "
+    "8. Overlay: using overlay.appendChild(wrapper) pattern? NOT setting overlay.style.* directly? NOT using overlay.innerHTML=''? "
+    "9. No card_mod/title in config? (use HTML instead) "
+    "10. Only using documented data-* attributes? (data-state-text, data-attr, data-action, etc.) "
+    "11. Dynamic JS card has root._watchedEntities + root._onHassUpdate for live state updates? "
+    "If ANY answer is NO → call patch_card to fix BEFORE verify_card. "
+    "Then call verify_card with same indexes. "
+    "DO NOT use get_card or get_dashboard to verify — they waste tokens."
 )
 
 _INSTRUCTIONS_SENT_KEY = "claw_dashboard_card_instructions_sent"
@@ -241,8 +291,12 @@ class DashboardCardTool(llm.Tool):
         "THIS IS FOR PERSISTENT DASHBOARD CARDS ONLY — cards that stay in the dashboard config. "
         "NOT for dynamic/temporary effects like full-screen overlays, guided tours, tutorial masks, toast notifications, or any JS-injected UI. "
         "For ANY dynamic visual effect or temporary UI overlay, use FrontendInspect action=exec_js instead. "
-        "Actions: check_dependency, list_dashboards, get_dashboard, get_card, add_view, add_card, update_card, patch_card, remove_card, remove_view, verify_card. "
-        "verify_card: lightweight check — confirms card exists + scans frontend for rendering errors (hui-error-card). "
+        "Actions: check_dependency, list_dashboards, get_dashboard, get_card, add_view, add_card, update_card, patch_card, remove_card, remove_view, verify_card, get_doc. "
+        "MANDATORY WORKFLOW (must follow in order): "
+        "1. check_dependency → 2. get_doc (for each feature: style/js_api/data_binding) → 3. list_dashboards → 4. write content → 5. add_card → 6. verify_card. "
+        "CRITICAL: add_card WILL REJECT content if you haven't called get_doc first. Do NOT skip step 2. "
+        "get_doc: retrieve API documentation. doc_name=style|js_api|data_binding|card_config|examples|efficiency. "
+        "verify_card: confirms card exists + audits entity/service references + scans frontend for rendering errors (hui-error-card, hpc-error-banner). "
         "Use verify_card after add/update instead of get_dashboard — it only checks ONE card, saves tokens. "
         "VERIFICATION RULE: After add_card/update_card/patch_card, ALWAYS use verify_card. NEVER use get_card or get_dashboard to verify — they are expensive and waste tokens. "
         "get_card is ONLY for when you need to READ the full card config before editing. "
@@ -278,6 +332,7 @@ class DashboardCardTool(llm.Tool):
                 "remove_card",
                 "remove_view",
                 "verify_card",
+                "get_doc",
             ]),
             vol.Optional("dashboard_url", default=""): str,
             vol.Optional("view_index", default=0): int,
@@ -291,6 +346,7 @@ class DashboardCardTool(llm.Tool):
             vol.Optional("patches", default=[]): list,
             vol.Optional("target", default="content"): vol.In(["content", "card_yaml"]),
             vol.Optional("dry_run", default=False): bool,
+            vol.Optional("doc_name", default=""): str,
         }
     )
 
@@ -347,6 +403,8 @@ class DashboardCardTool(llm.Tool):
                 return await self._remove_view(hass, dashboard_url, view_index)
             if action == "verify_card":
                 return await self._verify_card(hass, dashboard_url, view_index, section_index, card_index)
+            if action == "get_doc":
+                return self._get_doc(tool_input.tool_args.get("doc_name", ""), hass)
             return {"success": False, "error": f"Unknown action: {action}"}
         except Exception as err:
             _LOGGER.exception("DashboardCardTool error: %s", err)
@@ -374,10 +432,16 @@ class DashboardCardTool(llm.Tool):
         return {
             "success": True, "installed": True,
             "resource_registered": resource_registered,
-            "message": "html-card-pro is installed and ready."
-            + (" Resource auto-registered." if resource_registered == "added" else ""),
+            "message": "html-card-pro is installed and ready.",
             "_instructions": STEP1_ROLE,
-            "_action_required": "YOU MUST now call DashboardCard with action=list_dashboards to see available dashboards.",
+            "_mandatory_workflow": (
+                "BEFORE writing any card content, you MUST call DashboardCard action=get_doc for each doc you need: "
+                "- If card will have <style>: get_doc doc_name=style "
+                "- If card will use data-entity: get_doc doc_name=data_binding "
+                "- If card will have <script>: get_doc doc_name=js_api "
+                "Read docs FIRST, then write content. add_card WILL REFUSE your content if you skip this step."
+            ),
+            "_action_required": "Call DashboardCard action=list_dashboards next.",
         }
 
     async def _get_lovelace_config(self, hass: HomeAssistant, dashboard_url: str | None):
@@ -423,6 +487,21 @@ class DashboardCardTool(llm.Tool):
         for item in existing:
             url = item.get("url", "")
             if "html-card-pro" in url or "html-pro-card" in url:
+                try:
+                    import os, re as _re
+                    js_path = os.path.join(hass.config.config_dir, HTML_CARD_PRO_PATH)
+                    if os.path.isfile(js_path):
+                        file_tag = str(int(os.path.getmtime(js_path) * 1000))
+                        old_tag = ""
+                        tag_m = _re.search(r'hacstag=(\d+)', url)
+                        if tag_m:
+                            old_tag = tag_m.group(1)
+                        if old_tag != file_tag and hasattr(resources, 'async_update_item'):
+                            new_url = HTML_CARD_PRO_RESOURCE + "?hacstag=" + file_tag
+                            await resources.async_update_item(item["id"], {"url": new_url})
+                            return "cache_updated"
+                except Exception:
+                    pass
                 return "already_registered"
 
         try:
@@ -434,6 +513,56 @@ class DashboardCardTool(llm.Tool):
         except Exception as err:
             _LOGGER.warning("Failed to auto-register html-card-pro resource: %s", err)
             return f"register_failed: {err}"
+
+    _DOC_LAYERS = {
+        "style": STEP2_VISUAL,
+        "js_api": API_JS_REFERENCE,
+        "data_binding": API_DATA_BINDING,
+        "card_config": API_CARD_CONFIG,
+        "examples": API_PITFALLS,
+        "efficiency": STEP4_EFFICIENCY,
+    }
+
+    @staticmethod
+    def _docs_read(hass: HomeAssistant) -> set:
+        from ..runtime.state import get_conversation_status
+        status = get_conversation_status(hass)
+        return status.setdefault("_docs_read", set())
+
+    def _get_doc(self, doc_name: str, hass: HomeAssistant | None = None) -> dict:
+        if not doc_name:
+            return {"success": True, "available_docs": list(self._DOC_LAYERS.keys()),
+                    "hint": "Call get_doc with doc_name to retrieve specific documentation layer."}
+        doc = self._DOC_LAYERS.get(doc_name)
+        if doc is None:
+            return {"success": False, "error": f"Unknown doc: {doc_name}. Available: {list(self._DOC_LAYERS.keys())}"}
+        if hass:
+            self._docs_read(hass).add(doc_name)
+        return {"success": True, "doc_name": doc_name, "content": doc}
+
+    def _check_required_docs(self, hass: HomeAssistant, content: str) -> dict | None:
+        """Return blocking instruction if AI hasn't read required docs for this content."""
+        read = self._docs_read(hass)
+        missing = []
+        if '<script' in content and 'js_api' not in read:
+            missing.append('js_api')
+        if 'data-entity' in content and 'data_binding' not in read:
+            missing.append('data_binding')
+        if '<style' in content and 'style' not in read:
+            missing.append('style')
+        if not missing:
+            return None
+        docs_str = ', '.join(f'doc_name={d}' for d in missing)
+        return {
+            "success": False,
+            "error": f"BLOCKED: You have not read the required API docs: {docs_str}. Card NOT saved.",
+            "_action_required": (
+                f"STOP. DO NOT proceed with card creation. "
+                f"You MUST FIRST call: DashboardCard action=get_doc for each of: {docs_str}. "
+                f"THEN re-call add_card/update_card with the SAME content. "
+                f"Reason: your content uses features ({', '.join(missing)}) that require reading docs to avoid critical bugs."
+            ),
+        }
 
     @staticmethod
     def _resolve_cards(view: dict, section_index: int) -> tuple[list | None, str]:
@@ -649,7 +778,7 @@ class DashboardCardTool(llm.Tool):
                 ]
             views_summary.append(info)
 
-        return {
+        result: dict[str, Any] = {
             "success": True,
             "dashboard_url": dashboard_url or "lovelace",
             "views": views_summary,
@@ -660,6 +789,14 @@ class DashboardCardTool(llm.Tool):
                 "To add a card, use add_card with the correct view_index (and section_index for sections views)."
             ),
         }
+        read = self._docs_read(hass)
+        if not read:
+            result["_warning"] = (
+                "You have NOT read any API docs yet. BEFORE writing content, call get_doc for: "
+                "style (if using CSS), data_binding (if using data-entity), js_api (if using <script>). "
+                "add_card WILL REJECT content if docs are not read first."
+            )
+        return result
 
     async def _get_card(
         self,
@@ -750,8 +887,6 @@ class DashboardCardTool(llm.Tool):
                 f"view_index={len(views) - 1}, and your HTML content."
             ),
         }
-        if self._should_send_instructions(hass):
-            result["_style_rules"] = STEP2_VISUAL
         if isinstance(save_err, dict) and save_err.get("frontend_errors"):
             result["frontend_errors"] = save_err["frontend_errors"]
             result["_ai_instruction"] = save_err.get("_ai_instruction", "")
@@ -778,6 +913,10 @@ class DashboardCardTool(llm.Tool):
             dep = await self._check_dependency(hass)
             if not dep.get("installed"):
                 return dep
+            check_content = content or (parsed_card or card_config).get("content", "")
+            doc_block = self._check_required_docs(hass, check_content)
+            if doc_block:
+                return doc_block
 
         config_obj, ll_config = await self._get_lovelace_config(hass, dashboard_url)
         if config_obj is None:
@@ -823,9 +962,6 @@ class DashboardCardTool(llm.Tool):
         }
         if card.get("type") == CARD_TYPE and self._should_send_instructions(hass):
             result["_card_config"] = API_CARD_CONFIG
-            result["_data_binding"] = API_DATA_BINDING
-            result["_pitfalls"] = API_PITFALLS
-            result["_efficiency"] = STEP4_EFFICIENCY
         if views[view_index].get("type") == "sections":
             result["section_index"] = section_index if section_index >= 0 else len(views[view_index].get("sections", [])) - 1
         if isinstance(save_err, dict) and save_err.get("frontend_errors"):
@@ -849,6 +985,11 @@ class DashboardCardTool(llm.Tool):
             return {"success": False, "error": yaml_error}
         if not content and not card_config and parsed_card is None:
             return {"success": False, "error": "content, card_config, or card_yaml is required"}
+
+        check_content = content or (parsed_card or card_config).get("content", "")
+        doc_block = self._check_required_docs(hass, check_content)
+        if doc_block:
+            return doc_block
 
         config_obj, ll_config = await self._get_lovelace_config(hass, dashboard_url)
         if config_obj is None:
@@ -1047,6 +1188,108 @@ class DashboardCardTool(llm.Tool):
             "_navigate_to": nav_path,
         }
 
+    @staticmethod
+    def _audit_html_pro_card(card: dict, hass: HomeAssistant) -> dict[str, Any]:
+        import re
+        content = card.get("content", "")
+        entities: set[str] = set()
+        services: list[tuple[str, str]] = []
+
+        _DOMAINS = r'light|switch|sensor|binary_sensor|climate|media_player|fan|cover|input_boolean|input_number|input_select|input_text|input_button|button|scene|script|automation|person|zone|weather|camera|vacuum|lock|number|select|text|timer|counter|group|device_tracker'
+        _ENTITY_RE = re.compile(r'\b(' + _DOMAINS + r')\.[a-z][a-z0-9]*(?:_[a-z0-9]+)+\b')
+        _DATA_ENTITY_RE = re.compile(r'data-entity=["\']([^"\']+)["\']')
+        _CALL_SERVICE_RE = re.compile(r'(?:hass|claw)\.callService\s*\(\s*["\']([a-z_]+)["\']\s*,\s*["\']([a-z_]+)["\']')
+        _CLAW_ENTITY_RE = re.compile(r'claw\.(?:toggle|press|state)\s*\(\s*["\']([^"\']+)["\']')
+        _HASS_STATES_RE = re.compile(r'hass\.states\s*\[\s*["\']([^"\']+)["\']\s*\]')
+        _JINJA_STATES_RE = re.compile(r'(?:states|is_state|state_attr|is_state_attr)\s*\(\s*["\']([^"\']+)["\']')
+
+        for m in _DATA_ENTITY_RE.finditer(content):
+            entities.add(m.group(1))
+        for m in _CLAW_ENTITY_RE.finditer(content):
+            entities.add(m.group(1))
+        for m in _HASS_STATES_RE.finditer(content):
+            entities.add(m.group(1))
+        for m in _JINJA_STATES_RE.finditer(content):
+            val = m.group(1)
+            if '.' in val and not val.startswith('http'):
+                entities.add(val)
+        for m in _ENTITY_RE.finditer(content):
+            entities.add(m.group(0))
+        for m in _CALL_SERVICE_RE.finditer(content):
+            services.append((m.group(1), m.group(2)))
+
+        _DATA_ACTION_RE = re.compile(r'data-entity=["\']([^"\']+)["\'][^>]*data-action=["\']([^"\']+)["\']|data-action=["\']([^"\']+)["\'][^>]*data-entity=["\']([^"\']+)["\']')
+        _BUILTIN_ACTIONS = {"toggle", "turn_on", "turn_off", "more-info"}
+        for m in _DATA_ACTION_RE.finditer(content):
+            eid = m.group(1) or m.group(4)
+            act = m.group(2) or m.group(3)
+            if eid and act and act not in _BUILTIN_ACTIONS:
+                domain = eid.split(".")[0] if "." in eid else ""
+                if domain:
+                    services.append((domain, act))
+
+        _SLIDER_SERVICE_MAP = {
+            "data-brightness": ("light", "turn_on"),
+            "data-temperature": ("climate", "set_temperature"),
+            "data-volume": ("media_player", "volume_set"),
+            "data-position": ("cover", "set_cover_position"),
+            "data-speed": ("fan", "set_percentage"),
+        }
+        for attr, (dom, svc) in _SLIDER_SERVICE_MAP.items():
+            if attr in content:
+                services.append((dom, svc))
+
+        if 'data-option' in content:
+            services.append(("input_select", "select_option"))
+        if 'data-value' in content:
+            services.append(("input_number", "set_value"))
+
+        config_entities = card.get("entities", [])
+        if isinstance(config_entities, list):
+            for eid in config_entities:
+                if isinstance(eid, str):
+                    entities.add(eid)
+
+        missing_entities: list[str] = []
+        found_entities: list[str] = []
+        for eid in sorted(entities):
+            if hass.states.get(eid):
+                found_entities.append(eid)
+            else:
+                missing_entities.append(eid)
+
+        invalid_services: list[str] = []
+        valid_services: list[str] = []
+        seen_svc: set[str] = set()
+        for domain, service in services:
+            key = f"{domain}.{service}"
+            if key in seen_svc:
+                continue
+            seen_svc.add(key)
+            if hass.services.has_service(domain, service):
+                valid_services.append(key)
+            else:
+                invalid_services.append(key)
+
+        scripts = card.get("scripts", [])
+        bad_scripts: list[str] = []
+        if isinstance(scripts, list):
+            for url in scripts:
+                if isinstance(url, str) and url.strip():
+                    u = url.strip()
+                    if not (u.startswith("http://") or u.startswith("https://") or u.startswith("/")):
+                        bad_scripts.append(u)
+
+        audit: dict[str, Any] = {
+            "entities_found": len(found_entities),
+            "entities_missing": missing_entities,
+            "services_valid": len(valid_services),
+            "services_invalid": invalid_services,
+            "scripts_invalid": bad_scripts,
+            "audit_passed": len(missing_entities) == 0 and len(invalid_services) == 0 and len(bad_scripts) == 0,
+        }
+        return audit
+
     async def _verify_card(
         self,
         hass: HomeAssistant,
@@ -1070,13 +1313,40 @@ class DashboardCardTool(llm.Tool):
             return {"success": False, "error": f"card_index {card_index} out of range (0..{len(cards) - 1})"}
 
         card = cards[card_index]
+        card_type = card.get("type", "")
+        is_html_pro = card_type == CARD_TYPE
         result: dict[str, Any] = {
             "success": True,
             "exists": True,
-            "card_type": card.get("type", ""),
+            "card_type": card_type,
             "view_index": view_index,
             "card_index": card_index,
         }
+
+        if is_html_pro:
+            content = card.get("content", "")
+            if content:
+                audit = self._audit_html_pro_card(card, hass)
+                result["audit"] = audit
+                if not audit["audit_passed"]:
+                    problems = []
+                    if audit["entities_missing"]:
+                        problems.append(f"Missing entities: {', '.join(audit['entities_missing'])}")
+                    if audit["services_invalid"]:
+                        problems.append(f"Invalid services: {', '.join(audit['services_invalid'])}")
+                    if audit["scripts_invalid"]:
+                        problems.append(f"Invalid script URLs: {', '.join(audit['scripts_invalid'])}")
+                    result["render_ok"] = False
+                    result["_ai_instruction"] = (
+                        "AUDIT FAILED — card references non-existent entities or invalid services. "
+                        "Problems: " + "; ".join(problems) + ". "
+                        "YOU MUST fix these issues NOW: "
+                        "1. For missing entities: replace with correct entity_id from this Home Assistant instance (use SmartDiscovery to find valid alternatives). "
+                        "2. For invalid services: check domain supports this service (use ServiceCall action=list_services). "
+                        "3. After fixing, call verify_card AGAIN to confirm all issues resolved. "
+                        "DO NOT skip this — the card will not function correctly until audit passes."
+                    )
+                    return result
 
         try:
             import asyncio as _aio
@@ -1090,15 +1360,21 @@ class DashboardCardTool(llm.Tool):
             nav_js = (
                 "(function(){"
                 "var target='" + target_path + "';"
-                "if(window.location.pathname===target){return {already:true}}"
+                "var cur=window.location.pathname;"
+                "if(cur===target||cur===target+'/'){return {already:true,path:cur}}"
+                "var from=cur;"
                 "history.pushState(null,'',target);"
                 "window.dispatchEvent(new CustomEvent('location-changed'));"
-                "return {navigated:true,from:window.location.pathname};"
+                "return {navigated:true,from:from,to:target};"
                 "})()"
             )
             nav_id = f"cv_nav_{int(_t.time()*1000)}"
             queue_frontend_exec(hass, nav_id, nav_js)
-            await _aio.sleep(2.0)
+            nav_result = await async_wait_frontend_exec_result(hass, nav_id, timeout=3.0)
+            if isinstance(nav_result, dict) and nav_result.get("navigated"):
+                await _aio.sleep(2.0)
+            else:
+                await _aio.sleep(0.5)
             verify_js = (
                 "(function(){"
                 "var errors=[];"
@@ -1108,6 +1384,10 @@ class DashboardCardTool(llm.Tool):
                 "for(var i=0;i<els.length;i++){"
                 "var cfg=els[i]._config||{};"
                 "errors.push({error:cfg.error||'',message:cfg.message||'',severity:cfg.severity||'error'});"
+                "}"
+                "var hpc=root.querySelectorAll?root.querySelectorAll('.hpc-error-banner'):[];"
+                "for(var k=0;k<hpc.length;k++){"
+                "errors.push({error:hpc[k].textContent||'',message:'html-pro-card validation error',severity:'warning'});"
                 "}"
                 "var children=root.querySelectorAll?root.querySelectorAll('*'):[];"
                 "for(var j=0;j<children.length;j++){"
