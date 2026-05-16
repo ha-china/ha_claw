@@ -94,7 +94,8 @@
           "enable_sound_notifications": "Sound Notifications",
           "enable_context_status_bar": "Context Status Bar",
           "enable_file_upload": "File Upload",
-          "enable_rich_markdown": "Rich Markdown"
+          "enable_rich_markdown": "Rich Markdown",
+          "enable_activity_tracking": "Activity Awareness"
         },
         "data_description": {
           "enable_sidebar_dock": "When enabled, AI conversations are displayed as a fixed right sidebar alongside the main interface; when disabled, the default floating dialog is used.",
@@ -103,7 +104,8 @@
           "enable_sound_notifications": "When enabled, plays notification sounds on key events like reply completion and errors. When disabled, all sounds are muted.",
           "enable_context_status_bar": "When enabled, shows context tokens, window age, and current reply elapsed time above the chat input.",
           "enable_file_upload": "When enabled, shows an attach button in the chat input for uploading images, videos, and documents via drag, paste, or click.",
-          "enable_rich_markdown": "When enabled, Markdown formatting (bold, tables, code blocks, etc.) is preserved and rendered as rich text; when disabled, all formatting is stripped back to plain text."
+          "enable_rich_markdown": "When enabled, Markdown formatting (bold, tables, code blocks, etc.) is preserved and rendered as rich text; when disabled, all formatting is stripped back to plain text.",
+          "enable_activity_tracking": "When enabled, AI can sense your UI actions (page navigation, card clicks, toggle switches, etc.) to better understand what you're working on. When disabled, no actions are collected."
         },
         "sections": {
           "chat_window": {
@@ -125,11 +127,13 @@
             "description": "Configure chat input and message display capabilities.",
             "data": {
               "enable_file_upload": "File Upload",
-              "enable_rich_markdown": "Rich Markdown"
+              "enable_rich_markdown": "Rich Markdown",
+              "enable_activity_tracking": "Activity Awareness"
             },
             "data_description": {
               "enable_file_upload": "When enabled, shows an attach button in the chat input for uploading images, videos, and documents via drag, paste, or click.",
-              "enable_rich_markdown": "When enabled, Markdown formatting (bold, tables, code blocks, etc.) is preserved and rendered as rich text; when disabled, all formatting is stripped back to plain text."
+              "enable_rich_markdown": "When enabled, Markdown formatting (bold, tables, code blocks, etc.) is preserved and rendered as rich text; when disabled, all formatting is stripped back to plain text.",
+              "enable_activity_tracking": "When enabled, AI can sense your UI actions (page navigation, card clicks, toggle switches, etc.) to better understand what you're working on. When disabled, no actions are collected."
             }
           },
           "diagnostics": {

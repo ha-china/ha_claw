@@ -94,7 +94,8 @@
           "enable_sound_notifications": "提示音",
           "enable_context_status_bar": "上下文状态栏",
           "enable_file_upload": "文件上传",
-          "enable_rich_markdown": "富文本增强"
+          "enable_rich_markdown": "富文本增强",
+          "enable_activity_tracking": "操作感知"
         },
         "data_description": {
           "enable_sidebar_dock": "启用后，AI 对话将以右侧固定侧边栏形式展示，与主界面并排显示；关闭则使用默认浮动弹窗。",
@@ -103,7 +104,8 @@
           "enable_sound_notifications": "启用后，AI 回复完成、发生错误等关键时刻播放提示音；关闭则静音。",
           "enable_context_status_bar": "启用后，在聊天输入框上方显示上下文 token、窗口时间与当前回复耗时。",
           "enable_file_upload": "启用后，在聊天输入框显示附件按钮，支持拖拽、粘贴、点击上传图片/视频/文档。",
-          "enable_rich_markdown": "启用后保留 Markdown 格式（加粗、表格、代码块等）并转为富文本显示；关闭则剥离所有格式标记，回退为纯文本。"
+          "enable_rich_markdown": "启用后保留 Markdown 格式（加粗、表格、代码块等）并转为富文本显示；关闭则剥离所有格式标记，回退为纯文本。",
+          "enable_activity_tracking": "启用后，AI 能感知你在界面上的操作（页面浏览、点击卡片、切换开关等），从而更好理解你当前在做什么；关闭则不采集任何操作行为。"
         },
         "sections": {
           "chat_window": {
@@ -125,11 +127,13 @@
             "description": "设置聊天输入与消息显示能力。",
             "data": {
               "enable_file_upload": "文件上传",
-              "enable_rich_markdown": "富文本增强"
+              "enable_rich_markdown": "富文本增强",
+              "enable_activity_tracking": "操作感知"
             },
             "data_description": {
               "enable_file_upload": "启用后，在聊天输入框显示附件按钮，支持拖拽、粘贴、点击上传图片/视频/文档。",
-              "enable_rich_markdown": "启用后保留 Markdown 格式（加粗、表格、代码块等）并转为富文本显示；关闭则剥离所有格式标记，回退为纯文本。"
+              "enable_rich_markdown": "启用后保留 Markdown 格式（加粗、表格、代码块等）并转为富文本显示；关闭则剥离所有格式标记，回退为纯文本。",
+              "enable_activity_tracking": "启用后，AI 能感知你在界面上的操作（页面浏览、点击卡片、切换开关等），从而更好理解你当前在做什么；关闭则不采集任何操作行为。"
             }
           },
           "diagnostics": {
