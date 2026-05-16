@@ -1,7 +1,7 @@
 (function() {
     'use strict';
     
-    const HACRACK_VERSION = '8.2.0';
+    const HACRACK_VERSION = '8.3.0';
     if (window.__hacrackVersion && window.__hacrackVersion !== HACRACK_VERSION) {
         const reloadKey = '__hacrackReloadCount';
         const reloads = parseInt(sessionStorage.getItem(reloadKey) || '0', 10);
@@ -582,6 +582,179 @@
                 } catch(_) {}
             }, true);
         })();
+
+        // --- User Activity Tracker ---
+        if (!window.__clawActivityInstalled) {
+            let _actTrackingEnabled = true;
+            conn.sendMessagePromise({ type: 'ha_crack/get_settings' }).then(r => {
+                _actTrackingEnabled = r?.enable_activity_tracking !== false;
+            }).catch(() => {});
+            window.__clawActivityInstalled = true;
+            const _actRing = [];
+            const _ACT_MAX = 10;
+            const _pushAct = (type, detail, extra) => {
+                if (!_actTrackingEnabled) return;
+                const entry = { type, detail: String(detail || '').slice(0, 200), path: location.pathname };
+                if (extra) Object.assign(entry, extra);
+                _actRing.push(entry);
+                if (_actRing.length > _ACT_MAX) _actRing.splice(0, _actRing.length - _ACT_MAX);
+            };
+            let _lastNavPath = location.pathname;
+            const _scrapePageContext = () => {
+                const ctx = [];
+                const ha = document.querySelector('home-assistant');
+                const root = ha?.shadowRoot;
+                const toolbar = root?.querySelector('app-toolbar, .toolbar, ha-top-app-bar-fixed');
+                const title = toolbar?.querySelector?.('.title, [main-title]')?.textContent?.trim()
+                    || root?.querySelector?.('ha-panel-lovelace')?.shadowRoot?.querySelector?.('.toolbar .title')?.textContent?.trim()
+                    || document.title || '';
+                if (title) ctx.push(title.slice(0, 80));
+                const pageHeader = root?.querySelector?.('h1, .page-title, .header-title, [slot="header"]');
+                const headerText = pageHeader?.textContent?.trim();
+                if (headerText && headerText !== title) ctx.push(headerText.slice(0, 80));
+                const panel = root?.querySelector?.('[panel]');
+                if (panel) {
+                    const pName = panel.getAttribute?.('panel') || '';
+                    if (pName && !ctx.some(c => c.includes(pName))) ctx.push(pName);
+                }
+                const deepEl = root?.querySelector?.('hass-subpage, ha-config-section, hc-lovelace');
+                const deepHeader = deepEl?.shadowRoot?.querySelector?.('.header, h1, .title');
+                const deepText = deepHeader?.textContent?.trim();
+                if (deepText && !ctx.includes(deepText)) ctx.push(deepText.slice(0, 80));
+                return ctx.filter(Boolean).join(' > ').slice(0, 200);
+            };
+            window.addEventListener('location-changed', () => {
+                const p = location.pathname;
+                if (p !== _lastNavPath) {
+                    _lastNavPath = p;
+                    setTimeout(() => {
+                        const pageCtx = _scrapePageContext();
+                        _pushAct('navigate', pageCtx ? `${p} (${pageCtx})` : p);
+                    }, 500);
+                }
+            });
+            window.addEventListener('claw-dialog-opened', (ev) => {
+                const d = ev.detail?.[0];
+                _pushAct('dialog_open', d?.title || 'dialog');
+            });
+            window.addEventListener('claw-dialog-closed', () => {
+                _pushAct('dialog_close', '');
+            });
+            let _ptrDownTs = 0;
+            document.addEventListener('pointerdown', () => { _ptrDownTs = Date.now(); }, true);
+            document.addEventListener('pointerup', (ev) => {
+                const dur = Date.now() - _ptrDownTs;
+                if (dur > 500) {
+                    const t = ev.composedPath?.()?.[0] || ev.target;
+                    const text = (t?.textContent || '').trim().slice(0, 60);
+                    _pushAct('long_press', text || location.pathname);
+                }
+                _ptrDownTs = 0;
+            }, true);
+            document.addEventListener('dblclick', (ev) => {
+                const t = ev.composedPath?.()?.[0] || ev.target;
+                const text = (t?.textContent || '').trim().slice(0, 60);
+                _pushAct('double_click', text || location.pathname);
+            }, true);
+            document.addEventListener('click', (ev) => {
+                const path = ev.composedPath?.() || [];
+                const t = path[0] || ev.target;
+                if (!t) return;
+                const _findInPath = (sel) => {
+                    for (const n of path) {
+                        if (n.matches?.(sel)) return n;
+                        if (n.closest?.(sel)) return n.closest(sel);
+                    }
+                    return null;
+                };
+                const _entityId = (el) => {
+                    if (!el) return '';
+                    for (const n of path) {
+                        const e = n.getAttribute?.('data-entity-id') || '';
+                        if (e) return e;
+                    }
+                    const cfg = el.__config || el.config || el._config;
+                    return (cfg?.entity || cfg?.entity_id || '');
+                };
+                const _label = (el) => {
+                    if (!el) return '';
+                    const lbl = el.getAttribute?.('aria-label') || el.getAttribute?.('label')
+                        || el.closest?.('[aria-label]')?.getAttribute?.('aria-label') || '';
+                    return lbl.trim().slice(0, 60);
+                };
+                const _nearLabel = (el) => {
+                    if (!el) return '';
+                    const prev = el.previousElementSibling;
+                    if (prev?.tagName === 'LABEL' || prev?.classList?.contains?.('label'))
+                        return prev.textContent?.trim()?.slice(0, 60) || '';
+                    const parent = el.parentElement;
+                    const lbl = parent?.querySelector?.('label, .label, .title')?.textContent?.trim();
+                    return (lbl || '').slice(0, 60);
+                };
+                const row = _findInPath('ha-state-icon, state-badge, .entity, [data-entity-id]');
+                if (row) {
+                    const eid = _entityId(row);
+                    const toggle = _findInPath('ha-switch, mwc-switch');
+                    const action = toggle ? 'entity_toggle' : 'entity_click';
+                    if (eid) _pushAct(action, eid, { entity_id: eid });
+                    return;
+                }
+                const listItem = _findInPath('ha-list-item, mwc-list-item, ha-settings-row, ha-clickable-list-item');
+                if (listItem) {
+                    const text = listItem.textContent?.trim()?.slice(0, 80) || '';
+                    _pushAct('list_item', text);
+                    return;
+                }
+                const standaloneToggle = _findInPath('ha-switch, ha-formfield, mwc-switch');
+                if (standaloneToggle) {
+                    const name = _label(standaloneToggle) || _nearLabel(standaloneToggle) || '';
+                    _pushAct('toggle', name || 'switch');
+                    return;
+                }
+                const select = _findInPath('ha-select, ha-combo-box, mwc-select, ha-dropdown-menu, select');
+                if (select) {
+                    const val = select.value || select.getAttribute?.('value') || '';
+                    const name = _label(select) || _nearLabel(select) || '';
+                    _pushAct('select', `${name}: ${val}`.trim().slice(0, 200));
+                    return;
+                }
+                const card = _findInPath('ha-card');
+                if (card) {
+                    const parent = card.parentElement?.closest?.('[data-entity-id]') || card.parentElement;
+                    const cfg = parent?.__config || parent?.config || parent?._config || {};
+                    const eid = _entityId(card) || cfg.entity || '';
+                    const cardType = cfg.type || card.getAttribute?.('data-card-type') || '';
+                    const title = cfg.title || card.querySelector?.('.card-header')?.textContent?.trim() || '';
+                    const clickedText = (t.textContent || '').trim().slice(0, 60);
+                    const detail = [cardType, title, eid, clickedText].filter(Boolean).join(' | ');
+                    _pushAct('card_click', detail.slice(0, 200), eid ? { entity_id: eid } : undefined);
+                    return;
+                }
+                const panel = _findInPath('hass-subpage, ha-panel-iframe, ha-panel-custom, [panel]');
+                if (panel) {
+                    const panelName = panel.getAttribute?.('panel') || panel.tagName?.toLowerCase() || '';
+                    const innerText = (t.textContent || '').trim().slice(0, 60);
+                    _pushAct('panel_click', `${panelName}: ${innerText}`.slice(0, 200));
+                    return;
+                }
+                const btn = _findInPath('mwc-button, ha-button, button, a[href]');
+                if (btn) {
+                    const label = (btn.textContent || '').trim().slice(0, 60);
+                    if (label) _pushAct('button_click', label);
+                }
+            }, true);
+            const _flushAct = () => {
+                if (!_actRing.length) return;
+                const c = getConn();
+                if (!c) return;
+                const batch = _actRing.splice(0, _actRing.length);
+                c.sendMessagePromise({ type: 'ha_crack/user_activity', actions: batch }).catch(() => {
+                    _actRing.unshift(...batch.slice(-_ACT_MAX));
+                });
+            };
+            setInterval(_flushAct, 8000);
+            window.addEventListener('claw-chat-updated', _flushAct);
+        }
 
     }
 
@@ -2007,6 +2180,8 @@
             } catch (_) {}
 
             const conversation = [];
+            const welcomeText = h.localize?.('ui.dialogs.voice_command.how_can_i_help') || '';
+            conversation.push({ who: 'hass', text: welcomeText, thinking: '', tool_calls: {} });
             for (const t of turns) {
                 if (t.user) {
                     conversation.push({ who: 'user', text: t.user });
@@ -2021,7 +2196,7 @@
                 }
             }
 
-            if (!conversation.length) {
+            if (conversation.length <= 1) {
                 _toggleHistoryPanel(dock, _dockVoiceEl, true);
                 return;
             }
@@ -2326,7 +2501,12 @@
                 if (!settings.continuous_conversation) return;
                 if (!isFreshConversation(this._conversation)) return;
                 if (Array.isArray(state.conversation) && state.conversation.length > 0) {
-                    this._conversation = state.conversation.map(m => ({...m, tool_calls: m.tool_calls || {}}));
+                    const restored = state.conversation.map(m => ({...m, tool_calls: m.tool_calls || {}}));
+                    if (restored[0]?.who !== 'hass') {
+                        const wt = this.hass?.localize?.('ui.dialogs.voice_command.how_can_i_help') || '';
+                        restored.unshift({ who: 'hass', text: wt, thinking: '', tool_calls: {} });
+                    }
+                    this._conversation = restored;
                 }
                 if (state.conversationId) {
                     this._conversationId = state.conversationId;

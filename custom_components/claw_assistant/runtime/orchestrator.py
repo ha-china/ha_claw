@@ -453,7 +453,6 @@ async def _execute_conversation_turn_inner(
         if user_prefix:
             text = f"{user_prefix}\n\n{text}"
     else:
-        # First turn only: inject blueprint_studio editor selection context if available
         editor_selection = hass.data.get("blueprint_studio_editor_selection")
         if editor_selection and isinstance(editor_selection, dict):
             sel_text = editor_selection.get("selected_text", "")
@@ -474,6 +473,17 @@ async def _execute_conversation_turn_inner(
                 if lines_after:
                     ctx_block += "\n".join(lines_after)
                 text = f"{ctx_block}\n\n{text}"
+
+    from ..const import CONF_ENABLE_ACTIVITY_TRACKING, DOMAIN as _DOMAIN
+    _act_enabled = True
+    for _e in hass.config_entries.async_entries(_DOMAIN):
+        _act_enabled = _e.options.get(CONF_ENABLE_ACTIVITY_TRACKING, True)
+        break
+    if _act_enabled:
+        from .user_activity import build_activity_prompt_section
+        _act_section = build_activity_prompt_section(hass)
+        if _act_section:
+            text = f"<activity-context>\n{_act_section}\n</activity-context>\n\n{text}"
 
     runtime_config = build_conversation_runtime_config_for_hass(entry, hass)
     fallback_agents = runtime_config.fallback_agents

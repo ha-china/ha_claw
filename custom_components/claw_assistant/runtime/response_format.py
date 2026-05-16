@@ -412,12 +412,19 @@ _MEMORY_CONTEXT_NOTE_RE = re.compile(
     flags=re.IGNORECASE,
 )
 _MEMORY_CONTEXT_TAG_RE = re.compile(r"</?\s*memory-context\s*>", flags=re.IGNORECASE)
+_ACTIVITY_CONTEXT_BLOCK_RE = re.compile(
+    r"<\s*activity-context\s*>[\s\S]{0,50000}?</\s*activity-context\s*>",
+    flags=re.IGNORECASE,
+)
+_ACTIVITY_CONTEXT_TAG_RE = re.compile(r"</?\s*activity-context\s*>", flags=re.IGNORECASE)
 
 
 def _strip_memory_context(text: str) -> str:
     text = _MEMORY_CONTEXT_BLOCK_RE.sub("", text)
     text = _MEMORY_CONTEXT_NOTE_RE.sub("", text)
     text = _MEMORY_CONTEXT_TAG_RE.sub("", text)
+    text = _ACTIVITY_CONTEXT_BLOCK_RE.sub("", text)
+    text = _ACTIVITY_CONTEXT_TAG_RE.sub("", text)
     return text
 
 

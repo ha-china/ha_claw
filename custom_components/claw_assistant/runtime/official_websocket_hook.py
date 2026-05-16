@@ -128,6 +128,14 @@ def sound_notifications_enabled(hass) -> bool:
     return False
 
 
+def activity_tracking_enabled(hass) -> bool:
+    from ..const import CONF_ENABLE_ACTIVITY_TRACKING
+    for entry in hass.config_entries.async_entries(DOMAIN):
+        if entry.options.get(CONF_ENABLE_ACTIVITY_TRACKING, True):
+            return True
+    return False
+
+
 def queue_frontend_js(hass, js_code: str) -> None:
     if not js_code:
         return
@@ -197,6 +205,7 @@ async def websocket_get_settings(
             "enable_file_upload": file_upload_enabled(hass),
             "enable_sidebar_dock": sidebar_dock_enabled(hass),
             "enable_sound_notifications": sound_notifications_enabled(hass),
+            "enable_activity_tracking": activity_tracking_enabled(hass),
         },
     )
 
@@ -1055,6 +1064,21 @@ async def websocket_dialog_snapshot(hass, connection, msg):
     connection.send_result(msg["id"])
 
 
+@websocket_api.websocket_command(
+    {
+        vol.Required("type"): "ha_crack/user_activity",
+        vol.Required("actions"): list,
+    }
+)
+@websocket_api.async_response
+async def websocket_user_activity(hass, connection, msg):
+    from .user_activity import record_activity
+    for action in msg["actions"][:10]:
+        if isinstance(action, dict):
+            record_activity(hass, action)
+    connection.send_result(msg["id"])
+
+
 def install_official_websocket_process_hook(hass) -> None:
 
     domain_data = hass.data.setdefault("claw_assistant", {})
@@ -1071,6 +1095,7 @@ def install_official_websocket_process_hook(hass) -> None:
         ("ha_crack/frontend_exec_result", websocket_frontend_exec_result),
         ("ha_crack/frontend_exec_subscribe", websocket_frontend_exec_subscribe),
         ("ha_crack/dialog_snapshot", websocket_dialog_snapshot),
+        ("ha_crack/user_activity", websocket_user_activity),
     ):
         if cmd_type not in handlers:
             websocket_api.async_register_command(hass, cmd)

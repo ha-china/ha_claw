@@ -36,10 +36,16 @@ def clear_resume_history_binding(hass: HomeAssistant) -> None:
 
 
 _INTERNAL_TAG_RE = re.compile(r"\[- \w+:.*?\]", re.DOTALL)
+_ACTIVITY_BLOCK_RE = re.compile(
+    r"<\s*activity-context\s*>[\s\S]*?</\s*activity-context\s*>",
+    flags=re.IGNORECASE,
+)
 
 
 def _strip_internal_tags(text: str) -> str:
-    return _INTERNAL_TAG_RE.sub("", text).strip()
+    text = _INTERNAL_TAG_RE.sub("", text)
+    text = _ACTIVITY_BLOCK_RE.sub("", text)
+    return text.strip()
 
 
 def _summarize_conversation(turns: list, max_len: int = 60) -> str:
@@ -87,11 +93,19 @@ async def websocket_chat_history_list(
                 existing_id = seen_fingerprints[fp]
                 existing_turns = history._histories.get(existing_id, [])
                 if len(turns) <= len(existing_turns):
-                    shadow_ids.add(conv_id)
-                    continue
+                    primary_id, donor_id = existing_id, conv_id
                 else:
-                    shadow_ids.add(existing_id)
+                    primary_id, donor_id = conv_id, existing_id
                     seen_fingerprints[fp] = conv_id
+                primary_turns = history._histories.get(primary_id, [])
+                donor_turns = history._histories.get(donor_id, [])
+                existing_ts = {t.timestamp for t in primary_turns}
+                merged = [t for t in donor_turns if t.timestamp not in existing_ts]
+                if merged:
+                    primary_turns.extend(merged)
+                    primary_turns.sort(key=lambda t: t.timestamp)
+                    history._histories[primary_id] = primary_turns
+                shadow_ids.add(donor_id)
             else:
                 seen_fingerprints[fp] = conv_id
 
