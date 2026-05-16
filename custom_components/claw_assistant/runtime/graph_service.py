@@ -1,13 +1,3 @@
-"""Home Assistant facade over :mod:`graph_store`.
-
-Owns the singleton :class:`GraphStore` instance attached to ``hass.data``,
-hops every DB call onto the executor, and provides the bootstrap reindex
-that loads every workspace markdown into the graph at startup.
-
-Only this module knows about Home Assistant. ``graph_store`` and
-``md_to_graph`` stay HA-free for unit testing.
-"""
-
 from __future__ import annotations
 
 import logging
@@ -33,13 +23,11 @@ def _db_path() -> Path:
 
 
 def get_graph_store(hass: HomeAssistant) -> GraphStore | None:
-    """Return the active :class:`GraphStore` if setup has run."""
 
     return hass.data.get(_HASS_DATA_KEY)
 
 
 def get_graph_store_sync() -> GraphStore | None:
-    """Sync access for prompt builders without a hass handle."""
 
     return _singleton_store
 
@@ -49,11 +37,7 @@ def _open_store() -> GraphStore:
 
 
 async def async_setup_graph_store(hass: HomeAssistant) -> GraphStore:
-    """Open the store and bootstrap-reindex all workspace markdown.
 
-    Idempotent: rerunning on an already-populated DB just bumps
-    ``access_count`` for unchanged nodes (checksum dedup).
-    """
 
     global _singleton_store
 
@@ -93,16 +77,7 @@ async def async_unload_graph_store(hass: HomeAssistant) -> None:
 def recall_memory_lines_sync(
     user_text: str, *, limit: int = 12, kinds: tuple[str, ...] | None = None
 ) -> list[str]:
-    """Synchronous prompt-time recall.
 
-    Returns a list of pre-rendered ``- title: body`` (or ``- body`` when the
-    title equals the body) lines, ordered by score. Empty list if the
-    store is not ready, the query is empty, or recall errors out.
-
-    The query is run on the event-loop thread; FTS over a small SQLite
-    file is sub-millisecond, so this is safe for prompt assembly. Switch
-    to an async path if the DB ever grows large enough to matter.
-    """
 
     store = _singleton_store
     if store is None or not user_text.strip():
@@ -131,9 +106,8 @@ def recall_memory_lines_sync(
 async def async_bootstrap_reindex(
     hass: HomeAssistant, store: GraphStore
 ) -> dict[str, int]:
-    """Read every workspace markdown and upsert their nodes."""
 
-    from .workspace_store import WORKSPACE_DOC_NAMES, _doc_path  # noqa: PLC0415
+    from .workspace_store import WORKSPACE_DOC_NAMES, _doc_path 
 
     def _scan_and_index() -> dict[str, int]:
         totals = {"inserted": 0, "updated": 0}
@@ -160,11 +134,7 @@ async def async_bootstrap_reindex(
 async def async_reindex_doc(
     hass: HomeAssistant, doc_name: str, markdown: str
 ) -> dict[str, int]:
-    """Incrementally reindex a single workspace document.
 
-    Safe to call from save hooks: failures are logged and swallowed so
-    that markdown writes never fail because of indexing problems.
-    """
 
     store = get_graph_store(hass)
     if store is None:
@@ -188,7 +158,6 @@ async def async_recall(
     limit: int = 8,
     expand: bool = True,
 ) -> list[RecallHit]:
-    """Async wrapper around :meth:`GraphStore.recall`."""
 
     store = get_graph_store(hass)
     if store is None:

@@ -1008,9 +1008,9 @@ class SystemControlTool(llm.Tool):
 class ConversationMemoryTool(llm.Tool):
     name = "ConversationMemory"
     description = (
-        "Persistent curated memory that survives across sessions and is "
-        "injected into future system prompts. Keep entries compact and "
-        "focused on facts that will still matter later.\n\n"
+        "[Self Memory] — your personal notebook for user preferences and "
+        "simple facts. Automatically injected into every future system prompt. "
+        "Keep entries compact and focused on facts that will still matter later.\n\n"
         "WHEN TO SAVE (do this proactively, do not wait to be asked):\n"
         "- The user corrects you or says 'remember this' / 'don't do that again'.\n"
         "- The user reveals a stable preference, habit, or personal detail "
@@ -1038,7 +1038,13 @@ class ConversationMemoryTool(llm.Tool):
         "Actions: save (add or update one fact), get (read one), list (read "
         "all), clear (wipe one target — only on explicit user request). "
         "Params: action, target ('memory' or 'user'), key (short stable "
-        "identifier), value (the fact)."
+        "identifier), value (the fact).\n\n"
+        "IMPORTANT — DO NOT DOUBLE-SAVE: ConversationMemory and MemoryGraph "
+        "are mutually exclusive for the same piece of information. "
+        "Use ConversationMemory for simple user preferences and short facts. "
+        "Use MemoryGraph for complex relational knowledge, decisions, and "
+        "bug-fix records that need typed edges and graph traversal. "
+        "NEVER call both tools for the same fact in one turn."
     )
     parameters = vol.Schema({
         vol.Required("action"): vol.In(["save", "get", "list", "clear"]),
@@ -1558,13 +1564,14 @@ class BootstrapControlTool(llm.Tool):
 class MemoryGraphTool(llm.Tool):
     name = "MemoryGraph"
     description = (
-        "Long-term memory backed by a SQLite graph (nodes + typed edges, "
-        "BM25 ranking, time decay, dedup via content checksum). "
-        "Use this for durable facts, decisions, bug fixes, and their causal "
-        "links — not for the active turn's scratch state. Workspace markdown "
+        "[Knowledge Graph] — long-term relational memory backed by SQLite "
+        "(nodes + typed edges, BM25 ranking, time decay, dedup via content "
+        "checksum). Use this for durable decisions, bug fixes, and their "
+        "causal links — not for simple preferences (use ConversationMemory "
+        "for those) or active turn's scratch state. Workspace markdown "
         "files remain the human-readable source of truth and are auto-indexed "
         "into this graph; this tool also lets you write nodes/edges directly. "
-        "Params: action (recall/remember/link/pin/forget/get/stats), "
+        "Params: action (recall/remember/link/pin/forget/get/stats/cleanup), "
         "and action-specific fields. "
         "recall: query(required), kinds(list, optional), limit(int, default 8), expand(bool, default true). "
         "remember: kind(required, e.g. fact/preference/decision/bug_fix/event), "
@@ -1575,7 +1582,14 @@ class MemoryGraphTool(llm.Tool):
         "pin: id(int), pinned(bool, default true). "
         "forget: id(int). "
         "get: id(int). "
-        "stats: no params."
+        "stats: no params. "
+        "cleanup: no params — removes duplicates, junk nodes, and rebuilds missing edges.\n\n"
+        "IMPORTANT — DO NOT DOUBLE-SAVE: MemoryGraph and ConversationMemory "
+        "are mutually exclusive for the same piece of information. "
+        "Use MemoryGraph for relational knowledge that needs graph traversal, "
+        "typed edges, or BM25-ranked recall. "
+        "Use ConversationMemory for simple key-value user preferences. "
+        "NEVER call both tools for the same fact in one turn."
     )
     parameters = vol.Schema(
         {
@@ -1672,6 +1686,16 @@ class MemoryGraphTool(llm.Tool):
             if result is None:
                 return {"success": False, "error": "graph store unavailable"}
             node_id, was_new = result
+            if was_new:
+                try:
+                    hits = await async_recall(
+                        hass, f"{title} {body[:100]}", limit=3, expand=False
+                    )
+                    for h in hits:
+                        if h.node.id != node_id:
+                            await async_link(hass, node_id, h.node.id, "related_to")
+                except Exception:
+                    pass
             return {"success": True, "id": node_id, "created": was_new}
 
         if action == "link":
@@ -1736,6 +1760,10 @@ class MemoryGraphTool(llm.Tool):
         if action == "stats":
             stats = await hass.async_add_executor_job(store.stats)
             return {"success": True, **stats}
+
+        if action == "cleanup":
+            result = await hass.async_add_executor_job(store.cleanup)
+            return {"success": True, **result}
 
         return {"success": False, "error": f"unknown action: {action}"}
 
