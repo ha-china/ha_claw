@@ -166,6 +166,9 @@ def _resolve_history_write_id(
     resume_id = get_active_resume_history_id(hass)
     if resume_id and conv_history.get_history(resume_id):
         return resume_id
+    cont_id = str(get_conversation_status(hass).get("history_continuation_id") or "")
+    if cont_id and cont_id != current_id and conv_history.get_history(cont_id):
+        return cont_id
     return current_id
 
 
@@ -199,10 +202,11 @@ async def _finalize_completed_response(
         final_text=final_text,
         original_async_converse=converse_channel,
     )
-    LOGGER.info(
-        "goal gate result: suffix=%r continue=%s prompt=%r",
-        verdict_suffix[:80] if verdict_suffix else "", should_continue, bool(continuation_prompt),
-    )
+    if verdict_suffix or should_continue:
+        LOGGER.info(
+            "goal gate result: suffix=%r continue=%s prompt=%r",
+            verdict_suffix[:80] if verdict_suffix else "", should_continue, bool(continuation_prompt),
+        )
     pending = get_runtime_store(hass).setdefault("pending_goal_continuations", {})
     completed = get_runtime_store(hass).setdefault("completed_goal_conversations", set())
     conv_key = str(conversation_id or "default")
@@ -746,13 +750,15 @@ def _resolve_history_context_id(
     if status.get("resume_history_conversation_id"):
         clear_resume_history_binding(hass)
 
+    cont_id = str(status.get("history_continuation_id") or "")
     for candidate in (
         current_id,
+        cont_id,
         status.get("last_conversation_id"),
         get_active_conversation_state(hass).get("id"),
     ):
         candidate = str(candidate or "")
-        if candidate == current_id and conv_history.get_history(candidate):
+        if candidate and conv_history.get_history(candidate):
             return candidate
     return None
 
@@ -790,14 +796,24 @@ def build_recovered_history_context_prompt(
 
 def _build_fallback_extra_prompt(
     *,
+    hass=None,
     base_prompt: str | None,
     user_text: str,
     pending_handoff_context: str,
     previous_tool_results: list[dict[str, Any]],
 ) -> str | None:
+    lang_section = ""
+    if hass is not None:
+        from .prompting import _resolve_user_language, _language_display_name
+        user_lang = _resolve_user_language(hass)
+        if user_lang:
+            display = _language_display_name(user_lang)
+            lang_section = f"## Response Language\nYou MUST reply in {display}."
     required_prefix_sections = [
         "## Active User Task\n" + _compact_text(_strip_internal_tags(user_text), 2400),
     ]
+    if lang_section:
+        required_prefix_sections.append(lang_section)
     required_suffix_sections = [pending_handoff_context] if pending_handoff_context else []
     optional_tail_sections: list[str] = []
 
@@ -1178,6 +1194,7 @@ async def run_agent_fallback_chain(
         tool_calls_state.clear()
 
         current_extra_prompt = _build_fallback_extra_prompt(
+            hass=hass,
             base_prompt=base_extra_prompt,
             user_text=text,
             pending_handoff_context=pending_handoff_context,

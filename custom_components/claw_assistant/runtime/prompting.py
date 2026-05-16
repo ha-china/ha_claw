@@ -159,6 +159,31 @@ def _build_peer_agents_section(
     )
 
 
+def _resolve_user_language(hass: HomeAssistant) -> str:
+    from .state import get_conversation_status
+    lang = str(get_conversation_status(hass).get("user_language") or "").strip()
+    return lang if lang else ""
+
+
+def _language_display_name(lang_code: str) -> str:
+    code = lang_code.lower().replace("-", "_")
+    if code.startswith("zh"):
+        return "Chinese (中文)"
+    if code.startswith("en"):
+        return "English"
+    if code.startswith("ja"):
+        return "Japanese (日本語)"
+    if code.startswith("ko"):
+        return "Korean (한국어)"
+    if code.startswith("de"):
+        return "German (Deutsch)"
+    if code.startswith("fr"):
+        return "French (Français)"
+    if code.startswith("es"):
+        return "Spanish (Español)"
+    return lang_code
+
+
 def build_base_prompt(
     hass: HomeAssistant,
     *,
@@ -171,6 +196,15 @@ def build_base_prompt(
     base_prompt = build_internal_llm_prompt(text)
     appended_sections: list[str] = []
 
+    user_lang = _resolve_user_language(hass)
+    lang_instruction = ""
+    if user_lang:
+        display = _language_display_name(user_lang)
+        lang_instruction = (
+            f" The user's UI language is {display}."
+            f" You MUST reply in {display} unless the user explicitly asks for another language."
+        )
+
     ch_type = get_channel_type(conversation_id)
     if is_im_channel(conversation_id):
         appended_sections.append(
@@ -180,6 +214,7 @@ def build_base_prompt(
             f"The user reads your reply as a text message on their phone or desktop. "
             f"Full markdown is supported: bold, italic, lists, tables, code blocks, etc. "
             f"If the user sends an image or file, acknowledge it and describe what you see."
+            f"{lang_instruction}"
         )
     else:
         appended_sections.append(
@@ -192,6 +227,7 @@ def build_base_prompt(
             "or `[VIDEO:/local/...]`/`[IMAGE:...]`/`[GIF:...]`/`[FILE:...]` — auto-rendered. "
             "Camera/media specifics live in their tool descriptions. "
             "This is NOT a voice channel — the user is reading, not listening."
+            f"{lang_instruction}"
         )
 
     topic_hint = build_homeassistant_topic_hint(text)
