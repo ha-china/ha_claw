@@ -206,6 +206,7 @@ class FallbackConversationAgent(
             )
             return self._finalize_result(result)
         except asyncio.CancelledError:
+            self._salvage_partial_turn(user_input)
             if consume_stop_request(self.hass, user_input.conversation_id):
                 response = intent.IntentResponse(language=user_input.language)
                 response.async_set_speech("Stopped the current run.")
@@ -264,6 +265,44 @@ class FallbackConversationAgent(
             conversation_id=user_input.conversation_id,
             response=intent_response,
         )
+
+    def _salvage_partial_turn(self, user_input: conversation.ConversationInput) -> None:
+        try:
+            from .conversation_utils import get_conversation_history
+            from .runtime.state import get_conversation_status
+            from .runtime.agent_fallback import _get_chat_log_content
+
+            conv_id = user_input.conversation_id
+            if not conv_id:
+                return
+
+            partial_text = ""
+            try:
+                content_list = _get_chat_log_content(self.hass, conv_id)
+                for item in reversed(content_list or []):
+                    if getattr(item, "role", None) == "assistant" and getattr(item, "content", None):
+                        partial_text = item.content.strip()
+                        break
+            except Exception:
+                pass
+
+            if not partial_text:
+                status = get_conversation_status(self.hass)
+                partial_text = (status.get("current_thought") or "").strip()
+
+            if not partial_text:
+                return
+
+            history = get_conversation_history()
+            history.add_turn(
+                conv_id,
+                user_input.text or "",
+                f"[interrupted] {partial_text}",
+                metadata={"interrupted": True},
+            )
+            _LOGGER.debug("Salvaged partial turn for %s (%d chars)", conv_id, len(partial_text))
+        except Exception:
+            _LOGGER.debug("Failed to salvage partial turn", exc_info=True)
 
     def _finalize_result(self, result: conversation.ConversationResult):
         self._last_active = datetime.now(UTC)
