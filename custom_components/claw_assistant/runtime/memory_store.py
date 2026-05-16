@@ -339,6 +339,29 @@ async def async_save_memory_entry_result(
     path = await hass.async_add_executor_job(
         _write_memory_markdown, _serialize_entries(next_entries, target), target
     )
+    if outcome.status in ("stored", "updated"):
+        try:
+            from .graph_service import async_link, async_recall, async_remember
+            kind = "preference" if target == "user" else "fact"
+            result = await async_remember(
+                hass,
+                kind=kind,
+                title=outcome.key,
+                body=outcome.value,
+                source_doc=f"ConversationMemory/{target}",
+            )
+            if result is not None:
+                new_id, was_new = result
+                if was_new:
+                    hits = await async_recall(
+                        hass, f"{outcome.key} {outcome.value}",
+                        limit=3, expand=False,
+                    )
+                    for h in hits:
+                        if h.node.id != new_id:
+                            await async_link(hass, new_id, h.node.id, "related_to")
+        except Exception:
+            pass
     return {
         "path": str(path),
         "status": outcome.status,

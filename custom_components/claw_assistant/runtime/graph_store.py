@@ -1,18 +1,3 @@
-"""Graph-structured memory store backed by SQLite + FTS5.
-
-Design goals (replaces ad-hoc Markdown keyword scan):
-- Deduplication via content checksum.
-- Time decay via exponential half-life on `created_at`.
-- Ranking via BM25 (FTS5) * decay * confidence.
-- Relations via first-class edges (caused_by / supersedes / resolved_by / ...).
-- No model installation: vectors live in a reserved BLOB column, populated
-  later by an external embedding provider. FTS5 alone already outperforms
-  the previous linear markdown scan.
-
-This module is intentionally stdlib-only (sqlite3 + hashlib + math + re)
-so it can be unit-tested without spinning up Home Assistant.
-"""
-
 from __future__ import annotations
 
 import hashlib
@@ -77,8 +62,6 @@ def _normalize(text: str) -> str:
 
 
 def compute_checksum(kind: str, title: str, body: str) -> str:
-    """Stable content hash used for deduplication across runs."""
-
     payload = (
         f"{_normalize(kind)}\x00{_normalize(title)}\x00{_normalize(body)}"
     )
@@ -123,13 +106,6 @@ def _row_to_node(row: sqlite3.Row) -> Node:
 
 
 def _build_fts_query(text: str) -> str:
-    """Turn free text into a safe FTS5 MATCH expression.
-
-    Strategy: strip punctuation, split on whitespace, OR the tokens together
-    with prefix matching. Keeps recall high while avoiding BM25 collapse to
-    a single keyword.
-    """
-
     cleaned = _FTS_SAFE_RE.sub(" ", text or "").strip()
     if not cleaned:
         return ""
@@ -147,11 +123,6 @@ def _build_fts_query(text: str) -> str:
 
 
 def _decay_score(node: Node, now: float, half_life_days: float) -> float:
-    """score = confidence * exp(-age/half_life) * (1 + ln(1 + extra_access))
-
-    Pinned nodes get a flat 2x bonus and skip decay.
-    """
-
     if node.pinned:
         return max(node.confidence, 0.0) * 2.0
     age_days = max(0.0, (now - node.created_at) / 86400.0)
@@ -161,13 +132,6 @@ def _decay_score(node: Node, now: float, half_life_days: float) -> float:
 
 
 class GraphStore:
-    """Process-wide graph store over a SQLite file.
-
-    Thread-safe: connection uses ``check_same_thread=False`` and every
-    public method acquires ``self._lock``. Methods are synchronous; async
-    callers should hop via ``hass.async_add_executor_job`` or
-    ``asyncio.to_thread``.
-    """
 
     def __init__(self, db_path: Path | str) -> None:
         self._path = Path(db_path)
@@ -207,11 +171,6 @@ class GraphStore:
         confidence: float = 1.0,
         pinned: bool = False,
     ) -> tuple[int, bool]:
-        """Insert a new node or touch the existing one with the same checksum.
-
-        Returns ``(node_id, was_newly_inserted)``.
-        """
-
         title = title.strip()
         body = body.strip()
         if not title and not body:
@@ -335,6 +294,97 @@ class GraphStore:
                 ),
             }
 
+    def cleanup(self) -> dict[str, int]:
+        deleted_dup = 0
+        deleted_junk = 0
+        new_edges = 0
+
+        _JUNK_TITLES = frozenset({
+            "title", "enabled", "when", "objective", "steps",
+            "delete_after_success", "notes", "status", "created_at",
+            "last_run_at", "last_result", "run_count", "state",
+        })
+        _JUNK_PREFIXES = (
+            "last_request_before_tool", "last_tool_intent",
+            "last_requested_camera", "standing_goal_",
+            "goal_judge_", "judge_goal_",
+        )
+        _JUNK_BODIES = frozenset({
+            "项目 1", "项目 2", "项目 3",
+            "[x] 已完成任务", "[ ] 未完成任务",
+        })
+
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT id, kind, title, body, source_doc FROM nodes ORDER BY id"
+            ).fetchall()
+
+        to_delete: set[int] = set()
+
+        for row in rows:
+            nid = int(row["id"])
+            kind = str(row["kind"])
+            title = str(row["title"]).strip()
+            body = str(row["body"]).strip()
+            src = str(row["source_doc"] or "")
+            title_lower = title.lower()
+            if any(title_lower.startswith(p) for p in _JUNK_PREFIXES):
+                to_delete.add(nid)
+            elif kind == "follow_up" and src == "HEARTBEAT" and title_lower in _JUNK_TITLES:
+                to_delete.add(nid)
+            elif kind == "style" and src == "SOUL" and body in _JUNK_BODIES:
+                to_delete.add(nid)
+
+        seen_titles: dict[str, int] = {}
+        for row in rows:
+            nid = int(row["id"])
+            if nid in to_delete:
+                continue
+            key = str(row["title"]).strip().lower()
+            if key in seen_titles:
+                to_delete.add(nid)
+            else:
+                seen_titles[key] = nid
+
+        for nid in to_delete:
+            self.forget(nid)
+        deleted_junk = sum(
+            1 for row in rows
+            if int(row["id"]) in to_delete
+            and not any(str(row["title"]).strip().lower().startswith(p) for p in _JUNK_PREFIXES)
+            and str(row["title"]).strip().lower() not in _JUNK_TITLES
+        )
+        deleted_dup = len(to_delete) - deleted_junk
+
+        with self._lock:
+            remaining = self._conn.execute(
+                "SELECT id, title, body FROM nodes ORDER BY id"
+            ).fetchall()
+        for row in remaining:
+            nid = int(row["id"])
+            query_text = f"{row['title']} {str(row['body'])[:100]}"
+            hits = self.recall(query_text, limit=3, expand=False, touch=False)
+            for h in hits:
+                if h.node.id != nid:
+                    with self._lock:
+                        existing = self._conn.execute(
+                            "SELECT 1 FROM edges WHERE src_id=? AND dst_id=?",
+                            (nid, h.node.id),
+                        ).fetchone()
+                    if not existing:
+                        try:
+                            self.link(nid, h.node.id, "related_to")
+                            new_edges += 1
+                        except ValueError:
+                            pass
+
+        return {
+            "deleted_duplicates": deleted_dup,
+            "deleted_junk": deleted_junk,
+            "new_edges": new_edges,
+            **self.stats(),
+        }
+
     def recall(
         self,
         query: str,
@@ -345,13 +395,6 @@ class GraphStore:
         half_life_days: float = 30.0,
         touch: bool = True,
     ) -> list[RecallHit]:
-        """Top-``limit`` hits for ``query``, ranked by BM25 * decay.
-
-        If ``expand``, 1-hop edge neighbours of the top hits are included
-        with a dampened score so that causal / supersession chains surface
-        alongside direct matches.
-        """
-
         fts_query = _build_fts_query(query)
         if not fts_query:
             return []

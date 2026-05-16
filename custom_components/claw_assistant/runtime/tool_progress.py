@@ -300,8 +300,8 @@ def _tool_desc(name: str, a: dict, lang: str, hass=None) -> str:
     if name == "ConversationMemory":
         act = e(str(a.get("action", "")))
         if zh:
-            return f"🧬 记忆: {act}..." if act else "🧬 正在处理记忆..."
-        return f"🧬 Memory: {act}..." if act else "🧬 Managing memory..."
+            return f"🧬 自我记忆: {act}..." if act else "🧬 正在处理自我记忆..."
+        return f"🧬 Self Memory: {act}..." if act else "🧬 Self Memory..."
     if name == "GetConversationHistory":
         return "💫 正在获取对话历史..." if zh else "💫 Loading conversation history..."
     if name == "InstallSkill":
@@ -525,8 +525,8 @@ def _tool_desc(name: str, a: dict, lang: str, hass=None) -> str:
         _MG_ZH = {"recall": "回忆", "remember": "记忆", "link": "关联", "forget": "遗忘", "get": "读取", "stats": "统计"}
         _MG_EN = {"recall": "Recalling", "remember": "Remembering", "link": "Linking", "forget": "Forgetting", "get": "Reading", "stats": "Stats"}
         if zh:
-            return f"🧬 MemoryGraph: {_MG_ZH.get(act, act)}..."
-        return f"🧬 MemoryGraph: {_MG_EN.get(act, act)}..."
+            return f"🧬 知识图谱: {_MG_ZH.get(act, act)}..."
+        return f"🧬  Knowledge Graph: {_MG_EN.get(act, act)}..."
     if name.startswith("Hass"):
         eid = e(str(a.get("name", a.get("entity_id", ""))))[:22]
         tag = name.replace("Hass", "")

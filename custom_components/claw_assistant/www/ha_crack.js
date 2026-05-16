@@ -1,11 +1,17 @@
 (function() {
     'use strict';
     
-    const HACRACK_VERSION = '8.1.0';
+    const HACRACK_VERSION = '8.2.0';
     if (window.__hacrackVersion && window.__hacrackVersion !== HACRACK_VERSION) {
-        window.__hacrackVersion = HACRACK_VERSION;
-        location.reload();
-        return;
+        const reloadKey = '__hacrackReloadCount';
+        const reloads = parseInt(sessionStorage.getItem(reloadKey) || '0', 10);
+        if (reloads < 1) {
+            sessionStorage.setItem(reloadKey, String(reloads + 1));
+            window.__hacrackVersion = HACRACK_VERSION;
+            location.reload();
+            return;
+        }
+        sessionStorage.removeItem(reloadKey);
     }
     window.__hacrackVersion = HACRACK_VERSION;
     let initialized = false;
@@ -13,12 +19,13 @@
     let hassRef = null;
     
     function getHass() {
-        if (hassRef && hassRef.connection) return hassRef;
         const ha = document.querySelector('home-assistant');
-        if (ha && ha.hass) {
-            hassRef = ha.hass;
-            return hassRef;
+        const live = ha?.hass;
+        if (live?.connection) {
+            hassRef = live;
+            return live;
         }
+        if (hassRef?.connection) return hassRef;
         return null;
     }
 
@@ -120,26 +127,28 @@
     }
     
     let _dockedChat = null;
-    function deepQuery(selector, root = document) {
+    function deepQuery(selector, root = document, depth = 0) {
         if (selector === 'ha-assist-chat' && _dockedChat && _dockedChat.isConnected && root === document) {
             return _dockedChat;
         }
+        if (depth > 10) return null;
         let result = root.querySelector(selector);
         if (result) return result;
         const allElements = root.querySelectorAll('*');
         for (const el of allElements) {
             if (el.shadowRoot) {
-                result = deepQuery(selector, el.shadowRoot);
+                result = deepQuery(selector, el.shadowRoot, depth + 1);
                 if (result) return result;
             }
         }
         return null;
     }
     
-    function deepQueryAll(selector, root = document, results = []) {
+    function deepQueryAll(selector, root = document, results = [], depth = 0) {
+        if (depth > 10) return results;
         root.querySelectorAll(selector).forEach(el => results.push(el));
         root.querySelectorAll('*').forEach(el => {
-            if (el.shadowRoot) deepQueryAll(selector, el.shadowRoot, results);
+            if (el.shadowRoot) deepQueryAll(selector, el.shadowRoot, results, depth + 1);
         });
         return results;
     }
@@ -202,7 +211,6 @@
         pollInterval = setInterval(() => pollPendingJS(hass), 2000);
         pollPendingJS(hass);
         exposeGlobalAPI();
-        setupGoalContinuationStream(hass);
         registerHistoryWindow(hass);
         setupContinuousConversation(hass);
         setupAssistRightDock(hass);
@@ -576,8 +584,6 @@
         })();
 
     }
-
-    function setupGoalContinuationStream() {}
 
     const _MARKED_CDN = 'https://cdn.jsdelivr.net/npm/marked@15.0.7/lib/marked.esm.js';
     let _markedReady = null;
@@ -2251,8 +2257,49 @@
             const originalDisconnected = proto.disconnectedCallback;
             const originalAddMessage = proto._addMessage;
             const originalUpdated = proto.updated;
+            const findMessagesEl = (chat) => chat.shadowRoot?.querySelector('.messages');
+            const isAtBottom = (el) => el.scrollHeight - el.scrollTop - el.clientHeight < 48;
+            const stickToBottom = (el) => { el.scrollTop = el.scrollHeight; };
+            const attachScrollWatcher = function() {
+                if (this.__clawScrollWatcher) return;
+                const el = findMessagesEl(this);
+                if (!el) return;
+                this.__clawScrollWatcher = true;
+                this.__clawUserScrolledUp = false;
+                let lastScrollTop = el.scrollTop;
+                el.addEventListener('scroll', () => {
+                    const goingUp = el.scrollTop < lastScrollTop;
+                    lastScrollTop = el.scrollTop;
+                    if (goingUp && !isAtBottom(el)) {
+                        this.__clawUserScrolledUp = true;
+                    } else if (isAtBottom(el)) {
+                        this.__clawUserScrolledUp = false;
+                    }
+                }, { passive: true });
+                const ro = new ResizeObserver(() => {
+                    if (!this.__clawUserScrolledUp) stickToBottom(el);
+                });
+                ro.observe(el);
+                const observeChildren = () => {
+                    el.querySelectorAll(':scope > *').forEach(c => {
+                        if (c.__clawObserved) return;
+                        c.__clawObserved = true;
+                        ro.observe(c);
+                    });
+                };
+                observeChildren();
+                const mo = new MutationObserver(() => {
+                    observeChildren();
+                    if (!this.__clawUserScrolledUp) stickToBottom(el);
+                });
+                mo.observe(el, { childList: true, subtree: true, characterData: true });
+                this.__clawScrollResizeObserver = ro;
+                this.__clawScrollMutationObserver = mo;
+                stickToBottom(el);
+            };
             proto.updated = function(changed) {
                 originalUpdated?.call(this, changed);
+                attachScrollWatcher.call(this);
                 if (this.shadowRoot) {
                     try { window.dispatchEvent(new CustomEvent('claw-chat-updated', { detail: this })); } catch(e) {}
                 }
@@ -2299,46 +2346,6 @@
                 }
                 originalDisconnected?.call(this);
             };
-            const findMessagesEl = (chat) => chat.shadowRoot?.querySelector('.messages');
-            const isAtBottom = (el) => el.scrollHeight - el.scrollTop - el.clientHeight < 48;
-            const stickToBottom = (el) => { el.scrollTop = el.scrollHeight; };
-            const attachScrollWatcher = function() {
-                if (this.__clawScrollWatcher) return;
-                const el = findMessagesEl(this);
-                if (!el) return;
-                this.__clawScrollWatcher = true;
-                this.__clawUserScrolledUp = false;
-                let lastScrollTop = el.scrollTop;
-                el.addEventListener('scroll', () => {
-                    const goingUp = el.scrollTop < lastScrollTop;
-                    lastScrollTop = el.scrollTop;
-                    if (goingUp && !isAtBottom(el)) {
-                        this.__clawUserScrolledUp = true;
-                    } else if (isAtBottom(el)) {
-                        this.__clawUserScrolledUp = false;
-                    }
-                }, { passive: true });
-                const ro = new ResizeObserver(() => {
-                    if (!this.__clawUserScrolledUp) stickToBottom(el);
-                });
-                ro.observe(el);
-                const observeChildren = () => {
-                    el.querySelectorAll(':scope > *').forEach(c => {
-                        if (c.__clawObserved) return;
-                        c.__clawObserved = true;
-                        ro.observe(c);
-                    });
-                };
-                observeChildren();
-                const mo = new MutationObserver(() => {
-                    observeChildren();
-                    if (!this.__clawUserScrolledUp) stickToBottom(el);
-                });
-                mo.observe(el, { childList: true, subtree: true, characterData: true });
-                this.__clawScrollResizeObserver = ro;
-                this.__clawScrollMutationObserver = mo;
-                stickToBottom(el);
-            };
             proto._scrollMessagesBottom = async function() {
                 attachScrollWatcher.call(this);
                 const el = findMessagesEl(this);
@@ -2354,13 +2361,11 @@
                 originalFirstUpdated?.call(this, changed);
                 attachScrollWatcher.call(this);
             };
-            const originalUpdated2 = proto.updated;
-            proto.updated = function(changed) {
-                originalUpdated2?.call(this, changed);
-                attachScrollWatcher.call(this);
-            };
             if (typeof originalAddMessage === 'function') {
                 proto._addMessage = function(message) {
+                    if (typeof window.__clawTransformMessage === 'function') {
+                        message = window.__clawTransformMessage(message);
+                    }
                     originalAddMessage.call(this, message);
                     const conv = Array.isArray(this._conversation) ? this._conversation : [];
                     const prev = conv[conv.length - 2];
@@ -2723,25 +2728,23 @@
             });
         };
 
+        const ATTACH_RE = /\[ATTACHMENT:[^\]]+\]/g;
+        window.__clawTransformMessage = function(msg) {
+            if (msg && msg.who === 'user' && typeof msg.text === 'string' && ATTACH_RE.test(msg.text)) {
+                const realLen = msg.text.length;
+                const count = (msg.text.match(ATTACH_RE) || []).length;
+                const clean = msg.text.replace(ATTACH_RE, '').trim();
+                const badge = '+' + count + ' file' + (count > 1 ? 's' : '');
+                return {...msg, text: clean ? clean + ' `' + badge + '`' : '`' + badge + '`', _realChars: realLen};
+            }
+            return msg;
+        };
+
         customElements.whenDefined('ha-assist-chat').then(() => {
             const ctor = customElements.get('ha-assist-chat');
             const proto = ctor?.prototype;
             if (!proto || proto.__clawUploadPatched) return;
             proto.__clawUploadPatched = true;
-            const ATTACH_RE = /\[ATTACHMENT:[^\]]+\]/g;
-            const origAddMessage = proto._addMessage;
-            if (typeof origAddMessage === 'function') {
-                proto._addMessage = function(msg) {
-                    if (msg && msg.who === 'user' && typeof msg.text === 'string' && ATTACH_RE.test(msg.text)) {
-                        const realLen = msg.text.length;
-                        const count = (msg.text.match(ATTACH_RE) || []).length;
-                        const clean = msg.text.replace(ATTACH_RE, '').trim();
-                        const badge = '+' + count + ' file' + (count > 1 ? 's' : '');
-                        msg = {...msg, text: clean ? clean + ' `' + badge + '`' : '`' + badge + '`', _realChars: realLen};
-                    }
-                    return origAddMessage.call(this, msg);
-                };
-            }
             const origHandleSend = proto._handleSendMessage;
             if (typeof origHandleSend === 'function') {
                 proto._handleSendMessage = function() {
@@ -3583,7 +3586,9 @@
             },
             
             injectFont: (fontFamily, src, id = 'ha-crack-font') => {
-                const css = `@font-face { font-family: '${fontFamily}'; src: url('${src}'); }`;
+                const safeFamily = String(fontFamily).replace(/[\\'";{}]/g, '');
+                const safeSrc = String(src).replace(/[\\'";{}]/g, '');
+                const css = `@font-face { font-family: '${safeFamily}'; src: url('${safeSrc}'); }`;
                 return window.HACrack.injectGlobalCSS(css, id);
             },
             
@@ -3750,17 +3755,18 @@
     
     document.addEventListener('visibilitychange', () => {
         if (document.visibilityState === 'visible') {
-            const hass = getHass();
-            if (hass?.connection && !pollInterval) {
-                pollInterval = setInterval(() => pollPendingJS(hass), 500);
+            if (!pollInterval) {
+                const hass = getHass();
+                if (hass?.connection) {
+                    pollInterval = setInterval(() => pollPendingJS(getHass() || hass), 2000);
+                    pollPendingJS(hass);
+                }
             }
-        }
-    });
-    
-    window.addEventListener('focus', () => {
-        const hass = getHass();
-        if (hass?.connection && !pollInterval) {
-            pollInterval = setInterval(() => pollPendingJS(hass), 500);
+        } else {
+            if (pollInterval) {
+                clearInterval(pollInterval);
+                pollInterval = null;
+            }
         }
     });
     
