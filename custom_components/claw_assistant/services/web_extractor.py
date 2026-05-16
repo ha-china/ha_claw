@@ -7,7 +7,7 @@ import json
 import re
 from typing import Any
 
-from bs4 import BeautifulSoup, Tag
+from ._html_selector import Selector
 
 _trafilatura_loaded: bool = False
 _trafilatura_extract = None
@@ -90,11 +90,11 @@ class ExtractedWebContent:
 
 def extract_web_content(html: str, url: str) -> ExtractedWebContent | None:
 
-    raw_soup = BeautifulSoup(html, "html.parser")
-    title = _extract_title(raw_soup, url)
+    page = Selector(content=html, url=url)
+    title = _extract_title(page, url)
 
     if "weather.com.cn" in url:
-        weather = _extract_weather_content(raw_soup)
+        weather = _extract_weather_content(page)
         if weather:
             return ExtractedWebContent(
                 title=title,
@@ -102,7 +102,7 @@ def extract_web_content(html: str, url: str) -> ExtractedWebContent | None:
                 strategy="weather_specialized",
             )
 
-    schema_article = _extract_schema_article(raw_soup, default_title=title)
+    schema_article = _extract_schema_article(page, default_title=title)
     if schema_article is not None:
         return schema_article
 
@@ -110,7 +110,7 @@ def extract_web_content(html: str, url: str) -> ExtractedWebContent | None:
     if extracted is not None:
         return extracted
 
-    if _looks_like_javascript_shell(raw_soup):
+    if _looks_like_javascript_shell(page):
         return ExtractedWebContent(
             title=title,
             content="",
@@ -118,7 +118,7 @@ def extract_web_content(html: str, url: str) -> ExtractedWebContent | None:
             metadata={"requires_browser": True},
         )
 
-    fallback = _extract_fallback_text(raw_soup)
+    fallback = _extract_fallback_text(page)
     if fallback:
         return ExtractedWebContent(
             title=title,
@@ -175,7 +175,7 @@ def _extract_with_trafilatura(
 
 def _extract_main_container_text(html: str) -> str:
 
-    soup = BeautifulSoup(html, "html.parser")
+    page = Selector(content=html)
     best_text = ""
 
     for selector in (
@@ -188,7 +188,7 @@ def _extract_main_container_text(html: str) -> str:
         ".post-body",
         ".article-body",
     ):
-        for node in soup.select(selector):
+        for node in page.css(selector):
             candidate = _extract_node_text(node)
             if len(candidate) > len(best_text):
                 best_text = candidate
@@ -196,47 +196,46 @@ def _extract_main_container_text(html: str) -> str:
     return best_text if len(best_text) >= _min_text_threshold(best_text) else ""
 
 
-def _extract_node_text(node: Tag) -> str:
+def _extract_node_text(node: Selector) -> str:
 
-    cleaned = BeautifulSoup(str(node), "html.parser")
-    for element in cleaned.find_all(
-        ["script", "style", "noscript", "iframe", "nav", "aside", "footer", "header"]
-    ):
-        element.decompose()
-    return _normalize_text(cleaned.get_text(separator="\n", strip=True))
+    return _normalize_text(
+        node.get_all_text(
+            separator="\n",
+            strip=True,
+            ignore_tags=("script", "style", "noscript", "iframe", "nav", "aside", "footer", "header"),
+        )
+    )
 
 
-def _extract_title(soup: BeautifulSoup, url: str) -> str:
+def _extract_title(page: Selector, url: str) -> str:
     for selector in (
         "meta[property='og:title']",
         "meta[name='title']",
         "title",
         "h1",
     ):
-        node = soup.select_one(selector)
-        if node is None:
+        nodes = page.css(selector)
+        if not nodes:
             continue
-        if node.name == "meta":
-            content = node.get("content", "").strip()
+        node = nodes[0]
+        if node.tag == "meta":
+            content = str(node.attrib.get("content", "")).strip()
             if content:
                 return content
             continue
-        text = node.get_text(strip=True)
+        text = str(node.get_all_text(strip=True))
         if text:
             return text
     return url
 
 
 def _extract_schema_article(
-    soup: BeautifulSoup,
+    page: Selector,
     *,
     default_title: str,
 ) -> ExtractedWebContent | None:
-    for script in soup.find_all(
-        "script",
-        attrs={"type": re.compile("ld\\+json", re.IGNORECASE)},
-    ):
-        raw = script.string or script.get_text(separator=" ", strip=True)
+    for script in page.css('script[type*="ld+json"]'):
+        raw = str(script.text or script.get_all_text(separator=" ", strip=True))
         if not raw:
             continue
         try:
@@ -272,32 +271,19 @@ def _iter_json_objects(value: Any) -> list[dict[str, Any]]:
     return objects
 
 
-def _extract_fallback_text(soup: BeautifulSoup) -> str:
-    cleaned = BeautifulSoup(str(soup), "html.parser")
-    for element in cleaned.find_all(
-        [
-            "script",
-            "style",
-            "noscript",
-            "iframe",
-            "svg",
-            "canvas",
-            "form",
-            "button",
-            "input",
-            "template",
-            "header",
-            "footer",
-            "nav",
-            "aside",
-        ]
-    ):
-        element.decompose()
+def _extract_fallback_text(page: Selector) -> str:
+    _noise_tags = (
+        "script", "style", "noscript", "iframe", "svg",
+        "canvas", "form", "button", "input", "template",
+        "header", "footer", "nav", "aside",
+    )
+    _ancestor_noise = {"nav", "aside", "footer", "header"}
 
     fragments: list[str] = []
     seen: set[str] = set()
-    for node in cleaned.find_all(_FALLBACK_BLOCK_TAGS):
-        if node.find_parent(["nav", "aside", "footer", "header"]):
+    selector = ", ".join(_FALLBACK_BLOCK_TAGS)
+    for node in page.css(selector):
+        if node.find_ancestor(lambda a: a.tag in _ancestor_noise):
             continue
         hint = _node_hint(node)
         if any(token in hint for token in _NOISE_HINTS):
@@ -305,11 +291,11 @@ def _extract_fallback_text(soup: BeautifulSoup) -> str:
         if _link_density(node) > 0.5:
             continue
 
-        text = _normalize_text(node.get_text(separator=" ", strip=True))
+        text = _normalize_text(str(node.get_all_text(separator=" ", strip=True, ignore_tags=_noise_tags)))
         if len(text) < 20 or _looks_like_noise_line(text) or text in seen:
             continue
         seen.add(text)
-        fragments.append(f"- {text}" if node.name == "li" else text)
+        fragments.append(f"- {text}" if node.tag == "li" else text)
         if len("\n".join(fragments)) >= 4000:
             break
 
@@ -317,23 +303,20 @@ def _extract_fallback_text(soup: BeautifulSoup) -> str:
     return combined if len(combined) >= 60 else ""
 
 
-def _node_hint(node: Tag) -> str:
-    attrs = node.attrs or {}
-    raw_classes = attrs.get("class", [])
-    if isinstance(raw_classes, str):
-        classes = raw_classes
-    else:
-        classes = " ".join(raw_classes)
-    node_id = attrs.get("id", "")
-    return f"{node.name} {classes} {node_id}".lower()
+def _node_hint(node: Selector) -> str:
+    attrib = node.attrib
+    raw_classes = attrib.get("class", "")
+    classes = str(raw_classes)
+    node_id = str(attrib.get("id", ""))
+    return f"{node.tag} {classes} {node_id}".lower()
 
 
-def _link_density(node: Tag) -> float:
-    text = node.get_text(separator=" ", strip=True)
+def _link_density(node: Selector) -> float:
+    text = str(node.get_all_text(separator=" ", strip=True))
     if not text:
         return 0.0
     link_text = " ".join(
-        link.get_text(separator=" ", strip=True) for link in node.find_all("a")
+        str(link.get_all_text(separator=" ", strip=True)) for link in node.css("a")
     )
     return len(link_text) / max(len(text), 1)
 
@@ -374,21 +357,23 @@ def _normalize_text(text: str) -> str:
     return normalized.strip()
 
 
-def _looks_like_javascript_shell(soup: BeautifulSoup) -> bool:
-    cleaned = BeautifulSoup(str(soup), "html.parser")
-    for element in cleaned.find_all(["script", "style", "noscript", "template"]):
-        element.decompose()
-
-    visible_text = _normalize_text(cleaned.get_text(separator="\n", strip=True))
+def _looks_like_javascript_shell(page: Selector) -> bool:
+    visible_text = _normalize_text(
+        str(page.get_all_text(
+            separator="\n",
+            strip=True,
+            ignore_tags=("script", "style", "noscript", "template"),
+        ))
+    )
     visible_text_len = len(visible_text)
-    script_nodes = soup.find_all("script")
+    script_nodes = page.css("script")
     script_count = len(script_nodes)
     script_text_sample = " ".join(
-        script.get_text(separator=" ", strip=True) for script in script_nodes[:12]
+        str(s.text) for s in script_nodes[:12]
     ).lower()
-    root_marker = any(soup.select_one(selector) for selector in _JS_SHELL_ROOT_SELECTORS)
-    semantic_content = soup.find(["article", "main"]) is not None
-    paragraph_count = len(soup.find_all("p"))
+    root_marker = any(page.css(selector) for selector in _JS_SHELL_ROOT_SELECTORS)
+    semantic_content = bool(page.css("article, main"))
+    paragraph_count = len(page.css("p"))
 
     if visible_text_len <= 180 and root_marker and script_count >= 4:
         return True
@@ -404,14 +389,14 @@ def _looks_like_javascript_shell(soup: BeautifulSoup) -> bool:
     )
 
 
-def _extract_weather_content(soup: BeautifulSoup) -> str | None:
+def _extract_weather_content(page: Selector) -> str | None:
     weather_data = []
 
-    city_el = soup.select_one(".crumbs a, .city-name, h1, title")
-    city = city_el.get_text(strip=True) if city_el else "未知城市"
+    city_nodes = page.css(".crumbs a, .city-name, h1, title")
+    city = str(city_nodes[0].get_all_text(strip=True)) if city_nodes else "未知城市"
     weather_data.append(f"城市: {city}")
 
-    all_text = soup.get_text(separator="\n", strip=True)
+    all_text = str(page.get_all_text(separator="\n", strip=True))
     lines = all_text.split("\n")
     for line in lines:
         line = line.strip()
