@@ -466,7 +466,7 @@ class DashboardCardTool(llm.Tool):
             return None, "card_yaml must include card type"
         return parsed, ""
 
-    async def _save_config(self, config_obj, ll_config: dict, hass: HomeAssistant | None = None, dashboard_url: str | None = None) -> dict | None:
+    async def _save_config(self, config_obj, ll_config: dict, hass: HomeAssistant | None = None, dashboard_url: str | None = None, nav_path: str | None = None) -> dict | None:
         if config_obj.mode == "yaml":
             return {
                 "success": False,
@@ -486,10 +486,32 @@ class DashboardCardTool(llm.Tool):
                 import asyncio as _aio
                 from .frontend_tools import queue_frontend_exec, async_wait_frontend_exec_result
                 import time as _t
+                if nav_path:
+                    nav_id = f"ll_nav_{int(_t.time()*1000)}"
+                    nav_js = (
+                        "(function(){"
+                        "var target='" + nav_path + "';"
+                        "if(window.location.pathname===target){return {already:true}}"
+                        "history.pushState(null,'',target);"
+                        "window.dispatchEvent(new CustomEvent('location-changed'));"
+                        "return {navigated:true};"
+                        "})()"
+                    )
+                    queue_frontend_exec(hass, nav_id, nav_js)
+                    await _aio.sleep(1.5)
                 exec_id = f"ll_reload_{int(_t.time()*1000)}"
+                path_guard = "" if nav_path else (
+                    "var currentPath=window.location.pathname;"
+                )
+                path_restore = "" if nav_path else (
+                    "setTimeout(function(){if(window.location.pathname!==currentPath){"
+                    "history.pushState(null,'',currentPath);"
+                    "window.dispatchEvent(new CustomEvent('location-changed'))"
+                    "}},100);"
+                )
                 js = (
                     "(function(){"
-                    "var currentPath=window.location.pathname;"
+                    + path_guard +
                     "var ha=document.querySelector('home-assistant');"
                     "var main=ha&&ha.shadowRoot&&ha.shadowRoot.querySelector('home-assistant-main');"
                     "var msr=main&&main.shadowRoot;"
@@ -500,8 +522,8 @@ class DashboardCardTool(llm.Tool):
                     "var panel=pr&&pr.querySelector('ha-panel-lovelace');"
                     "if(!panel){return {no_panel:true}}"
                     "var ll=panel.lovelace||panel._lovelace||(panel.shadowRoot&&panel.shadowRoot.querySelector('hui-root')&&panel.shadowRoot.querySelector('hui-root').lovelace);"
-                    "if(ll&&ll.fetchConfig){ll.fetchConfig(true);setTimeout(function(){if(window.location.pathname!==currentPath){history.pushState(null,'',currentPath);window.dispatchEvent(new CustomEvent('location-changed'))}},100);return {reloaded:true}}"
-                    "if(ll&&ll.loadConfig){ll.loadConfig(true);setTimeout(function(){if(window.location.pathname!==currentPath){history.pushState(null,'',currentPath);window.dispatchEvent(new CustomEvent('location-changed'))}},100);return {reloaded:true}}"
+                    "if(ll&&ll.fetchConfig){ll.fetchConfig(true);" + path_restore + "return {reloaded:true}}"
+                    "if(ll&&ll.loadConfig){ll.loadConfig(true);" + path_restore + "return {reloaded:true}}"
                     "var conn=ha.hass&&ha.hass.connection;"
                     "if(conn){conn.sendMessagePromise({type:'lovelace/config',url_path:'" + (dashboard_url or 'lovelace') + "',force:true}).then(function(c){if(ll)ll.config=c;});return {ws_reload:true}}"
                     "return {no_action:true}"
@@ -710,12 +732,11 @@ class DashboardCardTool(llm.Tool):
             new_view["icon"] = icon
 
         views.append(new_view)
-        save_err = await self._save_config(config_obj, ll_config, hass=hass, dashboard_url=dashboard_url)
-        if isinstance(save_err, dict) and save_err.get("error"):
-            return save_err
-
         dash_path = dashboard_url or "lovelace"
         nav_path = f"/{dash_path}/{path}"
+        save_err = await self._save_config(config_obj, ll_config, hass=hass, dashboard_url=dashboard_url, nav_path=nav_path)
+        if isinstance(save_err, dict) and save_err.get("error"):
+            return save_err
 
         result: dict[str, Any] = {
             "success": True,
@@ -782,13 +803,12 @@ class DashboardCardTool(llm.Tool):
             card.update(card_config)
 
         cards.append(card)
-        save_err = await self._save_config(config_obj, ll_config, hass=hass, dashboard_url=dashboard_url)
-        if isinstance(save_err, dict) and save_err.get("error"):
-            return save_err
-
         dash_path = dashboard_url or "lovelace"
         view_path = views[view_index].get("path", str(view_index))
         nav_path = f"/{dash_path}/{view_path}"
+        save_err = await self._save_config(config_obj, ll_config, hass=hass, dashboard_url=dashboard_url, nav_path=nav_path)
+        if isinstance(save_err, dict) and save_err.get("error"):
+            return save_err
 
         result: dict[str, Any] = {
             "success": True,
@@ -851,13 +871,12 @@ class DashboardCardTool(llm.Tool):
         if parsed_card is None and card_config:
             cards[card_index].update(card_config)
 
-        save_err = await self._save_config(config_obj, ll_config, hass=hass, dashboard_url=dashboard_url)
-        if isinstance(save_err, dict) and save_err.get("error"):
-            return save_err
-
         dash_path = dashboard_url or "lovelace"
         view_path = views[view_index].get("path", str(view_index))
         nav_path = f"/{dash_path}/{view_path}"
+        save_err = await self._save_config(config_obj, ll_config, hass=hass, dashboard_url=dashboard_url, nav_path=nav_path)
+        if isinstance(save_err, dict) and save_err.get("error"):
+            return save_err
 
         result: dict[str, Any] = {
             "success": True,
@@ -946,13 +965,12 @@ class DashboardCardTool(llm.Tool):
             cards[card_index] = parsed
             card = parsed
 
-        save_err = await self._save_config(config_obj, ll_config, hass=hass, dashboard_url=dashboard_url)
-        if isinstance(save_err, dict) and save_err.get("error"):
-            return save_err
-
         dash_path = dashboard_url or "lovelace"
         view_path = views[view_index].get("path", str(view_index))
         nav_path = f"/{dash_path}/{view_path}"
+        save_err = await self._save_config(config_obj, ll_config, hass=hass, dashboard_url=dashboard_url, nav_path=nav_path)
+        if isinstance(save_err, dict) and save_err.get("error"):
+            return save_err
 
         return {
             "success": True,
@@ -987,7 +1005,10 @@ class DashboardCardTool(llm.Tool):
             return {"success": False, "error": f"card_index {card_index} out of range (0..{len(cards) - 1})"}
 
         removed = cards.pop(card_index)
-        save_err = await self._save_config(config_obj, ll_config, hass=hass, dashboard_url=dashboard_url)
+        dash_path = dashboard_url or "lovelace"
+        view_path = views[view_index].get("path", str(view_index))
+        nav_path = f"/{dash_path}/{view_path}"
+        save_err = await self._save_config(config_obj, ll_config, hass=hass, dashboard_url=dashboard_url, nav_path=nav_path)
         if isinstance(save_err, dict) and save_err.get("error"):
             return save_err
 
@@ -1012,14 +1033,13 @@ class DashboardCardTool(llm.Tool):
             return {"success": False, "error": f"view_index {view_index} out of range"}
 
         removed = views.pop(view_index)
-        save_err = await self._save_config(config_obj, ll_config, hass=hass, dashboard_url=dashboard_url)
-        if isinstance(save_err, dict) and save_err.get("error"):
-            return save_err
-
         dash_path = dashboard_url or "lovelace"
         fallback_index = max(0, view_index - 1)
         fallback_path = views[fallback_index].get("path", str(fallback_index)) if views else ""
         nav_path = f"/{dash_path}/{fallback_path}" if fallback_path else f"/{dash_path}"
+        save_err = await self._save_config(config_obj, ll_config, hass=hass, dashboard_url=dashboard_url, nav_path=nav_path)
+        if isinstance(save_err, dict) and save_err.get("error"):
+            return save_err
 
         return {
             "success": True,
@@ -1066,6 +1086,19 @@ class DashboardCardTool(llm.Tool):
             verify_id = f"cv_{int(_t.time()*1000)}"
             dash_path = dashboard_url or "lovelace"
             vpath = views[view_index].get("path", str(view_index))
+            target_path = f"/{dash_path}/{vpath}"
+            nav_js = (
+                "(function(){"
+                "var target='" + target_path + "';"
+                "if(window.location.pathname===target){return {already:true}}"
+                "history.pushState(null,'',target);"
+                "window.dispatchEvent(new CustomEvent('location-changed'));"
+                "return {navigated:true,from:window.location.pathname};"
+                "})()"
+            )
+            nav_id = f"cv_nav_{int(_t.time()*1000)}"
+            queue_frontend_exec(hass, nav_id, nav_js)
+            await _aio.sleep(2.0)
             verify_js = (
                 "(function(){"
                 "var errors=[];"
