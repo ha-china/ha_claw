@@ -100,6 +100,14 @@ def _domain_data(hass) -> dict:
     return hass.data.setdefault("claw_assistant", {})
 
 
+def get_frontend_state(hass) -> dict:
+    return _domain_data(hass).get(_FRONTEND_STATE_KEY, {})
+
+
+def get_frontend_platform(hass) -> str | None:
+    return get_frontend_state(hass).get("platform")
+
+
 def context_status_bar_enabled(hass) -> bool:
     for entry in hass.config_entries.async_entries(DOMAIN):
         if entry.options.get(CONF_ENABLE_CONTEXT_STATUS_BAR, True):
@@ -132,6 +140,22 @@ def activity_tracking_enabled(hass) -> bool:
     from ..const import CONF_ENABLE_ACTIVITY_TRACKING
     for entry in hass.config_entries.async_entries(DOMAIN):
         if entry.options.get(CONF_ENABLE_ACTIVITY_TRACKING, True):
+            return True
+    return False
+
+
+def tool_details_enabled(hass) -> bool:
+    from ..const import CONF_ENABLE_TOOL_DETAILS
+    for entry in hass.config_entries.async_entries(DOMAIN):
+        if entry.options.get(CONF_ENABLE_TOOL_DETAILS, False):
+            return True
+    return False
+
+
+def tool_progress_enabled(hass) -> bool:
+    from ..const import CONF_ENABLE_TOOL_PROGRESS
+    for entry in hass.config_entries.async_entries(DOMAIN):
+        if entry.options.get(CONF_ENABLE_TOOL_PROGRESS, True):
             return True
     return False
 
@@ -206,6 +230,8 @@ async def websocket_get_settings(
             "enable_sidebar_dock": sidebar_dock_enabled(hass),
             "enable_sound_notifications": sound_notifications_enabled(hass),
             "enable_activity_tracking": activity_tracking_enabled(hass),
+            "enable_tool_details": tool_details_enabled(hass),
+            "enable_tool_progress": tool_progress_enabled(hass),
         },
     )
 
@@ -243,6 +269,16 @@ async def streaming_websocket_process(
     ) -> None:
         if event_conversation_id != conversation_id:
             return
+        from ..const import CONF_ENABLE_TOOL_DETAILS, DOMAIN
+        _details_on = False
+        for entry in hass.config_entries.async_entries(DOMAIN):
+            if entry.options.get(CONF_ENABLE_TOOL_DETAILS, False):
+                _details_on = True
+                break
+        if not _details_on and isinstance(data, dict):
+            delta = data.get("delta")
+            if isinstance(delta, dict) and "tool_calls" in delta and not delta.get("content"):
+                return
         connection.send_event(
             msg["id"],
             {
@@ -304,28 +340,18 @@ async def websocket_get_context_status(
     if conversation_id and conversation_id in all_logs:
         chat_log = all_logs[conversation_id]
         content = chat_log.content if chat_log else []
-        from .context_compressor import _estimate_total_tokens, get_compressor
+        from .context_compressor import _estimate_total_tokens
         tokens_used = _estimate_total_tokens(content)
-        try:
-            cc = get_compressor()
-            context_window = cc.context_length
-        except Exception:
-            context_window = 262144
+        context_window = 262144
     else:
         for cid, clog in all_logs.items():
             if clog and hasattr(clog, "content") and clog.content:
-                from .context_compressor import _estimate_total_tokens, get_compressor
+                from .context_compressor import _estimate_total_tokens
                 t = _estimate_total_tokens(clog.content)
                 if t > tokens_used:
                     tokens_used = t
                     conversation_id = cid
-        if tokens_used:
-            try:
-                from .context_compressor import get_compressor
-                cc = get_compressor()
-                context_window = cc.context_length
-            except Exception:
-                context_window = 262144
+        context_window = 262144
 
     if agent_id:
         try:
@@ -431,11 +457,6 @@ def _guess_mime(filename: str) -> str:
     return _MIME_MAP.get(ext, "application/octet-stream")
 
 
-# Binary signature prefixes; if any of these is the leading bytes of the file
-# we MUST NOT treat it as text — even if a small chunk decodes as valid UTF-8
-# by accident. Covers the common "weird" formats LLMs generate (PDF, zip,
-# images, audio/video, sqlite, …) so the content-sniff fallback below stays
-# safe.
 _BINARY_MAGIC_PREFIXES: tuple[bytes, ...] = (
     b"\x89PNG\r\n\x1a\n", b"\xff\xd8\xff", b"GIF87a", b"GIF89a",
     b"BM", b"RIFF", b"%PDF-", b"PK\x03\x04", b"PK\x05\x06", b"PK\x07\x08",
@@ -472,8 +493,6 @@ def _sniff_is_text(head: bytes) -> bool:
     try:
         sample.decode("utf-8")
     except UnicodeDecodeError:
-        # Allow truncation in the middle of a multi-byte char: retry
-        # without the trailing partial sequence.
         for cut in range(1, 4):
             try:
                 sample[:-cut].decode("utf-8")
@@ -504,9 +523,6 @@ class ClawFileView(HomeAssistantView):
         hass = request.app["hass"]
         from .data_path import output_dir_path
         output_dir = output_dir_path(hass).resolve()
-        # Path-traversal guard: resolve and verify the target stays inside
-        # OUTPUT_DIR. ``..`` segments / absolute paths in ``filename`` would
-        # otherwise let any unauthenticated client read arbitrary files.
         try:
             target = (output_dir / filename).resolve(strict=False)
             target.relative_to(output_dir)
@@ -514,10 +530,6 @@ class ClawFileView(HomeAssistantView):
             return web.Response(status=403, text="forbidden")
 
         def _probe() -> tuple[bool, bytes]:
-            # Read just enough to (a) confirm the file exists and (b) feed
-            # the text/binary sniffer below. 8KB is plenty: every common
-            # binary magic fits in the first ~16 bytes and a non-trivial
-            # UTF-8 truncation is impossible inside 8KB of valid text.
             try:
                 if not target.is_file():
                     return False, b""
@@ -532,10 +544,6 @@ class ClawFileView(HomeAssistantView):
 
         mime = _guess_mime(target.name)
         if _sniff_is_text(head):
-            # Treat the file as UTF-8 text regardless of extension — covers
-            # the long tail of "weird" formats the AI invents (.tex, .toml,
-            # .lua, made-up extensions, no extension at all, …) without
-            # forcing us to maintain a hand-curated allow-list.
             base = mime if mime.startswith("text/") else "text/plain"
             content_type = f"{base}; charset=utf-8"
         else:
@@ -921,18 +929,72 @@ def _install_recognize_intent_hook(hass) -> None:
         pipeline_mod.conversation.async_converse = _hooked_converse
         pipeline_mod.conversation.async_get_chat_log = _hooked_get_chat_log
 
-        if getattr(self, "tts_stream", None) is not None:
+        start_stage = getattr(self, "start_stage", None)
+        end_stage = getattr(self, "end_stage", None)
+        start_stage_str = str(start_stage).lower() if start_stage else ""
+        end_stage_str = str(end_stage).lower() if end_stage else ""
+        is_voice_input = "stt" in start_stage_str or "wake_word" in start_stage_str
+        has_tts_output = "tts" in end_stage_str
+        is_voice_pipeline = is_voice_input or has_tts_output
+
+        device_id = getattr(self, "_device_id", None)
+        device_info = None
+        detected_platform = None
+        if device_id:
+            try:
+                from homeassistant.helpers import device_registry as dr
+                device_registry = dr.async_get(self.hass)
+                device_entry = device_registry.async_get(device_id)
+                if device_entry:
+                    device_info = {
+                        "manufacturer": device_entry.manufacturer,
+                        "model": device_entry.model,
+                        "name": device_entry.name,
+                        "sw_version": device_entry.sw_version,
+                    }
+                    mfr = (device_entry.manufacturer or "").lower()
+                    model = (device_entry.model or "").lower()
+                    if "apple" in mfr or "iphone" in model or "ipad" in model:
+                        detected_platform = "ios_app"
+                    elif "samsung" in mfr or "google" in mfr or "xiaomi" in mfr or "huawei" in mfr or "oneplus" in mfr or "oppo" in mfr or "vivo" in mfr or "pixel" in model:
+                        detected_platform = "android_app"
+            except Exception:
+                pass
+
+        from .state import get_conversation_status, PLATFORM_IOS_APP, PLATFORM_ANDROID_APP_V2
+        conv_status = get_conversation_status(self.hass)
+        conv_status["is_voice_pipeline"] = is_voice_pipeline
+        conv_status["_voice_detection_source"] = f"pipeline:start={start_stage},end={end_stage}" if is_voice_pipeline else "pipeline:text"
+        conv_status["_pipeline_start_stage"] = start_stage_str
+        conv_status["_pipeline_end_stage"] = end_stage_str
+        conv_status["_pipeline_device_id"] = device_id
+        conv_status["_pipeline_device_info"] = device_info
+        if detected_platform:
+            conv_status["detected_platform"] = PLATFORM_IOS_APP if detected_platform == "ios_app" else PLATFORM_ANDROID_APP_V2
+        if is_voice_pipeline:
+            device_desc = ""
+            if detected_platform == "ios_app":
+                device_desc = "Device: iOS Companion App.\n"
+            elif detected_platform == "android_app":
+                device_desc = "Device: Android Companion App.\n"
+            elif device_info and device_info.get("name"):
+                device_desc = f"Device: {device_info['name']}.\n"
+            
             voice_hint = (
                 "## Channel\n"
-                "Type: voice (speech-to-text → you → text-to-speech pipeline).\n"
-                "The user spoke into a microphone; their words were transcribed by STT. "
+                "Type: voice (speech-to-text to text-to-speech pipeline).\n"
+                f"{device_desc}"
+                "The user spoke into a microphone and their words were transcribed by STT. "
                 "Your entire reply will be synthesized by a TTS engine and played back as audio. "
-                "The user will HEAR your answer, not read it. "
-                "Write exactly as you would speak: short, natural, conversational sentences. "
-                "Never use markdown formatting (bold, italic, headings, lists, tables, code blocks) — "
+                "The user will hear your answer, not read it. "
+                "Write exactly as you would speak to someone in person. "
+                "Use short, natural, conversational sentences. "
+                "Never use markdown formatting such as bold, italic, headings, lists, tables, or code blocks. "
                 "TTS will read the raw symbols aloud and it sounds terrible. "
-                "Never use emoji — they are either skipped or read as Unicode names. "
-                "Avoid URLs, file paths, and long numbers; paraphrase instead. "
+                "Never use emoji or special symbols. "
+                "They are either skipped or read as Unicode names. "
+                "Avoid URLs, file paths, and long numbers. "
+                "Paraphrase instead. "
                 "If the answer is complex, give a brief spoken summary and suggest "
                 "the user check the Home Assistant dashboard for details."
             )

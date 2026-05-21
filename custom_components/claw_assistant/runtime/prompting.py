@@ -191,10 +191,15 @@ def build_base_prompt(
     conversation_id: str | None,
     runtime_config: ConversationRuntimeConfig,
 ) -> str:
-    from .state import get_channel_type, is_im_channel
+    from .state import (
+        get_channel_type, is_im_channel, get_conversation_status,
+        is_companion_app, is_mobile_platform, get_platform_display_name,
+    )
+    from .official_websocket_hook import get_frontend_platform
 
     base_prompt = build_internal_llm_prompt(text)
-    appended_sections: list[str] = []
+    static_sections: list[str] = []
+    dynamic_sections: list[str] = []
 
     user_lang = _resolve_user_language(hass)
     lang_instruction = ""
@@ -206,8 +211,21 @@ def build_base_prompt(
         )
 
     ch_type = get_channel_type(conversation_id)
-    if is_im_channel(conversation_id):
-        appended_sections.append(
+    platform = get_frontend_platform(hass)
+    conv_status = get_conversation_status(hass)
+    detected_platform = conv_status.get("detected_platform")
+    if detected_platform:
+        platform = detected_platform
+    platform_name = get_platform_display_name(platform)
+    is_voice = conv_status.get("is_voice_pipeline", False)
+    pipeline_end_stage = conv_status.get("_pipeline_end_stage", "")
+    if "tts" in pipeline_end_stage:
+        is_voice = True
+
+    if is_voice:
+        pass
+    elif is_im_channel(conversation_id):
+        static_sections.append(
             f"## Channel\n"
             f"Type: {ch_type} (instant messaging).\n"
             f"You are chatting inside an IM bot (WeChat / QQ / etc.). "
@@ -216,10 +234,37 @@ def build_base_prompt(
             f"If the user sends an image or file, acknowledge it and describe what you see."
             f"{lang_instruction}"
         )
+    elif is_companion_app(platform):
+        static_sections.append(
+            f"## Channel\n"
+            f"Type: ha (Home Assistant Companion App).\n"
+            f"Platform: {platform_name}.\n"
+            f"The user is using the official Home Assistant mobile app. "
+            f"The chat interface is rendered in a WebView inside the app. "
+            f"Full markdown is supported. Rich media (images, videos) can be displayed. "
+            f"The user is on a mobile device with a smaller screen. "
+            f"Keep responses concise and mobile-friendly when appropriate. "
+            f"This is NOT a voice channel — the user is reading, not listening."
+            f"{lang_instruction}"
+        )
+    elif is_mobile_platform(platform):
+        static_sections.append(
+            f"## Channel\n"
+            f"Type: ha (Home Assistant mobile web).\n"
+            f"Platform: {platform_name}.\n"
+            f"The user is accessing Home Assistant via a mobile browser. "
+            f"Full markdown is supported. Rich media can be displayed. "
+            f"The user is on a mobile device with a smaller screen. "
+            f"Keep responses concise and mobile-friendly when appropriate. "
+            f"This is NOT a voice channel — the user is reading, not listening."
+            f"{lang_instruction}"
+        )
     else:
-        appended_sections.append(
+        platform_info = f"Platform: {platform_name}.\n" if platform else ""
+        static_sections.append(
             "## Channel\n"
             "Type: ha (Home Assistant frontend chat panel).\n"
+            f"{platform_info}"
             "You are inside the Home Assistant web UI Assist chat window. "
             "The user types text and reads your reply in a rich-markdown bubble. "
             "You may use full markdown: bold, italic, lists, tables, code blocks, etc. "
@@ -230,13 +275,17 @@ def build_base_prompt(
             f"{lang_instruction}"
         )
 
+    static_sections.extend(_build_runtime_preference_sections(runtime_config))
+
+    peer_section = _build_peer_agents_section(hass, runtime_config)
+    if peer_section:
+        static_sections.append(peer_section)
+
     topic_hint = build_homeassistant_topic_hint(text)
     if topic_hint:
-        appended_sections.append(
+        dynamic_sections.append(
             f"## Current Home Assistant Topic Hint\n{topic_hint}"
         )
-
-    appended_sections.extend(_build_runtime_preference_sections(runtime_config))
 
     context_lines = _build_unified_context(hass, conversation_id)
     shared_context = get_conversation_history().get_recent_context(
@@ -255,18 +304,14 @@ def build_base_prompt(
             f'\nFocus on the current request: "{text}"\n'
             "Reuse prior context only when it helps the current turn."
         )
-        appended_sections.append(history_prompt.strip())
-
-    peer_section = _build_peer_agents_section(hass, runtime_config)
-    if peer_section:
-        appended_sections.append(peer_section)
+        dynamic_sections.append(history_prompt.strip())
 
     config_prompt = build_config_approval_prompt_block(hass)
     if config_prompt:
-        appended_sections.append(config_prompt)
+        dynamic_sections.append(config_prompt)
 
     im_approval_prompt = build_im_approval_prompt_block(hass)
     if im_approval_prompt:
-        appended_sections.append(im_approval_prompt)
+        dynamic_sections.append(im_approval_prompt)
 
-    return _fit_base_prompt(base_prompt, appended_sections)
+    return _fit_base_prompt(base_prompt, static_sections + dynamic_sections)

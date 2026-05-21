@@ -25,6 +25,22 @@ def reset_active_conversation(token: Token[str]) -> None:
 
 _IM_PREFIXES = ("wechat:", "feishu:", "dingtalk:", "qq:")
 
+PLATFORM_ANDROID_APP_V2 = "android_app_v2"
+PLATFORM_ANDROID_APP = "android_app"
+PLATFORM_IOS_APP = "ios_app"
+PLATFORM_IOS_WEB = "ios_web"
+PLATFORM_ANDROID_WEB = "android_web"
+PLATFORM_MACOS_WEB = "macos_web"
+PLATFORM_WINDOWS_WEB = "windows_web"
+PLATFORM_LINUX_WEB = "linux_web"
+PLATFORM_WEB = "web"
+
+COMPANION_APP_PLATFORMS = (PLATFORM_ANDROID_APP_V2, PLATFORM_ANDROID_APP, PLATFORM_IOS_APP)
+MOBILE_PLATFORMS = (
+    PLATFORM_ANDROID_APP_V2, PLATFORM_ANDROID_APP, PLATFORM_IOS_APP,
+    PLATFORM_IOS_WEB, PLATFORM_ANDROID_WEB,
+)
+
 
 def is_im_channel(conversation_id: str | None) -> bool:
     return bool(conversation_id and conversation_id.startswith(_IM_PREFIXES))
@@ -37,6 +53,29 @@ def get_channel_type(conversation_id: str | None) -> str:
         if conversation_id.startswith(prefix):
             return prefix.rstrip(":")
     return "ha"
+
+
+def is_companion_app(platform: str | None) -> bool:
+    return platform in COMPANION_APP_PLATFORMS
+
+
+def is_mobile_platform(platform: str | None) -> bool:
+    return platform in MOBILE_PLATFORMS
+
+
+def get_platform_display_name(platform: str | None) -> str:
+    names = {
+        PLATFORM_ANDROID_APP_V2: "Android Companion App",
+        PLATFORM_ANDROID_APP: "Android Companion App",
+        PLATFORM_IOS_APP: "iOS Companion App",
+        PLATFORM_IOS_WEB: "iOS Safari",
+        PLATFORM_ANDROID_WEB: "Android Browser",
+        PLATFORM_MACOS_WEB: "macOS Browser",
+        PLATFORM_WINDOWS_WEB: "Windows Browser",
+        PLATFORM_LINUX_WEB: "Linux Browser",
+        PLATFORM_WEB: "Web Browser",
+    }
+    return names.get(platform or "", "Unknown")
 
 
 RUNTIME_STORE_KEY = "runtime_state"

@@ -182,7 +182,11 @@ def install_conversation_hook(hass: HomeAssistant, entry: ConfigEntry) -> None:
                     frontend_lang = lang_data["language"]
         except Exception:
             pass
-        get_conversation_status(hass)["user_language"] = frontend_lang
+        status = get_conversation_status(hass)
+        status["user_language"] = frontend_lang
+        if satellite_id:
+            status["is_voice_pipeline"] = True
+            status["_voice_detection_source"] = "satellite_id"
         if agent_id is not None and agent_id != entry.entry_id:
             result = await original_async_converse(
                 hass, text, conversation_id, context, language,
