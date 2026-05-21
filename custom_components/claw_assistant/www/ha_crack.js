@@ -218,6 +218,7 @@
         setupFileUpload(hass);
         setupFrontendBridge(hass);
         setupSoundNotifications(hass);
+        setupSlashCommands(hass);
         setTimeout(() => {
             if (window.HACrack?.preventAssistDialogClose) {
                 window.HACrack.preventAssistDialogClose();
@@ -5448,5 +5449,195 @@
             }
         }
     });
+
+    function setupSlashCommands(hass) {
+        if (!hass?.connection) return;
+        if (window.__clawSlashSetup) return;
+        window.__clawSlashSetup = true;
+
+        let commands = [];
+        let popup = null;
+        let selectedIndex = 0;
+        let currentInput = null;
+
+        const fetchCommands = async () => {
+            try {
+                const r = await hass.connection.sendMessagePromise({ type: 'ha_crack/get_commands' });
+                commands = r?.commands || [];
+            } catch(e) {}
+        };
+        fetchCommands();
+        setInterval(fetchCommands, 60000);
+
+        const isZh = () => {
+            try {
+                const lang = hass?.language || 
+                             hass?.locale?.language ||
+                             localStorage.getItem('selectedLanguage') || 
+                             document.documentElement.lang || 
+                             navigator.language || '';
+                return lang.toLowerCase().startsWith('zh');
+            } catch(e) { return false; }
+        };
+
+        const createPopup = (container, haInput) => {
+            if (popup) popup.remove();
+            popup = document.createElement('div');
+            popup.id = 'claw-slash-popup';
+            popup.style.cssText = 'position:absolute;max-height:280px;overflow-y:auto;background:var(--card-background-color,#fff);border:1px solid var(--divider-color,#e0e0e0);border-radius:5px 5px 0 0;box-shadow:0 -2px 8px rgba(0,0,0,0.1);z-index:9999;display:none;';
+            container.appendChild(popup);
+            popup._haInput = haInput;
+            popup.addEventListener('mousedown', (e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                const item = e.target.closest('.claw-slash-item');
+                if (item) selectCommand(item.dataset.name);
+            });
+            popup.addEventListener('mouseover', (e) => {
+                const item = e.target.closest('.claw-slash-item');
+                if (item) {
+                    const idx = parseInt(item.dataset.index);
+                    if (idx !== selectedIndex) {
+                        selectedIndex = idx;
+                        updateSelection();
+                    }
+                }
+            });
+            return popup;
+        };
+        
+        const positionPopup = () => {
+            if (!popup || !popup._haInput) return;
+            const rect = popup._haInput.getBoundingClientRect();
+            const containerRect = popup.parentElement.getBoundingClientRect();
+            popup.style.left = (rect.left - containerRect.left) + 'px';
+            popup.style.width = rect.width + 'px';
+            popup.style.bottom = (containerRect.bottom - rect.top + 4) + 'px';
+        };
+
+        const updateSelection = () => {
+            if (!popup) return;
+            popup.querySelectorAll('.claw-slash-item').forEach((el, i) => {
+                el.style.background = i === selectedIndex ? 'var(--primary-color,#03a9f4)' : '';
+                el.style.color = i === selectedIndex ? '#fff' : '';
+            });
+        };
+
+        const renderItems = (filter) => {
+            if (!popup) return;
+            const zh = isZh();
+            const filtered = commands.filter(c => {
+                const q = filter.toLowerCase();
+                return c.name.toLowerCase().includes(q) || 
+                       (c.aliases || []).some(a => a.toLowerCase().includes(q)) ||
+                       c.description.toLowerCase().includes(q) ||
+                       (c.description_zh || '').toLowerCase().includes(q);
+            });
+            if (filtered.length === 0) {
+                popup.style.display = 'none';
+                return;
+            }
+            selectedIndex = Math.min(selectedIndex, filtered.length - 1);
+            popup.innerHTML = filtered.map((c, i) => {
+                const desc = zh && c.description_zh ? c.description_zh : c.description;
+                const sel = i === selectedIndex ? 'background:var(--primary-color,#03a9f4);color:#fff;' : '';
+                return `<div class="claw-slash-item" data-index="${i}" data-name="${c.name}" style="padding:8px 12px;cursor:pointer;display:flex;align-items:center;gap:16px;${sel}"><span style="font-weight:500;white-space:nowrap;flex-shrink:0;">/${c.name}</span><span style="opacity:0.7;font-size:0.9em;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1;min-width:0;">${desc}</span></div>`;
+            }).join('');
+            popup.style.display = 'block';
+            positionPopup();
+        };
+
+        let chatRef = null;
+        let nativeInputRef = null;
+
+        const selectCommand = (name) => {
+            const val = '/' + name + ' ';
+            hidePopup();
+            const native = nativeInputRef || chatRef?._messageInput?.shadowRoot?.querySelector('input');
+            if (native) {
+                native.focus();
+                native.value = val;
+                native.dispatchEvent(new InputEvent('input', { bubbles: true, composed: true, data: val }));
+                native.setSelectionRange(val.length, val.length);
+            }
+        };
+
+        const hidePopup = () => {
+            if (popup) popup.style.display = 'none';
+            selectedIndex = 0;
+        };
+
+        const handleInput = (e) => {
+            const inp = e.target;
+            const val = inp.value || '';
+            if (val.startsWith('/') && !val.includes(' ')) {
+                currentInput = inp;
+                const chat = chatRef || deepQuery('ha-assist-chat');
+                const sr = chat?.shadowRoot;
+                if (!sr) return;
+                const inputDiv = sr.querySelector('div.input[slot="primaryAction"]');
+                const haInput = sr.querySelector('ha-input#message-input');
+                if (!popup || !sr.contains(popup)) {
+                    if (inputDiv && haInput) {
+                        inputDiv.style.position = 'relative';
+                        popup = createPopup(inputDiv, haInput);
+                    }
+                }
+                renderItems(val.slice(1));
+            } else {
+                hidePopup();
+            }
+        };
+
+        const handleKeydown = (e) => {
+            if (!popup || popup.style.display === 'none') return;
+            const items = popup.querySelectorAll('.claw-slash-item');
+            if (e.key === 'ArrowDown') {
+                e.preventDefault();
+                selectedIndex = (selectedIndex + 1) % items.length;
+                renderItems(currentInput?.value?.slice(1) || '');
+            } else if (e.key === 'ArrowUp') {
+                e.preventDefault();
+                selectedIndex = (selectedIndex - 1 + items.length) % items.length;
+                renderItems(currentInput?.value?.slice(1) || '');
+            } else if (e.key === 'Enter' || e.key === 'Tab') {
+                const sel = items[selectedIndex];
+                if (sel) {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    selectCommand(sel.dataset.name);
+                }
+            } else if (e.key === 'Escape') {
+                hidePopup();
+            }
+        };
+
+        const installHandler = () => {
+            const chat = deepQuery('ha-assist-chat');
+            if (!chat?.shadowRoot) return;
+            chatRef = chat;
+            const sr = chat.shadowRoot;
+            const haInput = sr.querySelector('ha-input#message-input');
+            if (!haInput || haInput.__clawSlashBound) return;
+            haInput.__clawSlashBound = true;
+            const native = haInput.shadowRoot?.querySelector('input') || haInput.querySelector('input');
+            nativeInputRef = native;
+            const onInput = (e) => {
+                currentInput = e.target;
+                nativeInputRef = e.target;
+                handleInput(e);
+            };
+            if (native) {
+                native.addEventListener('input', onInput);
+                native.addEventListener('keydown', handleKeydown, true);
+            }
+            haInput.addEventListener('input', onInput);
+            haInput.addEventListener('keydown', handleKeydown, true);
+        };
+
+        window.addEventListener('claw-chat-updated', installHandler);
+        setInterval(installHandler, 3000);
+        installHandler();
+    }
     
 })();

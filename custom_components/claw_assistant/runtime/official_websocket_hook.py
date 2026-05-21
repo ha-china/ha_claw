@@ -1141,6 +1141,37 @@ async def websocket_user_activity(hass, connection, msg):
     connection.send_result(msg["id"])
 
 
+@websocket_api.websocket_command(
+    {
+        vol.Required("type"): "ha_crack/get_commands",
+    }
+)
+@websocket_api.async_response
+async def websocket_get_commands(hass, connection, msg):
+    from ..command_registry import core_command_specs
+    from ..chat_commands import _skill_command_registry
+    commands = []
+    for spec in core_command_specs():
+        commands.append({
+            "name": spec.name,
+            "description": spec.description,
+            "description_zh": spec.description_zh,
+            "category": spec.category,
+            "aliases": list(spec.aliases),
+        })
+    skill_registry = _skill_command_registry()
+    for name, skill in skill_registry.items():
+        desc = skill.get("description", "") if isinstance(skill, dict) else ""
+        commands.append({
+            "name": name,
+            "description": desc,
+            "description_zh": "",
+            "category": "Skill",
+            "aliases": [],
+        })
+    connection.send_result(msg["id"], {"commands": commands})
+
+
 def install_official_websocket_process_hook(hass) -> None:
 
     domain_data = hass.data.setdefault("claw_assistant", {})
@@ -1158,6 +1189,7 @@ def install_official_websocket_process_hook(hass) -> None:
         ("ha_crack/frontend_exec_subscribe", websocket_frontend_exec_subscribe),
         ("ha_crack/dialog_snapshot", websocket_dialog_snapshot),
         ("ha_crack/user_activity", websocket_user_activity),
+        ("ha_crack/get_commands", websocket_get_commands),
     ):
         if cmd_type not in handlers:
             websocket_api.async_register_command(hass, cmd)
