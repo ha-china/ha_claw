@@ -125,6 +125,10 @@ _MESSAGES: dict[str, dict[str, str]] = {
         "zh": "信息",
         "en": "Info",
     },
+    "cmd_category_plugin": {
+        "zh": "插件",
+        "en": "Plugin",
+    },
     "cmd_skill_commands": {
         "zh": "技能命令",
         "en": "Skill commands",
@@ -166,8 +170,8 @@ _MESSAGES: dict[str, dict[str, str]] = {
         "en": "third",
     },
     "cmd_model_switch_hint": {
-        "zh": "切换: /model <序号>           设为主力\n       /model <序号> fallback  设为备用\n       /model <序号> third     设为第三（可选）\n       /model third none     清除第三",
-        "en": "Switch: /model <number>            set as primary\n        /model <number> fallback   set as fallback\n        /model <number> third      set as third (optional)\n        /model third none          clear third",
+        "zh": "\u200b`/model 序号` — 设为主力\n\u200b`/model 序号 fallback` — 设为备用\n\u200b`/model 序号 third` — 设为第三（可选）\n\u200b`/model third none` — 清除第三",
+        "en": "\u200b`/model number` — set as primary\n\u200b`/model number fallback` — set as fallback\n\u200b`/model number third` — set as third (optional)\n\u200b`/model third none` — clear third",
     },
     "cmd_model_third_cleared": {
         "zh": "已清除第三模型 ✓",

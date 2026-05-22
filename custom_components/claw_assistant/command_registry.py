@@ -64,13 +64,16 @@ CORE_COMMAND_REGISTRY: tuple[CommandSpec, ...] = (
     CommandSpec(
         name="model",
         usage="/model",
-        description="List available AI agents or switch primary/fallback by number.",
-        description_zh="列出可用模型或按序号切换主力/备用。",
+        description="List available AI agents or switch primary/fallback/third by number.",
+        description_zh="列出可用模型或按序号切换主力/备用/第三。",
         category="Config",
         aliases=("models",),
         subcommands=(
             ("/model", "List all available models.", "列出所有可用模型。"),
-            ("/model <number>", "Switch to model by number.", "按序号切换模型。"),
+            ("/model 序号", "Set as primary.", "设为主力。"),
+            ("/model 序号 fallback", "Set as fallback.", "设为备用。"),
+            ("/model 序号 third", "Set as third (optional).", "设为第三（可选）。"),
+            ("/model third none", "Clear third model.", "清除第三模型。"),
         ),
     ),
     CommandSpec(
@@ -104,11 +107,46 @@ CORE_COMMAND_REGISTRY: tuple[CommandSpec, ...] = (
             ("/goal clear", "Stop and remove the goal.", "停止并清除目标。"),
         ),
     ),
+    CommandSpec(
+        name="plugin",
+        usage="/plugin",
+        description="Manage installed plugins. AI handles plugin tools internally.",
+        description_zh="管理已安装插件。插件工具由 AI 内部处理。",
+        category="System",
+        aliases=("plugins",),
+        subcommands=(
+            ("/plugin list", "List installed plugins.", "列出已安装插件。"),
+            ("/plugin status", "Check plugin status.", "检查插件状态。"),
+        ),
+    ),
 )
 
 
 def core_command_specs() -> tuple[CommandSpec, ...]:
     return CORE_COMMAND_REGISTRY
+
+
+def get_plugin_command_specs() -> list[CommandSpec]:
+    try:
+        from .plugins.context import _REGISTERED_COMMANDS
+        specs = []
+        for name, (_, description) in _REGISTERED_COMMANDS.items():
+            specs.append(CommandSpec(
+                name=name,
+                usage=f"/{name}",
+                description=description or f"Plugin command: {name}",
+                description_zh=description or f"插件命令: {name}",
+                category="Plugin",
+            ))
+        return specs
+    except Exception:
+        return []
+
+
+def all_command_specs() -> list[CommandSpec]:
+    specs = list(CORE_COMMAND_REGISTRY)
+    specs.extend(get_plugin_command_specs())
+    return specs
 
 
 def build_core_command_map() -> dict[str, CommandSpec]:
@@ -120,11 +158,20 @@ def build_core_command_map() -> dict[str, CommandSpec]:
     return lookup
 
 
+def build_full_command_map() -> dict[str, CommandSpec]:
+    lookup = build_core_command_map()
+    for spec in get_plugin_command_specs():
+        lookup[spec.name] = spec
+        for alias in spec.aliases:
+            lookup[alias] = spec
+    return lookup
+
+
 def resolve_core_command(name: str) -> CommandSpec | None:
     lookup = name.strip().lower().lstrip("/")
     if not lookup:
         return None
-    return build_core_command_map().get(lookup)
+    return build_full_command_map().get(lookup)
 
 
 def reserved_command_names() -> frozenset[str]:

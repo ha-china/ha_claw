@@ -11,6 +11,7 @@ from homeassistant.helpers import intent
 from .command_registry import (
     CommandSpec,
     core_command_specs,
+    all_command_specs,
     reserved_command_names,
     resolve_core_command,
 )
@@ -78,12 +79,18 @@ def _strip_wrapper_prefix(text: str) -> str:
 
 
 def _resolve_command_name(name: str) -> tuple[str, str] | None:
+    from .runtime.plugin_store import get_plugin_tool_registry
     lowered = name.lower()
     core_spec = resolve_core_command(lowered)
     if core_spec is not None:
+        if core_spec.category == "Plugin":
+            return "plugin_invoke", lowered
         return core_spec.name, lowered
     if _skill_command_registry().get(lowered) is not None:
         return "skill_invoke", lowered
+    plugin_registry = get_plugin_tool_registry()
+    if lowered in plugin_registry or name in plugin_registry:
+        return "plugin_tool_invoke", name if name in plugin_registry else lowered
     return None
 
 
@@ -126,7 +133,8 @@ def _build_result(
     message: str,
 ) -> conversation.ConversationResult:
     response = intent.IntentResponse(language=user_input.language)
-    response.async_set_speech(message)
+    formatted = f"\u200b\n\n{message}" if message and not message.startswith("\u200b") else message
+    response.async_set_speech(formatted)
     return conversation.ConversationResult(
         conversation_id=user_input.conversation_id,
         response=response,
@@ -224,6 +232,7 @@ _CATEGORY_KEYS = {
     "Skills": "cmd_category_skills",
     "Config": "cmd_category_config",
     "Info": "cmd_category_info",
+    "Plugin": "cmd_category_plugin",
 }
 
 
@@ -233,11 +242,11 @@ def _escape_md_angles(s: str) -> str:
 
 def _build_command_catalog_message(language: str | None = None) -> str:
     grouped: dict[str, list[CommandSpec]] = {}
-    for spec in core_command_specs():
+    for spec in all_command_specs():
         grouped.setdefault(spec.category, []).append(spec)
 
     lines: list[str] = []
-    for category in ("Session", "Skills", "Config", "Info"):
+    for category in ("Session", "Skills", "Config", "Info", "Plugin"):
         specs = grouped.get(category, [])
         if not specs:
             continue
@@ -250,57 +259,51 @@ def _build_command_catalog_message(language: str | None = None) -> str:
             if spec.subcommands:
                 from .runtime.reply_formatter import is_chinese
                 zh = is_chinese(language)
-                for sub_usage, sub_desc_en, sub_desc_zh in spec.subcommands:
+                for i, (sub_usage, sub_desc_en, sub_desc_zh) in enumerate(spec.subcommands):
                     sub_usage_esc = _escape_md_angles(sub_usage)
                     sub_desc = sub_desc_zh if zh else sub_desc_en
-                    lines.append(f"`{sub_usage_esc}` — {sub_desc}")
+                    if i == 0:
+                        lines.append("")
+                    lines.append(f"\u200b`{sub_usage_esc}` — {sub_desc}")
                     lines.append("")
             else:
                 usage = _escape_md_angles(spec.usage)
                 desc = _spec_desc(spec, language)
-                lines.append(f"`{usage}` — {desc}")
+                lines.append(f"\u200b`{usage}` — {desc}")
                 lines.append("")
 
-    skill_registry = _skill_command_registry()
-    if skill_registry:
-        lines.extend(["", f"**{t('cmd_skill_commands', language)}**", ""])
-        for command_name, skill in sorted(skill_registry.items()):
-            description = str(skill.get("description", "") or "").strip()
-            suffix = f" — {description}" if description else ""
-            lines.append(f"`/{command_name}`{suffix}")
-            lines.append("")
-
-    conflicts = _conflicting_skill_commands()
-    if conflicts:
-        lines.extend(["", f"**{t('cmd_skill_conflicts', language)}**", ""])
-        for entry in conflicts[:8]:
-            skill = entry["skill"]
-            skill_name = str(skill.get("name", "") or skill.get("slug", ""))
-            lines.append(f"- {skill_name} ({entry['reason']})")
-        remaining = len(conflicts) - min(len(conflicts), 8)
-        if remaining > 0:
-            lines.append(f"... and {remaining} more")
-
+    lines.append("")
+    lines.append(f"\u200b{t('cmd_help_footer', language)}")
+    lines.append("")
     return "\n".join(lines)
 
 
 def _build_help_message(command_name: str = "", language: str | None = None) -> str:
     lookup = command_name.strip()
     if not lookup:
-        return (
-            f"\u200b\n\n{_build_command_catalog_message(language)}\n\n"
-            f"---\n{t('cmd_help_footer', language)}"
-        )
+        return f"\u200b\n\n{_build_command_catalog_message(language)}"
 
     spec = _find_core_command_spec(lookup)
     if spec is not None:
         usage = _escape_md_angles(spec.usage)
-        return (
-            f"**/{spec.name}**\n\n"
-            f"{t('cmd_help_usage', language)}: `{usage}`\n"
-            f"{t('cmd_help_category', language)}: {t(_CATEGORY_KEYS.get(spec.category, spec.category), language)}\n\n"
-            f"{_spec_desc(spec, language)}"
-        )
+        lines = [
+            f"**/{spec.name}**",
+            "",
+            f"{t('cmd_help_usage', language)}: `{usage}`",
+            f"{t('cmd_help_category', language)}: {t(_CATEGORY_KEYS.get(spec.category, spec.category), language)}",
+            "",
+            _spec_desc(spec, language),
+        ]
+        if spec.subcommands:
+            from .runtime.reply_formatter import is_chinese
+            zh = is_chinese(language)
+            lines.append("")
+            for sub_usage, sub_desc_en, sub_desc_zh in spec.subcommands:
+                sub_usage_esc = _escape_md_angles(sub_usage)
+                sub_desc = sub_desc_zh if zh else sub_desc_en
+                lines.append(f"\u200b`{sub_usage_esc}` — {sub_desc}")
+                lines.append("")
+        return "\n".join(lines)
 
     normalized = lookup.lower().lstrip("/")
     skill_meta = _skill_command_registry().get(normalized)
@@ -962,11 +965,33 @@ async def async_handle_chat_command(
             )
         return await hass.async_add_executor_job(_invoke)
 
+    if command.name == "plugin_invoke":
+        from .plugins.context import _REGISTERED_COMMANDS
+        cmd_entry = _REGISTERED_COMMANDS.get(command.raw_name)
+        if cmd_entry is None:
+            return ChatCommandOutcome(
+                result=_build_result(user_input, f"Plugin command not found: /{command.raw_name}")
+            )
+        handler, description = cmd_entry
+        try:
+            result = handler(command.args)
+            if isinstance(result, str):
+                return ChatCommandOutcome(result=_build_result(user_input, result))
+            return ChatCommandOutcome(result=_build_result(user_input, str(result) if result else "OK"))
+        except Exception as e:
+            return ChatCommandOutcome(result=_build_result(user_input, f"Plugin command error: {e}"))
+
     if command.name == "model":
         return await _handle_model_command(hass, user_input, command.args)
 
     if command.name == "goal":
         return await _handle_goal_command(hass, user_input, command.args)
+
+    if command.name == "plugin":
+        return await _handle_plugin_command(hass, user_input, command.args)
+
+    if command.name == "plugin_tool_invoke":
+        return await _handle_plugin_tool_invoke(hass, user_input, command.raw_name, command.args)
 
     return None
 
@@ -1137,3 +1162,137 @@ async def _handle_model_command(hass, user_input, args: str) -> ChatCommandOutco
     return ChatCommandOutcome(result=_build_result(
         user_input, t("cmd_model_switched", lang).replace("{name}", target["label"]).replace("{role}", role_label)
     ))
+
+
+def _build_plugin_usage_message() -> str:
+    return (
+        "Usage:\n"
+        "/plugin list\n"
+        "/plugin status"
+    )
+
+
+def _format_plugin_brief(plugin: dict[str, Any]) -> str:
+    name = str(plugin.get("name", "")).strip() or "unknown"
+    version = str(plugin.get("version", "")).strip()
+    loaded = plugin.get("loaded", False)
+    tools_count = plugin.get("tools_count", 0)
+    status = "loaded" if loaded else "not loaded"
+    ver_str = f" v{version}" if version else ""
+    return f"- {name}{ver_str} | {status} | {tools_count} tools"
+
+
+def _format_plugin_list(plugins: list[dict[str, Any]], *, limit: int = 12) -> str:
+    if not plugins:
+        return "No installed plugins."
+    lines = [_format_plugin_brief(p) for p in plugins[: max(limit, 0)]]
+    remaining = len(plugins) - len(lines)
+    if remaining > 0:
+        lines.append(f"... and {remaining} more")
+    return "\n".join(lines)
+
+
+async def _handle_plugin_command(
+    hass,
+    user_input: conversation.ConversationInput,
+    args: str,
+) -> ChatCommandOutcome:
+    from .runtime.plugin_store import get_loaded_plugins, list_installed_plugins
+
+    raw = (args or "").strip().lower()
+
+    if not raw or raw in ("list", "ls", "installed"):
+        plugins = await hass.async_add_executor_job(list_installed_plugins)
+        message = _build_plugin_usage_message()
+        if plugins:
+            message += "\n\nInstalled plugins:\n" + _format_plugin_list(plugins)
+        else:
+            message += "\n\nNo plugins installed."
+        return ChatCommandOutcome(result=_build_result(user_input, message))
+
+    if raw in ("status", "loaded", "active"):
+        loaded = get_loaded_plugins()
+        if not loaded:
+            return ChatCommandOutcome(result=_build_result(user_input, "No active plugins."))
+        lines = ["Active plugins:"]
+        for p in loaded:
+            name = p.get("name", "?")
+            tools = p.get("tools", [])
+            lines.append(f"- {name}: {len(tools)} tools")
+        lines.append("")
+        lines.append("Plugin tools are invoked internally by AI via PluginManager.")
+        return ChatCommandOutcome(result=_build_result(user_input, "\n".join(lines)))
+
+    return ChatCommandOutcome(result=_build_result(user_input, _build_plugin_usage_message()))
+
+
+async def _handle_plugin_tool_invoke(
+    hass,
+    user_input: conversation.ConversationInput,
+    tool_name: str,
+    args: str,
+) -> ChatCommandOutcome:
+    from .runtime.plugin_store import get_plugin_tool_registry
+    from .runtime.tool_executor import execute_kernel_tool
+    import json
+
+    plugin_registry = get_plugin_tool_registry()
+    if tool_name not in plugin_registry:
+        return ChatCommandOutcome(result=_build_result(
+            user_input, f"Plugin tool not found: {tool_name}"
+        ))
+
+    tool_args = {}
+    user_query = args.strip()
+    if user_query:
+        if user_query.startswith("{"):
+            try:
+                tool_args = json.loads(user_query)
+                user_query = ""
+            except json.JSONDecodeError:
+                pass
+
+    try:
+        result = await execute_kernel_tool(
+            hass,
+            tool_name=tool_name,
+            tool_args=tool_args,
+            agent_id="conversation",
+            context=None,
+            language=user_input.language,
+            device_id=None,
+        )
+        filtered_result = _filter_plugin_tool_result(result)
+        result_json = json.dumps(filtered_result, ensure_ascii=False)
+        injected_text = f"[Plugin tool {tool_name} executed. Result: {result_json}]"
+        if user_query:
+            injected_text += f" User question: {user_query}"
+        else:
+            injected_text += " Summarize the result for the user."
+        return ChatCommandOutcome(
+            rewritten_text=injected_text,
+            result=None,
+        )
+    except Exception as e:
+        return ChatCommandOutcome(result=_build_result(user_input, f"Plugin tool error: {e}"))
+
+
+def _filter_plugin_tool_result(result: dict) -> dict:
+    """Filter sensitive fields from plugin tool result."""
+    if not isinstance(result, dict):
+        return result
+    sensitive_keys = {
+        "plugin_path", "module_path", "hermes_home", "database_path",
+        "database_path_source", "plugin_git_commit", "plugin_git_remote",
+        "plugin_git_branch", "plugin_git_dirty", "tool_args",
+    }
+    filtered = {}
+    for key, value in result.items():
+        if key in sensitive_keys:
+            continue
+        if isinstance(value, dict):
+            value = _filter_plugin_tool_result(value)
+        elif isinstance(value, list):
+            value = [_filter_plugin_tool_result(v) if isinstance(v, dict) else v for v in value]
+        filtered[key] = value
+    return filtered
