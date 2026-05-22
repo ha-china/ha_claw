@@ -1,7 +1,7 @@
 (function() {
     'use strict';
     
-    const HACRACK_VERSION = '8.4.0';
+    const HACRACK_VERSION = '8.5.0';
     if (window.__hacrackVersion && window.__hacrackVersion !== HACRACK_VERSION) {
         const reloadKey = '__hacrackReloadCount';
         const reloads = parseInt(sessionStorage.getItem(reloadKey) || '0', 10);
@@ -176,16 +176,18 @@
             '[class*="backdrop"]',
             'mwc-dialog[open]::before'
         ];
+        const hpcOverlay = document.getElementById('html-pro-card-overlay');
         let removed = 0;
         overlaySelectors.forEach(sel => {
             deepQueryAll(sel).forEach(el => {
-                if (el.style) {
+                if (el.style && el.id !== 'html-pro-card-overlay' && !hpcOverlay?.contains(el)) {
                     el.style.pointerEvents = 'none';
                     removed++;
                 }
             });
         });
         const highZElements = deepQueryAll('*').filter(el => {
+            if (el.id === 'html-pro-card-overlay' || hpcOverlay?.contains(el)) return false;
             const z = parseInt(getComputedStyle(el).zIndex) || 0;
             const isOverlay = z > 100 && el.offsetWidth > window.innerWidth * 0.5 && el.offsetHeight > window.innerHeight * 0.5;
             return isOverlay && !el.querySelector('button, input, a');
@@ -1986,7 +1988,8 @@
                 const act = activities.find(a => a.tool_call_id === part.id || a.marker_id === part.id);
                 if (!act) continue;
                 const built = _buildCardHtml(act);
-                html += '<div class="claw-ta-card collapsed" data-ta-id="' + _escHtml(built.taId) + '"' + (act.result !== undefined ? ' data-has-result="1"' : '') + '>' + built.html + '</div>';
+                const cardClass = _mdStreamActive ? 'claw-ta-card' : 'claw-ta-card collapsed';
+                html += '<div class="' + cardClass + '" data-ta-id="' + _escHtml(built.taId) + '"' + (act.result !== undefined ? ' data-has-result="1"' : '') + '>' + built.html + '</div>';
             }
             if (_mdStreamActive && parts[parts.length - 1]?.type !== 'text') {
                 html += '<div class="claw-md-text"><p>...</p></div>';
@@ -4406,10 +4409,13 @@
             turnEnd = null;
             if (!keepTokens) {
                 totalChars = 0;
-                backendTokens = 0;
                 windowStart = Date.now();
                 windowTimeLabel = '0s';
                 hasTurn = false;
+                window.__clawToolActivities = [];
+                window.__clawToolActivitySeen = false;
+                window.__clawTurnParts = [];
+                _mdStreamActive = false;
             }
             if (tickTimer) { clearInterval(tickTimer); tickTimer = null; }
             if (removeBar) {
@@ -4499,31 +4505,12 @@
             render();
         };
 
-        let backendTokens = 0;
-        let backendCtx = 0;
-
-        window.__clawSetHistoryTokens = (tokens) => {
-            if (tokens > 0) {
-                backendTokens = tokens;
-                hasTurn = true;
-                render();
-            }
-        };
-
-        const fetchBackendTokens = async () => {
-            try {
-                const r = await hass.connection.sendMessagePromise({ type: 'ha_crack/get_context_status' });
-                if (r?.tokens_used) backendTokens = r.tokens_used;
-                if (r?.context_window) backendCtx = r.context_window;
-            } catch(e) {}
-        };
 
         const endTurn = () => {
             if (phase === S_IDLE) return;
             turnEnd = Date.now();
             phase = S_IDLE;
             if (tickTimer) { clearInterval(tickTimer); tickTimer = null; }
-            fetchBackendTokens().then(render);
             render();
         };
 
@@ -4556,6 +4543,7 @@
                                 _scheduleToolRender();
                             }
                             if (delta._claw_thinking) {
+                                _mdStreamActive = false;
                                 if (window.__clawToolDetailsEnabled) {
                                     const markerId = '_thinking_singleton';
                                     const parts = window.__clawTurnParts || (window.__clawTurnParts = []);
@@ -4668,9 +4656,7 @@
 
             hass.connection.subscribeEvents(ev => {
                 const d = ev.data;
-                if (d?.tokens_used > 0) {
-                    backendTokens = d.tokens_used;
-                    if (d.context_window > 0) backendCtx = d.context_window;
+                if (d?.phase) {
                     hasTurn = true;
                     render();
                 }
@@ -4725,10 +4711,10 @@
                 else { const m=sr.querySelector('.messages'); if(m) m.parentNode.insertBefore(bar,m.nextSibling); else sr.appendChild(bar); }
             }
 
-            if (hasTurn) totalChars = calcCurrentChars();
-            const localTk = Math.round(totalChars/CPT) + (hasTurn ? BASE_PROMPT_TOKENS : 0);
-            const tk = backendTokens > localTk ? backendTokens : localTk;
-            const ctxW = backendCtx || CTX;
+            const currentChars = calcCurrentChars();
+            if (currentChars > totalChars) totalChars = currentChars;
+            const tk = Math.round(totalChars/CPT*0.25) + (hasTurn ? BASE_PROMPT_TOKENS : 0);
+            const ctxW = CTX;
             const pct = Math.min(100, Math.round(tk/ctxW*100));
             const pc = pctColor(pct);
             const active = phase !== S_IDLE;
@@ -4790,10 +4776,7 @@
                 const chars = calcCurrentChars();
                 if (chars > 0) {
                     hasTurn = true;
-                    // Only update totalChars if backendTokens not set (avoid overwriting accurate backend data)
-                    if (backendTokens === 0) {
-                        totalChars = chars;
-                    }
+                    totalChars = chars;
                 }
                 installHooks();
                 render();
