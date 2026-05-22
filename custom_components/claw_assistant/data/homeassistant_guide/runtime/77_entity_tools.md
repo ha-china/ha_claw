@@ -76,7 +76,9 @@ Expose/unexpose entities to conversation.
 
 ## IntentCall
 
-List or call intent handlers.
+List or call third-party Home Assistant intent handlers only.
+
+Do not use `IntentCall` for Claw plugins, plugin tools, skills, slash commands, or tools already listed in the function schema. Claw plugin tools are separate tools and must be called directly by their tool name.
 
 ### List
 

@@ -271,16 +271,25 @@ _EMBEDDED_JS_PATTERNS = (
 )
 
 
+def _parse_js_object_fallback(raw_js: str) -> Any:
+    """Parse JS object using Python's json with preprocessing, fallback when chompjs unavailable."""
+    import json
+    cleaned = raw_js.strip()
+    cleaned = re.sub(r"'([^']*)':", r'"\1":', cleaned)
+    cleaned = re.sub(r":\s*'([^']*)'", r': "\1"', cleaned)
+    cleaned = re.sub(r',\s*([}\]])', r'\1', cleaned)
+    cleaned = re.sub(r'([{,]\s*)(\w+)(\s*:)', r'\1"\2"\3', cleaned)
+    try:
+        return json.loads(cleaned)
+    except json.JSONDecodeError:
+        return None
+
+
 def _extract_embedded_js_data(
     page: Selector,
     *,
     default_title: str,
 ) -> ExtractedWebContent | None:
-    try:
-        import chompjs
-    except ImportError:
-        return None
-
     html = str(page)
     
     for pattern, strategy in _EMBEDDED_JS_PATTERNS:
@@ -288,7 +297,7 @@ def _extract_embedded_js_data(
         if match:
             try:
                 raw_js = match.group(1)
-                data = chompjs.parse_js_object(raw_js)
+                data = _parse_js_object_fallback(raw_js)
                 if isinstance(data, dict):
                     text_content = _extract_text_from_json(data)
                     if text_content and len(text_content) >= _min_text_threshold(text_content):
@@ -307,15 +316,15 @@ def _extract_embedded_js_data(
         if "src=" in str(script) or "function(" in script_text[:200]:
             continue
         try:
-            for obj in chompjs.parse_js_objects(script_text):
-                if isinstance(obj, dict) and len(obj) > 2:
-                    text_content = _extract_text_from_json(obj)
-                    if text_content and len(text_content) >= _min_text_threshold(text_content):
-                        return ExtractedWebContent(
-                            title=default_title,
-                            content=text_content,
-                            strategy="embedded_js_generic",
-                        )
+            obj = _parse_js_object_fallback(script_text)
+            if isinstance(obj, dict) and len(obj) > 2:
+                text_content = _extract_text_from_json(obj)
+                if text_content and len(text_content) >= _min_text_threshold(text_content):
+                    return ExtractedWebContent(
+                        title=default_title,
+                        content=text_content,
+                        strategy="embedded_js_generic",
+                    )
         except (ValueError, TypeError):
             continue
 

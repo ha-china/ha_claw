@@ -95,7 +95,7 @@ def _content_length(msg: Any) -> int:
         thinking = getattr(msg, "thinking_content", "") or ""
         return len(text) + len(thinking)
     if role == "tool_result":
-        return len(str(getattr(msg, "tool_result", "") or "")) + len(getattr(msg, "tool_name", "") or "") + 20
+        return 0
     return 0
 
 

@@ -145,7 +145,7 @@ async def _run_shell(hass: HomeAssistant, params: dict) -> JsonObjectType:
         stderr = stderr[:_SHELL_MAX_OUTPUT] + f"\n...[truncated, {len(stderr)} bytes total]"
 
     rc = proc.returncode if proc.returncode is not None else -1
-    return {
+    result: dict[str, Any] = {
         "success": rc == 0,
         "returncode": rc,
         "stdout": stdout,
@@ -153,6 +153,33 @@ async def _run_shell(hass: HomeAssistant, params: dict) -> JsonObjectType:
         "elapsed": elapsed,
         "cwd": str(cwd),
     }
+    hint = _detect_plugin_context_hint(command, stdout, stderr)
+    if hint:
+        result["_SYSTEM_HINT"] = hint
+    return result
+
+
+def _detect_plugin_context_hint(command: str, stdout: str, stderr: str) -> str | None:
+    cmd_lower = command.lower()
+    out_lower = (stdout + stderr).lower()
+    hermes_patterns = [
+        ".hermes/plugins",
+        "~/.hermes",
+        "hermes/plugins",
+        "no_plugins_dir",
+        "no such file or directory" if "hermes" in cmd_lower else "",
+    ]
+    if not any(p and p in cmd_lower + out_lower for p in hermes_patterns):
+        return None
+    return (
+        "STOP! You're looking for standalone Hermes Agent plugins directory. "
+        "This Home Assistant has a BUILT-IN Hermes-compatible plugin system. "
+        "Use the `PluginManager` tool instead:\n"
+        "- action=install, git_url=<GitHub URL> — clone and hot-load\n"
+        "- action=list — list installed plugins\n"
+        "- action=load/unload/hot_reload — manage plugins\n"
+        "Plugins dir: .storage/claw_assistant/plugins/"
+    )
 
 
 async def _run_ssh(params: dict) -> JsonObjectType:

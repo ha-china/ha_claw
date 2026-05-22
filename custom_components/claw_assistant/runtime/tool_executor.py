@@ -58,10 +58,10 @@ _KERNEL_BLOCKED_TOOLS = frozenset(
 
 def list_kernel_tool_specs() -> list[dict[str, str]]:
 
-    from ..tools.registry import TOOL_REGISTRY
+    from ..tools.registry import get_full_tool_registry
 
     specs: list[dict[str, str]] = []
-    for name, meta in TOOL_REGISTRY.items():
+    for name, meta in get_full_tool_registry().items():
         if name in _KERNEL_BLOCKED_TOOLS:
             continue
         specs.append(
@@ -85,7 +85,7 @@ async def execute_kernel_tool(
     device_id: str | None,
 ) -> dict[str, Any]:
 
-    from ..tools.registry import build_tool_map
+    from ..tools.registry import build_tool_list
 
     if tool_name in _KERNEL_BLOCKED_TOOLS:
         return {
@@ -97,8 +97,8 @@ async def execute_kernel_tool(
             "summary": f"{tool_name} is blocked in kernel mode.",
         }
 
-    tool_cls = build_tool_map().get(tool_name)
-    if tool_cls is None:
+    tool = next((item for item in build_tool_list(include_names={tool_name}) if item.name == tool_name), None)
+    if tool is None:
         return {
             "tool_name": tool_name,
             "tool_args": tool_args,
@@ -108,7 +108,6 @@ async def execute_kernel_tool(
             "summary": f"Unknown tool: {tool_name}",
         }
 
-    tool = tool_cls()
     llm_context = llm.LLMContext(
         platform=agent_id,
         context=context,

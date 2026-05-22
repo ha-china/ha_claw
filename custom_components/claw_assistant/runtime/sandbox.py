@@ -317,6 +317,8 @@ async def run_in_sandbox(
 
     if payload.get("ok"):
         result = payload.get("result")
+        if result is not None and not isinstance(result, (bool, int, float, str, list, dict, type(None))):
+            result = str(result)
         return {
             "success": True,
             "result": result,

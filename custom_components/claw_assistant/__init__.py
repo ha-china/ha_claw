@@ -51,6 +51,14 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     from .conversation_utils import async_setup_history_store
     await async_setup_history_store(hass)
     await async_setup_runtime(hass, entry)
+    from .runtime.plugin_store import load_all_plugins
+    from .runtime.internal_llm import invalidate_runtime_tool_cache
+    loaded_plugins = await hass.async_add_executor_job(load_all_plugins, hass)
+    if loaded_plugins:
+        enabled = [p.manifest.name for p in loaded_plugins if p.enabled]
+        failed = [p.manifest.name for p in loaded_plugins if not p.enabled]
+        LOGGER.info("Plugins loaded: %d enabled, %d failed. Enabled: %s", len(enabled), len(failed), enabled)
+        invalidate_runtime_tool_cache()
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
     entry.async_on_unload(entry.add_update_listener(_async_update_listener))
     LOGGER.info("claw_assistant initialized with backend-only runtime")

@@ -94,6 +94,14 @@ class ConversationHistory:
         self.max_turns = max_turns
         self.max_age_seconds = max_age_hours * 3600
         self._store: Optional["Store"] = None
+        self._context_engine: Any = None
+
+    def set_context_engine(self, engine: Any) -> None:
+        self._context_engine = engine
+        _LOGGER.info("Context engine set: %s", type(engine).__name__)
+
+    def get_context_engine(self) -> Any:
+        return self._context_engine
 
     def add_turn(
         self,

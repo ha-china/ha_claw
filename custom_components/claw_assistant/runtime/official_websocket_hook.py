@@ -321,37 +321,15 @@ async def websocket_get_context_status(
     connection: websocket_api.ActiveConnection,
     msg: dict,
 ) -> None:
-    from homeassistant.util.hass_dict import HassKey
-
     model = ""
-    tokens_used = 0
-    context_window = 0
     agent_id = ""
     conversation_id = ""
 
     status = hass.data.get("claw_assistant", {}).get("runtime_state", {}).get("conversation_status", {})
     agent_id = status.get("current_agent_id", "")
 
-    DATA_CHAT_LOGS: HassKey = HassKey("conversation_chat_log")
-    all_logs = hass.data.get(DATA_CHAT_LOGS) or {}
     active_conv = hass.data.get("claw_assistant", {}).get("runtime_state", {}).get("active_conversation", {})
     conversation_id = active_conv.get("id") or ""
-
-    if conversation_id and conversation_id in all_logs:
-        chat_log = all_logs[conversation_id]
-        content = chat_log.content if chat_log else []
-        from .context_compressor import _estimate_total_tokens
-        tokens_used = _estimate_total_tokens(content)
-        context_window = 262144
-    else:
-        for cid, clog in all_logs.items():
-            if clog and hasattr(clog, "content") and clog.content:
-                from .context_compressor import _estimate_total_tokens
-                t = _estimate_total_tokens(clog.content)
-                if t > tokens_used:
-                    tokens_used = t
-                    conversation_id = cid
-        context_window = 262144
 
     if agent_id:
         try:
@@ -367,8 +345,8 @@ async def websocket_get_context_status(
 
     connection.send_result(msg["id"], {
         "model": model,
-        "tokens_used": tokens_used,
-        "context_window": context_window or 262144,
+        "tokens_used": 0,
+        "context_window": 262144,
         "agent_id": agent_id,
         "conversation_id": conversation_id,
     })
@@ -1148,25 +1126,36 @@ async def websocket_user_activity(hass, connection, msg):
 )
 @websocket_api.async_response
 async def websocket_get_commands(hass, connection, msg):
-    from ..command_registry import core_command_specs
+    from ..command_registry import all_command_specs
     from ..chat_commands import _skill_command_registry
+    from .plugin_store import get_plugin_tool_registry
     commands = []
-    for spec in core_command_specs():
+    for spec in all_command_specs():
         commands.append({
             "name": spec.name,
             "description": spec.description,
             "description_zh": spec.description_zh,
             "category": spec.category,
-            "aliases": list(spec.aliases),
+            "aliases": [],
         })
     skill_registry = _skill_command_registry()
     for name, skill in skill_registry.items():
-        desc = skill.get("description", "") if isinstance(skill, dict) else ""
+        raw_desc = skill.get("description", "") if isinstance(skill, dict) else ""
+        desc = f"[Skill: {raw_desc}]" if raw_desc else f"[Skill: {name}]"
         commands.append({
             "name": name,
             "description": desc,
             "description_zh": "",
             "category": "Skill",
+            "aliases": [],
+        })
+    plugin_tool_registry = get_plugin_tool_registry()
+    for tool_name, meta in plugin_tool_registry.items():
+        commands.append({
+            "name": tool_name,
+            "description": meta.get("desc", ""),
+            "description_zh": "",
+            "category": "Plugin",
             "aliases": [],
         })
     connection.send_result(msg["id"], {"commands": commands})

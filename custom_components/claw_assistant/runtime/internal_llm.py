@@ -543,19 +543,17 @@ _MINIMAL_TOOL_NAMES = {
 
 def build_runtime_tool_list() -> list[llm.Tool]:
 
-    global _CACHED_RUNTIME_TOOLS
-    if _CACHED_RUNTIME_TOOLS is None:
-        from ..tools.registry import build_tool_list
-        from ..tools.skill_tools import build_skill_tool_list
+    from ..tools.registry import build_tool_list
+    from ..tools.skill_tools import build_skill_tool_list
 
-        _CACHED_RUNTIME_TOOLS = merge_tool_lists(
-            build_tool_list(), build_skill_tool_list()
-        )
-        LOGGER.debug(
-            "Built full runtime tool surface: %s tools",
-            len(_CACHED_RUNTIME_TOOLS),
-        )
-    return _CACHED_RUNTIME_TOOLS
+    tools = merge_tool_lists(
+        build_tool_list(include_plugins=True), build_skill_tool_list()
+    )
+    LOGGER.debug(
+        "Built full runtime tool surface: %s tools",
+        len(tools),
+    )
+    return tools
 
 
 def invalidate_runtime_tool_cache() -> None:

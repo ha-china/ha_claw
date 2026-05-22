@@ -2447,11 +2447,11 @@ class NotifyTool(llm.Tool):
 class IntentCallTool(llm.Tool):
     name = "IntentCall"
     description = (
-        "Execute third-party intent handlers registered in Home Assistant. "
-        "These are NOT built-in HA intents and NOT separate tools - "
-        "they can ONLY be invoked through this tool.\n"
+        "Execute third-party Home Assistant intent handlers only. "
+        "Do NOT use this for Claw Assistant plugins, plugin tools, skills, slash commands, or tools already listed in the function schema. "
+        "Claw plugin tools are separate tools and must be called directly by their tool name.\n"
         "action=list: Discover all available intents, their descriptions, and slot definitions (REQUIRED/optional). "
-        "Call this first when you encounter a user request that no other tool can handle.\n"
+        "Call this only when the user explicitly asks for a Home Assistant intent handler or no Claw tool/plugin/tool schema applies.\n"
         "action=call: Execute an intent. You MUST pass all REQUIRED slot values in the 'slots' dict.\n"
         "RULES: Do NOT omit REQUIRED slots. Do NOT invent intent names - use action=list first. "
         "Show the result 'speech' to user as-is if it contains markdown or images."
