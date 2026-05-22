@@ -86,10 +86,10 @@ Read skill content.
 
 ## InstallSkill
 
-Install new skill.
+Install new skill. The `markdown` field MUST include proper YAML frontmatter.
 
 ```json
-{"name": "my-skill", "markdown": "# Skill Content\n...", "overwrite": false}
+{"name": "my-skill", "markdown": "---\nname: my-skill\ndescription: What this skill does\n---\n\n# Skill Content\n...", "overwrite": false}
 ```
 
 ## DeleteSkill
