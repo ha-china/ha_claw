@@ -221,6 +221,21 @@ def _tool_call_error(result: object) -> str | None:
     return str(error) if error not in (None, "") else None
 
 
+def _ensure_json_serializable(obj: object) -> object:
+    """Ensure an object is JSON serializable, converting non-serializable types."""
+    if obj is None or isinstance(obj, (bool, int, float, str)):
+        return obj
+    if isinstance(obj, dict):
+        return {k: _ensure_json_serializable(v) for k, v in obj.items()}
+    if isinstance(obj, (list, tuple)):
+        return [_ensure_json_serializable(v) for v in obj]
+    try:
+        json.dumps(obj)
+        return obj
+    except (TypeError, ValueError):
+        return str(obj)
+
+
 async def _execute_tool_spec(
     hass: HomeAssistant,
     llm_context: llm.LLMContext,
@@ -266,7 +281,7 @@ async def _execute_tool_spec(
         "args": tool_args,
         "success": _tool_call_success(result),
         "error": _tool_call_error(result),
-        "result": result,
+        "result": _ensure_json_serializable(result),
     }
 
 
@@ -333,6 +348,12 @@ def _cap_py_payload(payload: JsonObjectType) -> JsonObjectType:
                 rendered[:_PY_RESULT_MAX_CHARS]
                 + f"...[truncated, {len(rendered)} chars total]"
             )
+    elif result_val is not None:
+        try:
+            rendered = json.dumps(result_val, ensure_ascii=False, default=str)
+            payload["result"] = _cap_string(rendered, _PY_RESULT_MAX_CHARS)
+        except Exception:
+            payload["result"] = _cap_string(str(result_val), _PY_RESULT_MAX_CHARS)
     return payload
 
 
@@ -1902,8 +1923,8 @@ class ParallelToolCallTool(llm.Tool):
             if isinstance(r, BaseException):
                 results.append({"tool": deduped_specs[i][0], "success": False, "error": str(r)})
             else:
-                results.append(r)
-        success_count = sum(1 for item in results if item.get("success"))
+                results.append(_ensure_json_serializable(r))
+        success_count = sum(1 for item in results if isinstance(item, dict) and item.get("success"))
 
         return {
             "success": success_count == len(results),
@@ -2882,3 +2903,200 @@ class ExposeEntityTool(llm.Tool):
             "count": len(results),
             "results": results,
         }
+
+
+_PLUGIN_RESULT_SENSITIVE_KEYS = frozenset({
+    "plugin_path", "module_path", "hermes_home", "database_path",
+    "database_path_source", "plugin_git_commit", "plugin_git_remote",
+    "tool_args", "fingerprint", "approval_id",
+})
+
+
+def _filter_plugin_result(result: dict) -> dict:
+    """Filter sensitive fields from plugin tool result to prevent leakage."""
+    if not isinstance(result, dict):
+        return result
+    filtered = {}
+    for key, value in result.items():
+        if key in _PLUGIN_RESULT_SENSITIVE_KEYS:
+            continue
+        if isinstance(value, dict):
+            value = _filter_plugin_result(value)
+        elif isinstance(value, list):
+            value = [_filter_plugin_result(v) if isinstance(v, dict) else v for v in value]
+        filtered[key] = value
+    return filtered
+
+
+class PluginManagerTool(llm.Tool):
+    name = "PluginManager"
+    description = (
+        "Manage Hermes-compatible plugins in Home Assistant. "
+        "Supports installing plugins from GitHub (clone to plugins dir). "
+        "Actions: list (all), loaded (active), load/unload/hot_reload (single), "
+        "reload_all, validate (check source), guide (install help), call_tool (invoke a loaded plugin tool). "
+        "For plugin-related user requests, use this bridge first: loaded/list to inspect, call_tool to execute. "
+        "Do not use IntentCall for Claw plugins. "
+        "Plugins dir: .storage/claw_assistant/plugins/. "
+        "HOT reload - no HA restart needed."
+    )
+    parameters = vol.Schema({
+        vol.Required("action"): vol.In([
+            "list", "loaded", "load", "unload", "hot_reload", "reload_all",
+            "validate", "guide", "install", "pending", "cancel_approval", "call_tool"
+        ]),
+        vol.Optional("plugin_name", default=""): str,
+        vol.Optional("source_path", default=""): str,
+        vol.Optional("git_url", default=""): str,
+        vol.Optional("approval_id", default=""): str,
+        vol.Optional("tool_name", default=""): str,
+        vol.Optional("tool_args", default={}): dict,
+    })
+
+    async def async_call(
+        self, hass: HomeAssistant, tool_input: llm.ToolInput, llm_context: llm.LLMContext
+    ) -> JsonObjectType:
+        from ..runtime.plugin_store import (
+            cancel_plugin_approval,
+            get_loaded_plugins,
+            get_plugin_install_guide,
+            get_plugin_tool_registry,
+            hot_load_plugin,
+            hot_reload_plugin,
+            hot_unload_plugin,
+            list_installed_plugins,
+            list_pending_plugin_approvals,
+            reload_plugins,
+            validate_plugin_installation,
+        )
+        from ..runtime.tool_executor import execute_kernel_tool
+
+        action = tool_input.tool_args.get("action", "list")
+        plugin_name = tool_input.tool_args.get("plugin_name", "").strip()
+        source_path = tool_input.tool_args.get("source_path", "").strip()
+        git_url = tool_input.tool_args.get("git_url", "").strip()
+        approval_id = tool_input.tool_args.get("approval_id", "").strip()
+        plugin_tool_name = tool_input.tool_args.get("tool_name", "").strip()
+        plugin_tool_args_raw = tool_input.tool_args.get("tool_args", {})
+        if isinstance(plugin_tool_args_raw, str):
+            try:
+                plugin_tool_args = json.loads(plugin_tool_args_raw) if plugin_tool_args_raw.strip() else {}
+            except Exception:
+                plugin_tool_args = {}
+        elif isinstance(plugin_tool_args_raw, dict):
+            plugin_tool_args = plugin_tool_args_raw
+        else:
+            plugin_tool_args = {}
+        plugins_dir = Path(hass.config.config_dir) / ".storage/claw_assistant/plugins"
+
+        if action == "list":
+            plugins = await hass.async_add_executor_job(list_installed_plugins)
+            return {
+                "success": True,
+                "count": len(plugins),
+                "plugins": plugins,
+                "plugins_dir": str(Path(hass.config.config_dir) / ".storage/claw_assistant/plugins"),
+            }
+
+        if action == "loaded":
+            loaded = get_loaded_plugins()
+            return {"success": True, "count": len(loaded), "plugins": loaded}
+
+        if action == "load":
+            if not plugin_name:
+                return {"success": False, "error": "plugin_name required"}
+            return hot_load_plugin(hass, plugin_name)
+
+        if action == "unload":
+            if not plugin_name:
+                return {"success": False, "error": "plugin_name required"}
+            return hot_unload_plugin(hass, plugin_name)
+
+        if action == "hot_reload":
+            if not plugin_name:
+                return {"success": False, "error": "plugin_name required"}
+            return hot_reload_plugin(hass, plugin_name)
+
+        if action == "reload_all":
+            result = await hass.async_add_executor_job(reload_plugins, hass)
+            return result
+
+        if action == "validate":
+            if not source_path:
+                return {"success": False, "error": "source_path required"}
+            result = await hass.async_add_executor_job(validate_plugin_installation, source_path)
+            return result
+
+        if action == "guide":
+            if not plugin_name:
+                return {"success": False, "error": "plugin_name required"}
+            result = await hass.async_add_executor_job(get_plugin_install_guide, plugin_name)
+            return result
+
+        if action == "install":
+            if not git_url:
+                return {"success": False, "error": "git_url required (GitHub repo URL)"}
+            import re
+            import subprocess
+            match = re.search(r"github\.com[/:]([^/]+)/([^/\s\.]+)", git_url)
+            if not match:
+                return {"success": False, "error": "Invalid GitHub URL"}
+            repo_name = match.group(2).replace(".git", "")
+            target_dir = plugins_dir / repo_name
+            plugins_dir.mkdir(parents=True, exist_ok=True)
+            if target_dir.exists():
+                return {
+                    "success": False,
+                    "error": f"Plugin '{repo_name}' already exists",
+                    "hint": f"Use hot_reload to reload, or delete {target_dir} first",
+                }
+            try:
+                result = await hass.async_add_executor_job(
+                    subprocess.run,
+                    ["git", "clone", "--depth", "1", git_url, str(target_dir)],
+                    {"capture_output": True, "text": True, "timeout": 60}
+                )
+                if result.returncode != 0:
+                    return {"success": False, "error": f"Git clone failed: {result.stderr[:500]}"}
+                load_result = hot_load_plugin(hass, repo_name)
+                return {
+                    "success": True,
+                    "action": "installed",
+                    "plugin": repo_name,
+                    "path": str(target_dir),
+                    "load_result": load_result,
+                }
+            except Exception as e:
+                return {"success": False, "error": str(e)}
+
+        if action == "pending":
+            pending = list_pending_plugin_approvals(hass)
+            return {"success": True, "count": len(pending), "pending": pending}
+
+        if action == "cancel_approval":
+            if not approval_id:
+                return {"success": False, "error": "approval_id required"}
+            return cancel_plugin_approval(hass, approval_id)
+
+        if action == "call_tool":
+            if not plugin_tool_name:
+                return {"success": False, "error": "tool_name required. Use action=loaded to see available plugin tools."}
+            plugin_registry = get_plugin_tool_registry()
+            if plugin_tool_name not in plugin_registry:
+                available = list(plugin_registry.keys())[:5]
+                hint = f"Available: {', '.join(available)}" if available else "No plugin tools loaded."
+                return {"success": False, "error": f"Plugin tool not found: {plugin_tool_name}. {hint}"}
+            result = await execute_kernel_tool(
+                hass,
+                tool_name=plugin_tool_name,
+                tool_args=plugin_tool_args,
+                agent_id=llm_context.assistant or llm_context.platform or "conversation",
+                context=llm_context.context,
+                language=llm_context.language,
+                device_id=llm_context.device_id,
+            )
+            filtered = _filter_plugin_result(result)
+            filtered["called_via"] = "PluginManager"
+            return filtered
+
+        return {"success": False, "error": f"Unknown action: {action}"}

@@ -52,6 +52,7 @@ from .misc_tools import (
     BootstrapControlTool,
     MemoryGraphTool,
     ParallelToolCallTool,
+    PluginManagerTool,
     SetMasterPromptTool,
     SetWorkspaceDocTool,
     SystemControlTool,
@@ -119,7 +120,7 @@ TOOL_REGISTRY: dict[str, dict[str, Any]] = {
     "ValidateService": {"category": "query", "desc": "Validate service call parameters. Params: domain, service, data. Returns validity, errors, and suggestions.", "priority": 2},
     "ServiceHelp": {"category": "query", "desc": "Get help for a domain or service. Params: domain (required), service (optional)", "priority": 2},
     "SmartDiscovery": {"category": "query", "desc": "Smart entity discovery. Params: area/domain/state/name_contains/name_pattern/device_class/inferred_type/person_name/pet_name/limit", "priority": 2},
-    "IntentCall": {"category": "query", "desc": "List or call third-party intent handlers. action=list to discover available intents and their REQUIRED/optional slots; action=call with intent_type and slots dict containing all REQUIRED values.", "priority": 2},
+    "IntentCall": {"category": "query", "desc": "List or call third-party Home Assistant intent handlers only. Do NOT use for Claw plugins, plugin tools, skills, slash commands, or tools already listed in the function schema. Plugin tools are separate tools and must be called directly by tool name. action=list discovers HA intents; action=call executes one with required slots.", "priority": 2},
     "ConfigFile": {"category": "system", "desc": "Access the Home Assistant config directory. Params: action(list/read/stage_write/stage_append/stage_mkdir/stage_delete/apply/cancel/list_pending), path/content/approval_id, user_consent(bool, only required for delete apply), consent_quote(str, audit). write/append/mkdir auto-apply on `apply` (reversible). delete is destructive — describe in chat what/why, judge the user's reply yourself (no keyword list), then `apply` with user_consent=true and consent_quote=\"<their words>\". For automations.yaml/configuration.yaml/sensors.yaml, prefer the Automation tool.", "priority": 3},
     "ReadFile": {"category": "system", "desc": "Read or search a Claw Assistant temp/output text file. action=read(default, no char limit, use offset+max_chars for pagination), action=search(exact case-insensitive), action=search_fuzzy(multi-keyword fuzzy match), action=info(file size only). Params: path, action, offset, max_chars, query, context_chars.", "priority": 1},
     "DeleteSkill": {"category": "core", "desc": "Delete an installed Markdown skill (audited in changelog). Params: name, reason", "priority": 2},
@@ -136,6 +137,7 @@ TOOL_REGISTRY: dict[str, dict[str, Any]] = {
     "FrontendInspect": {"category": "system", "desc": "Interact with the HA frontend like a real user. action=snapshot reads current page DOM tree. action=navigate smoothly navigates via SPA transition (path e.g. /config, /lovelace/0). action=tap clicks an element by CSS selector or visible text (traverses shadow DOM). action=type types text into an input field (selector or text to find, value to type, clear=true to clear first). action=scroll scrolls page or element (direction=up/down/left/right, amount in px). action=exec_js runs arbitrary JS. Params: action, selector, text, path, value, clear, direction, amount, js_code, depth(default 8)", "priority": 2},
     "DashboardCard": {"category": "system", "desc": "Create/manage Lovelace dashboard views and cards. Supports masonry and sections view types. html-card-pro cards use content; other cards use card_config or card_yaml. Workflow: list_dashboards→get_dashboard→get_card/add_view/add_card/update_card. Run check_dependency only before creating custom:html-pro-card. Params: action, dashboard_url, view_index, card_index, section_index(-1=auto for sections views), title, icon, content(HTML/CSS/JS), card_config, card_yaml. Returns mandatory _action_required instructions.", "priority": 2},
     "ExposeEntity": {"category": "system", "desc": "Expose or unexpose entities to the conversation assistant. ⚠️ PRIVACY: Before exposing, inform user: 'I need to expose [entity] to control it. Data stays local, not sent externally. Proceed?' action=list: list unexposed. action=expose: expose entity. Params: action(expose/list), entity_id, expose(bool), domain", "priority": 1},
+    "PluginManager": {"category": "system", "desc": "Stable bridge for Hermes-compatible Claw plugins. Use this first for plugin-related requests. action=loaded/list inspect plugins and available plugin tools; action=call_tool executes a loaded plugin tool by tool_name with tool_args; load/unload/hot_reload/reload_all manage hot loading; install/validate/guide handle plugin installation. Do NOT use IntentCall for Claw plugins.", "priority": 2},
 }
 
 CORE_TOOLS = [
@@ -215,6 +217,7 @@ def build_tool_map() -> dict[str, type]:
         "DashboardCard": DashboardCardTool,
         "FrontendInspect": FrontendInspectTool,
         "ExposeEntity": ExposeEntityTool,
+        "PluginManager": PluginManagerTool,
     }
 
 
@@ -222,6 +225,7 @@ def build_tool_list(
     *,
     include_names: set[str] | None = None,
     exclude_names: set[str] | None = None,
+    include_plugins: bool = True,
 ) -> list[llm.Tool]:
 
     tool_map = build_tool_map()
@@ -232,4 +236,24 @@ def build_tool_list(
         if exclude_names is not None and name in exclude_names:
             continue
         tools.append(tool_cls())
+    
+    # Add plugin tools
+    if include_plugins:
+        from ..runtime.plugin_store import get_plugin_tools
+        plugin_tools = get_plugin_tools()
+        for tool in plugin_tools:
+            if include_names is not None and tool.name not in include_names:
+                continue
+            if exclude_names is not None and tool.name in exclude_names:
+                continue
+            tools.append(tool)
+    
     return tools
+
+
+def get_full_tool_registry() -> dict[str, dict[str, Any]]:
+    from ..runtime.plugin_store import get_plugin_tool_registry
+    
+    registry = dict(TOOL_REGISTRY)
+    registry.update(get_plugin_tool_registry())
+    return registry

@@ -152,7 +152,7 @@ class UrlFetchTool(llm.Tool):
                 result = await ws.fetch_url_content(url)
                 if result and result.content:
                     doc_id, chunks = _store_chunks(hass, url, result.title, result.content)
-                    return {
+                    resp = {
                         "success": True,
                         "doc_id": doc_id,
                         "title": result.title,
@@ -161,9 +161,51 @@ class UrlFetchTool(llm.Tool):
                         "content": chunks[0],
                         "has_more": len(chunks) > 1,
                     }
+                    hint = _detect_hermes_plugin_repo(url, result.title, result.content)
+                    if hint:
+                        resp["_SYSTEM_HINT"] = hint
+                    return resp
+                if result and result.strategy == "js_shell":
+                    return {
+                        "success": False,
+                        "error": "Page requires JavaScript rendering",
+                        "hint": "Do NOT use browser automation (playwright/patchright) - too heavy for HA environment. "
+                                "Use ExecutePython with sandbox=true and requirements=['chompjs'] to parse embedded JS data: "
+                                "`import chompjs; data = chompjs.parse_js_object(js_str)`. "
+                                "Or use Python json+re for simple cases.",
+                    }
                 return {"success": False, "error": "Failed to fetch URL"}
         except Exception as e:
             return {"success": False, "error": str(e)}
+
+
+def _detect_hermes_plugin_repo(url: str, title: str, content: str) -> str | None:
+    url_lower = url.lower()
+    content_lower = content.lower()
+    is_github = "github.com" in url_lower
+    if not is_github:
+        return None
+    hermes_signals = [
+        "hermes-agent" in url_lower,
+        "hermes_" in url_lower or "hermes-" in url_lower,
+        "~/.hermes/plugins" in content_lower,
+        "hermes/plugins" in content_lower,
+        "plugin.yaml" in content_lower and "hermes" in content_lower,
+        "def register(ctx" in content_lower,
+        "ctx.register_tool" in content_lower,
+    ]
+    if not any(hermes_signals):
+        return None
+    import re
+    match = re.search(r"github\.com[/:]([^/]+)/([^/\s\.]+)", url)
+    repo_name = match.group(2).replace(".git", "") if match else "this-plugin"
+    return (
+        f"This is a Hermes-compatible plugin repository: {repo_name}\n"
+        "To install it in this Home Assistant, use the `PluginManager` tool:\n"
+        f"  action=install, git_url={url}\n"
+        "This will clone the repo to .storage/claw_assistant/plugins/ and hot-load it.\n"
+        "Do NOT tell the user to manually clone to ~/.hermes/plugins/ — that's for standalone Hermes Agent."
+    )
 
 
 class WebReadChunkTool(llm.Tool):
