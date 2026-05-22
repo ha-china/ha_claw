@@ -28,7 +28,7 @@
 {"registry": "area", "action": "create", "params": {"name": "Living Room"}}
 
 // Rename area
-{"registry": "area", "action": "update", "area_id": "living_room", "params": {"name": "客厅"}}
+{"registry": "area", "action": "update", "area_id": "living_room", "params": {"name": "Main Living Room"}}
 
 // Assign entity to area
 {"registry": "entity", "action": "update", "entity_id": "light.xxx", "params": {"area_id": "living_room"}}

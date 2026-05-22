@@ -39,46 +39,6 @@ snapshot returns `active_dialogs` with structured data:
 - DashboardCard = MODIFY config (create/edit/delete cards)
 - Workflow: FrontendInspect → DashboardCard → FrontendInspect (verify)
 
-## exec_js Best Practices
-
-**DO NOT manually traverse shadow DOM!** Use these helper patterns:
-
-```javascript
-// Get all visible text on page (recommended)
-(() => {
-  const roots = [document];
-  const texts = [];
-  const seen = new Set();
-  while (roots.length) {
-    const r = roots.pop();
-    if (seen.has(r)) continue;
-    seen.add(r);
-    r.querySelectorAll('*').forEach(el => {
-      if (el.shadowRoot) roots.push(el.shadowRoot);
-      const t = el.textContent?.trim();
-      if (t && t.length < 500) texts.push(t);
-    });
-  }
-  return [...new Set(texts)].join('\n').substring(0, 3000);
-})()
-
-// Get specific element by visible text
-(() => {
-  const roots = [document];
-  const seen = new Set();
-  while (roots.length) {
-    const r = roots.pop();
-    if (seen.has(r)) continue;
-    seen.add(r);
-    for (const el of r.querySelectorAll('*')) {
-      if (el.shadowRoot) roots.push(el.shadowRoot);
-      if (el.textContent?.includes('TARGET_TEXT')) return el.outerHTML.substring(0, 1000);
-    }
-  }
-  return 'not found';
-})()
-```
-
 ## Common Patterns
 
 ```

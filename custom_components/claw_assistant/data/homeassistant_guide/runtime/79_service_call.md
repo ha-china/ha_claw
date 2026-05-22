@@ -52,6 +52,6 @@ If unsure about params:
 
 ## Notes
 
-- entity_id supports fuzzy matching ("客厅灯" → light.living_room)
+- entity_id supports fuzzy matching ("living room light" → light.living_room)
 - data params are flat or nested dict
-- Use real param names (brightness_pct, not "亮度")
+- Use real param names (brightness_pct, not user's colloquial terms)

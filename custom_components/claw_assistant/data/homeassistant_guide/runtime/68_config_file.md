@@ -1,5 +1,7 @@
 # ConfigFile - Access Config Directory
 
+Read/write files in Home Assistant config directory.
+
 ## Actions
 
 | Action | Purpose | Params |
@@ -14,29 +16,30 @@
 | cancel | Cancel staged changes | approval_id |
 | list_pending | List pending changes | - |
 
-## Workflow
+## Write Workflow
 
 ```
-1. stage_write path="sensors.yaml" content="..."
-   → Returns approval_id
+ConfigFile action=stage_write path="sensors.yaml" content="..."
+→ Returns approval_id, show preview to user
 
-2. Describe change to user, get confirmation
-
-3. apply approval_id="xxx" user_consent=true consent_quote="用户说的话"
+ConfigFile action=apply approval_id="<id>"
+→ File written
 ```
 
 ## Delete Workflow
 
-Delete is destructive — requires explicit consent:
+Delete is destructive — requires explicit user consent:
 
 ```
-1. stage_delete path="old_file.yaml"
-2. Explain to user what/why
-3. apply approval_id="xxx" user_consent=true consent_quote="可以删除"
+ConfigFile action=stage_delete path="old_file.yaml"
+→ Returns approval_id, explain to user what will be deleted
+
+ConfigFile action=apply approval_id="<id>" user_consent=true consent_quote="<user's exact words>"
+→ File deleted
 ```
 
 ## Notes
 
-- write/append/mkdir auto-apply on `apply`
-- delete requires user_consent=true + consent_quote
+- Stage operations return approval_id for preview before apply
+- Delete requires user_consent=true with user's actual consent quote
 - For automations.yaml, prefer Automation tool
