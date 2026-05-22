@@ -2550,11 +2550,17 @@
 
     window.addEventListener('claw-chat-updated', () => _patchMarkdown());
 
+    const _hasPendingTools = () => {
+        const activities = window.__clawToolActivities || [];
+        return activities.some(a => a.result === undefined && !a.error);
+    };
+
     const _origStreamHook = window.__clawOnStreamDelta;
     window.__clawOnStreamDelta = (delta) => {
         _mdStreamActive = true;
         if (_mdRenderTimer) clearTimeout(_mdRenderTimer);
         _mdRenderTimer = setTimeout(() => {
+            if (_hasPendingTools()) return;
             _mdStreamActive = false;
             _renderFinal();
         }, 600);
