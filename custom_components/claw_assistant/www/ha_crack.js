@@ -1,7 +1,7 @@
 (function() {
     'use strict';
     
-    const HACRACK_VERSION = '8.5.0';
+    const HACRACK_VERSION = '8.6.0';
     if (window.__hacrackVersion && window.__hacrackVersion !== HACRACK_VERSION) {
         const reloadKey = '__hacrackReloadCount';
         const reloads = parseInt(sessionStorage.getItem(reloadKey) || '0', 10);
@@ -1089,6 +1089,20 @@
             box-sizing: border-box;
             margin: 4px 0;
         }
+        ha-markdown-element { position: relative; }
+        ha-markdown-element.claw-rerender::after {
+            content: '';
+            position: absolute; inset: 0;
+            background: var(--card-background-color, #fff);
+            opacity: 0;
+            animation: clawFadeOut .15s ease forwards;
+            pointer-events: none;
+            z-index: 1;
+        }
+        @keyframes clawFadeOut {
+            0% { opacity: .85; }
+            100% { opacity: 0; }
+        }
         @keyframes clawTaIn {
             from { opacity: 0; transform: translateY(4px); }
             to { opacity: 1; transform: none; }
@@ -1320,6 +1334,7 @@
     window.__clawToolActivitySeen = false;
     window.__clawTurnParts = [];
     let _taRenderPending = false;
+    let _turnEnded = false;
 
     const _TA_ICONS = {
         'add-circle': '<svg viewBox="0 0 24 24"><path d="M11 11V7H13V11H17V13H13V17H11V13H7V11H11ZM12 22C6.47715 22 2 17.5228 2 12C2 6.47715 6.47715 2 12 2C17.5228 2 22 6.47715 22 12C22 17.5228 17.5228 22 12 22ZM12 20C16.4183 20 20 16.4183 20 12C20 7.58172 16.4183 4 12 4C7.58172 4 4 7.58172 4 12C4 16.4183 7.58172 20 12 20Z" fill="currentColor"/></svg>',
@@ -2031,9 +2046,11 @@
                 if (el.__clawMixedSig !== sig) {
                     el.__clawMixedSig = sig;
                     el.__clawMixedSeqSig = seqSig;
+                    el.classList.add('claw-rerender');
                     el.innerHTML = '<div class="claw-md claw-md-mixed">' + html + '</div>';
+                    requestAnimationFrame(() => el.classList.remove('claw-rerender'));
                     _transformCodeBlocks(el);
-                    el.querySelectorAll('.claw-ta-card .claw-ta-header').forEach(h => h.addEventListener('click', () => h.closest('.claw-ta-card')?.classList.toggle('collapsed')));
+                    el.querySelectorAll('.claw-ta-card .claw-ta-header').forEach(h => h.addEventListener('click', () => { const c = h.closest('.claw-ta-card'); if (c) { c.classList.toggle('collapsed'); c.dataset.userToggled = '1'; } }));
                 }
                 const oldPanel = msr.querySelector('.claw-ta-panel');
                 if (oldPanel) oldPanel.remove();
@@ -2041,12 +2058,8 @@
             }
         }
         let fallback = msr.querySelector('.claw-ta-panel');
-        if (fallback && _mdStreamActive) {
-            fallback.classList.remove('collapsed');
-            delete fallback.dataset.finalCollapsed;
-        } else if (fallback && !fallback.dataset.finalCollapsed) {
-            fallback.classList.add('collapsed');
-            fallback.dataset.finalCollapsed = '1';
+        if (!_turnEnded) {
+            if (fallback) { fallback.remove(); fallback = null; }
         }
         const mixed = el?.querySelector('.claw-md-mixed');
         activities.forEach(act => {
@@ -2059,40 +2072,55 @@
                 if ((act.result !== undefined || act.error) && !card.dataset.hasResult) {
                     _updateExistingCard(card, act);
                 }
+                if (_turnEnded && !card.classList.contains('collapsed') && !card.dataset.userToggled) {
+                    card.classList.add('collapsed');
+                }
                 return;
             }
             const built = _buildCardHtml(act);
             card = document.createElement('div');
-            card.className = 'claw-ta-card collapsed';
+            card.className = _turnEnded ? 'claw-ta-card collapsed' : 'claw-ta-card';
             card.dataset.taId = built.taId;
             if (act.result !== undefined) card.dataset.hasResult = '1';
             card.innerHTML = built.html;
-            card.querySelector('.claw-ta-header').addEventListener('click', () => card.classList.toggle('collapsed'));
+            card.querySelector('.claw-ta-header').addEventListener('click', () => { card.classList.toggle('collapsed'); card.dataset.userToggled = '1'; });
             const markerId = act.marker_id || act.tool_call_id;
             const marker = markerId && el ? el.querySelector('.claw-tool-marker[data-tool-id="' + CSS.escape(markerId) + '"]') : null;
             if (marker) {
                 marker.replaceWith(card);
                 return;
             }
-            if (!fallback) {
-                fallback = document.createElement('div');
-                fallback.className = 'claw-ta-panel' + (_mdStreamActive ? '' : ' collapsed');
-                fallback.innerHTML =
-                    '<div class="claw-ta-panel-header">' +
-                        '<svg class="claw-ta-panel-chevron" viewBox="0 0 24 24"><path d="M11.9999 13.1714L16.9497 8.22168L18.3639 9.63589L11.9999 15.9999L5.63599 9.63589L7.0502 8.22168L11.9999 13.1714Z"/></svg>' +
-                        '<b>Tool Activity</b>' +
-                        '<span class="claw-ta-panel-count"></span>' +
-                    '</div>' +
-                    '<div class="claw-ta-panel-body"></div>';
-                fallback.querySelector('.claw-ta-panel-header')?.addEventListener('click', () => fallback.classList.toggle('collapsed'));
-                if (el) msr.insertBefore(fallback, el);
-                else msr.appendChild(fallback);
+            if (_turnEnded) {
+                if (!fallback) {
+                    fallback = document.createElement('div');
+                    fallback.className = 'claw-ta-panel collapsed';
+                    fallback.innerHTML =
+                        '<div class="claw-ta-panel-header">' +
+                            '<svg class="claw-ta-panel-chevron" viewBox="0 0 24 24"><path d="M11.9999 13.1714L16.9497 8.22168L18.3639 9.63589L11.9999 15.9999L5.63599 9.63589L7.0502 8.22168L11.9999 13.1714Z"/></svg>' +
+                            '<b>Tool Activity</b>' +
+                            '<span class="claw-ta-panel-count"></span>' +
+                        '</div>' +
+                        '<div class="claw-ta-panel-body"></div>';
+                    fallback.querySelector('.claw-ta-panel-header')?.addEventListener('click', () => fallback.classList.toggle('collapsed'));
+                    if (el) msr.insertBefore(fallback, el);
+                    else msr.appendChild(fallback);
+                }
+                const body = fallback.querySelector('.claw-ta-panel-body') || fallback;
+                body.appendChild(card);
+            } else {
+                if (el) {
+                    if (act.tool_name === '_thinking') msr.insertBefore(card, el);
+                    else el.appendChild(card);
+                } else {
+                    msr.appendChild(card);
+                }
             }
-            const body = fallback.querySelector('.claw-ta-panel-body') || fallback;
-            body.appendChild(card);
-            const count = fallback.querySelector('.claw-ta-panel-count');
-            if (count) count.textContent = String(body.querySelectorAll('.claw-ta-card').length);
         });
+        if (fallback) {
+            const pBody = fallback.querySelector('.claw-ta-panel-body') || fallback;
+            const count = fallback.querySelector('.claw-ta-panel-count');
+            if (count) count.textContent = String(pBody.querySelectorAll('.claw-ta-card').length);
+        }
     };
 
     const _scheduleToolRender = () => {
@@ -2451,7 +2479,9 @@
                 if (clawMd) {
                     clawMd.innerHTML = html;
                 } else {
+                    el.classList.add('claw-rerender');
                     el.innerHTML = '<div class="claw-md">' + html + '</div>';
+                    requestAnimationFrame(() => el.classList.remove('claw-rerender'));
                 }
                 const _cleanExtraNodes = () => {
                     Array.from(el.childNodes).forEach(n => {
@@ -2550,17 +2580,11 @@
 
     window.addEventListener('claw-chat-updated', () => _patchMarkdown());
 
-    const _hasPendingTools = () => {
-        const activities = window.__clawToolActivities || [];
-        return activities.some(a => a.result === undefined && !a.error);
-    };
-
     const _origStreamHook = window.__clawOnStreamDelta;
     window.__clawOnStreamDelta = (delta) => {
         _mdStreamActive = true;
         if (_mdRenderTimer) clearTimeout(_mdRenderTimer);
         _mdRenderTimer = setTimeout(() => {
-            if (_hasPendingTools()) return;
             _mdStreamActive = false;
             _renderFinal();
         }, 600);
@@ -2571,6 +2595,7 @@
     const _origStreamEnd = window.__clawOnStreamEnd;
     window.__clawOnStreamEnd = () => {
         _mdStreamActive = false;
+        _turnEnded = true;
         if (_mdRenderTimer) clearTimeout(_mdRenderTimer);
         const chat = deepQuery('ha-assist-chat');
         const sr = chat?.shadowRoot;
@@ -2588,7 +2613,7 @@
         delete window.__clawThinkingText;
         const thinkEl = lastMd?.shadowRoot?.querySelector('.claw-thinking-text');
         if (thinkEl) thinkEl.remove();
-        setTimeout(() => _renderFinal(), 150);
+        setTimeout(() => { _renderFinal(); _scheduleToolRender(); }, 150);
         if (typeof _origStreamEnd === 'function') _origStreamEnd();
         if (window.__clawIsNewReset) { delete window.__clawIsNewReset; }
         else if (typeof window.__clawPlaySound === 'function') window.__clawPlaySound('stream-complete');
@@ -4422,6 +4447,7 @@
                 window.__clawToolActivitySeen = false;
                 window.__clawTurnParts = [];
                 _mdStreamActive = false;
+                _turnEnded = false;
             }
             if (tickTimer) { clearInterval(tickTimer); tickTimer = null; }
             if (removeBar) {
@@ -4533,6 +4559,7 @@
                     window.__clawToolActivities = [];
                     window.__clawToolActivitySeen = false;
                     window.__clawTurnParts = [];
+                    _turnEnded = false;
                     const _oldPanel = deepQuery('ha-assist-chat')?.shadowRoot?.querySelector('.message.hass:last-of-type ha-markdown')?.shadowRoot?.querySelector('.claw-ta-panel');
                     if (_oldPanel) _oldPanel.remove();
                     const wrappedCb = (ev) => {
