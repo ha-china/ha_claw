@@ -803,12 +803,14 @@ def patch_tool_progress(hass: HomeAssistant) -> None:
                 from .state import get_channel_type as _gct, get_conversation_status as _gcs
                 _is_ha_frontend = _gct(getattr(self, "conversation_id", None)) == "ha"
                 _is_voice = _gcs(hass).get("is_voice_pipeline", False)
+                _pending = getattr(self, "_claw_pending_tools", 0) + 1
+                self._claw_pending_tools = _pending
                 _tool_info_payload = {"_claw_tool_info": {
                     "tool_call_id": getattr(tc, "id", ""),
                     "marker_id": getattr(tc, "id", ""),
                     "tool_name": tc.tool_name,
                     "tool_args": dict(tc.tool_args),
-                }}
+                }, "_claw_pending_tools": _pending}
                 listener = self.delta_listener
                 if listener:
                     if _is_ha_frontend and not _is_voice:
@@ -888,12 +890,15 @@ def patch_tool_progress(hass: HomeAssistant) -> None:
             if _rl and hasattr(result, "tool_call_id"):
                 from .state import get_channel_type as _gct2
                 if _gct2(getattr(self, "conversation_id", None)) == "ha" and _details_on:
+                    _pending = max(0, getattr(self, "_claw_pending_tools", 1) - 1)
+                    self._claw_pending_tools = _pending
                     _rl(self, {
                         "_claw_tool_result": {
                             "tool_call_id": result.tool_call_id,
                             "tool_name": getattr(result, "tool_name", ""),
                             "tool_result": getattr(result, "tool_result", None),
                         },
+                        "_claw_pending_tools": _pending,
                         "_claw_skip_tts": True,
                     })
             yield result
@@ -997,10 +1002,17 @@ def patch_apiinstance_tool_fallback(hass: HomeAssistant) -> None:
                 raise err
 
             tool_cls = build_tool_map().get(tool_input.tool_name)
-            if tool_cls is None:
-                raise
-
-            tool = tool_cls()
+            if tool_cls is not None:
+                tool = tool_cls()
+            else:
+                from ..runtime.plugin_store import get_plugin_tools
+                plugin_tool = next(
+                    (t for t in get_plugin_tools() if t.name == tool_input.tool_name),
+                    None,
+                )
+                if plugin_tool is None:
+                    raise
+                tool = plugin_tool
             args = tool_input.tool_args
             if getattr(tool, "parameters", None) is not None:
                 try:

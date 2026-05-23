@@ -10,15 +10,35 @@ from .skill_store import (
 )
 
 
+_CONCEPT_TAXONOMY = (
+    "## Tool Routing (read FIRST, apply on EVERY request)\n"
+    "1. **Service** — execute any HA domain.action on entities. "
+    "Tool: `ServiceCall`. Discovery: `ListServices`. "
+    "DEFAULT path when user wants to control, query, or change anything in HA.\n"
+    "2. **Intent** — native HA voice commands only (HassTurnOn, HassGetState…). "
+    "Tool: `IntentCall`. NEVER for plugins, skills, or custom tools.\n"
+    "3. **Integration** — HA config entries (add/remove/configure components). "
+    "Tool: `ConfigEntries`.\n"
+    "4. **Skill** — read-only markdown docs in skills/ dir. Not code, not callable. "
+    "Tool: `GetInstalledSkill` / `ListInstalledSkills`.\n"
+    "5. **Plugin** — code extensions in plugins/ dir with their own registered tools. "
+    "Tool: `PluginManager` (action=loaded to list, action=call_tool to execute).\n"
+    "ONE path per concept. Never cross-route "
+    "(e.g. ListServices cannot find plugins; IntentCall cannot run skills).\n"
+    "BEFORE calling any tool, verify: "
+    "What concept does this request belong to? "
+    "Am I using the tool assigned to THAT concept? "
+    "If the answer is no, stop and re-route."
+)
+
 _SKILL_INDEX_GUIDANCE = (
     "Skill bodies are not in prompt. Fetch relevant ones with "
     "`GetInstalledSkill(name=\"<slug>\")`; do not assume contents."
 )
 
 _PLUGIN_INDEX_GUIDANCE = (
-    "For plugin-related requests, use the `PluginManager` bridge first. "
-    "Inspect with action=loaded/list, then execute plugin tools with action=call_tool, tool_name, and tool_args. "
-    "Do not use `IntentCall` for Claw plugins."
+    "Use PluginManager action=loaded to see available plugin tools, "
+    "then action=call_tool to execute them."
 )
 
 _CACHED_MASTER_SECTIONS: tuple[str, ...] | None = None
@@ -47,20 +67,27 @@ def _build_capability_overview() -> str:
 
 def _build_plugin_catalog() -> str:
     try:
-        from .plugin_store import get_loaded_plugins
+        from .plugin_store import get_loaded_plugins, list_installed_plugins
     except Exception:
         return ""
-    plugins = get_loaded_plugins()
-    if not plugins:
-        return ""
+    loaded = get_loaded_plugins()
     items = []
-    for p in plugins:
+    for p in loaded:
         if not p.get("enabled"):
             continue
         name = p.get("name", "")
-        tools = p.get("tools", [])
-        tools_str = ", ".join(tools) if tools else "no tools"
-        items.append(f"- {name}: {tools_str}")
+        tool_count = len(p.get("tools", []))
+        items.append(f"- {name} [loaded, {tool_count} tools]")
+    if not items:
+        try:
+            installed = list_installed_plugins()
+        except Exception:
+            installed = []
+        for p in installed:
+            name = p.get("name", "")
+            error = p.get("load_error") or ""
+            status = f"NOT loaded: {error}" if error else "NOT loaded"
+            items.append(f"- {name} [{status}]")
     if not items:
         return ""
     return "\n".join(items)
@@ -113,6 +140,8 @@ def build_master_prompt_sections(*, user_text: str = "") -> tuple[str, ...]:
     capability_overview = _build_capability_overview()
     if capability_overview:
         sections.insert(0, capability_overview)
+
+    sections.insert(0, _CONCEPT_TAXONOMY)
 
     result = tuple(section for section in sections if section.strip())
     _CACHED_MASTER_SECTIONS = result

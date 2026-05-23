@@ -411,8 +411,14 @@ def _is_tools_template_only(content: str) -> bool:
     return False
 
 
+def _strip_leading_heading(text: str) -> str:
+    lines = text.split("\n", 1)
+    if lines and re.match(r"^#{1,3}\s", lines[0]):
+        return lines[1].strip() if len(lines) > 1 else ""
+    return text
+
+
 def _build_memory_prompt_block(memory_markdown: str, user_text: str) -> str:
-    del user_text
     if not memory_markdown.strip():
         return ""
     bullet_lines = [
@@ -420,24 +426,73 @@ def _build_memory_prompt_block(memory_markdown: str, user_text: str) -> str:
         for line in memory_markdown.splitlines()
         if _MEMORY_LIST_PREFIX_RE.match(line.strip())
     ]
+    total_count = len(bullet_lines) if bullet_lines else 0
+
+    if user_text.strip():
+        matched = _recall_relevant_memory_lines(bullet_lines, user_text)
+        if matched:
+            suffix = ""
+            if total_count > len(matched):
+                suffix = (
+                    f"\n... {total_count - len(matched)} more; "
+                    "full MEMORY via GetWorkspaceDoc."
+                )
+            return (
+                f"Recalled {len(matched)}/{total_count} relevant memories:\n"
+                + "\n".join(matched)
+                + suffix
+            )
+
     if not bullet_lines:
-        compact = memory_markdown[:_MAX_MEMORY_CHARS].rstrip()
-        return f"Index only; full MEMORY via GetWorkspaceDoc.\n{compact}"
-    selected: list[str] = []
-    total_chars = 0
+        return ""
+    summary = f"{total_count} memory entries stored. Use ConversationMemory(action=list) or GetWorkspaceDoc(name=MEMORY) to read."
+    return summary
+
+
+def _recall_relevant_memory_lines(
+    bullet_lines: list[str], user_text: str
+) -> list[str]:
+    from .graph_service import get_graph_store_sync
+
+    store = get_graph_store_sync()
+    if store is not None:
+        try:
+            hits = store.recall(
+                user_text,
+                kinds=["fact", "preference"],
+                limit=_MAX_MEMORY_LINES,
+                expand=False,
+                touch=False,
+            )
+            if hits:
+                hit_texts = {h.node.title.lower() for h in hits} | {
+                    h.node.body.lower() for h in hits
+                }
+                matched: list[str] = []
+                for line in bullet_lines:
+                    body = line.lstrip("- ").strip()
+                    key_part = body.split(":", 1)[0].strip().lower() if ":" in body else ""
+                    val_part = body.split(":", 1)[1].strip().lower() if ":" in body else body.lower()
+                    if key_part and any(key_part in t or t in key_part for t in hit_texts):
+                        matched.append(line)
+                    elif val_part and any(
+                        val_part in t or t in val_part for t in hit_texts
+                    ):
+                        matched.append(line)
+                if matched:
+                    return matched[:_MAX_MEMORY_LINES]
+        except Exception:
+            pass
+
+    query_tokens = set(re.findall(r"\w{2,}", user_text.lower()))
+    if not query_tokens:
+        return []
+    matched = []
     for line in bullet_lines:
-        if line in selected:
-            continue
-        if len(selected) >= _MAX_MEMORY_LINES:
-            break
-        if total_chars + len(line) > _MAX_MEMORY_CHARS:
-            break
-        selected.append(line)
-        total_chars += len(line)
-    suffix = ""
-    if len(bullet_lines) > len(selected):
-        suffix = f"\n... {len(bullet_lines) - len(selected)} more memory items; read full MEMORY via GetWorkspaceDoc."
-    return "Index only; full MEMORY via GetWorkspaceDoc.\n" + "\n".join(selected) + suffix
+        line_lower = line.lower()
+        if any(tok in line_lower for tok in query_tokens):
+            matched.append(line)
+    return matched[:_MAX_MEMORY_LINES]
 
 
 _MAX_USER_LINES = 40
@@ -630,6 +685,7 @@ def build_workspace_startup_bundle(*, user_text: str = "", index_only: bool = Fa
     else:
         for name, content in loaded_docs:
             header = f"### {name}.md" if not name.startswith("memory/") else f"### {name}"
+            content = _strip_leading_heading(content)
             sections.append(f"{header}\n{content}")
         if skipped_docs:
             status_lines = [

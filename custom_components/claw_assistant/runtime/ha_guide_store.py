@@ -57,31 +57,194 @@ class GuideStoreSnapshot:
 
 _GUIDE_STORE: dict[str, GuideStoreSnapshot] = {"snapshot": GuideStoreSnapshot()}
 _GUIDE_TOPIC_HINTS: dict[str, tuple[str, ...]] = {
-    "automation": ("automation", "automations", "自动化", "脚本", "script", "trigger", "trace"),
-    "dashboard": ("dashboard", "lovelace", "仪表盘", "卡片", "card", "视图", "view"),
-    "frontend": ("frontend", "screen", "屏幕", "页面", "点击", "click", "tap", "inspect", "snapshot", "看看", "界面"),
-    "integration": ("integration", "integrations", "集成", "reload", "repair", "repairs", "修复"),
-    "calendar": ("calendar", "calendars", "日历"),
-    "todo": ("todo", "待办", "任务", "清单", "shopping list", "购物"),
-    "backup": ("backup", "restore", "备份", "恢复", "rollback", "回滚"),
-    "diagnostics": ("diagnostics", "logs", "trace", "日志", "诊断"),
-    "esphome": ("esphome", "esp", "固件", "ota", "节点"),
-    "safety": ("safety", "safe", "风险", "安全", "确认", "危险"),
-    "naming context": ("alias", "aliases", "命名", "名称", "别名", "friendly name"),
-    "template": ("template", "jinja", "模板", "jinja2", "state_attr", "trigger."),
-    "blueprint": ("blueprint", "蓝图", "blueprints"),
+    # 10 — builtin intents
+    "intent": (
+        "intent", "intents", "HassTurnOn", "HassTurnOff", "HassLightSet",
+        "HassSetPosition", "HassClimateSetTemperature", "HassMediaPause",
+        "HassMediaNext", "HassVacuumStart", "意图", "指令",
+    ),
+    # 15 — tool selection / routing
+    "tool routing": (
+        "routing", "ServiceCall", "intent", "tool selection", "工具选择",
+        "路由", "IntentCall", "device control", "设备控制",
+    ),
+    # 20 — services reference
+    "service": (
+        "service", "services", "服务", "domain", "alarm_control_panel",
+        "lock", "media_player", "climate", "fan", "vacuum", "cover",
+        "ListServices", "ServiceHelp", "服务调用",
+    ),
+    # 30 — safety
+    "safety": (
+        "safety", "safe", "sensitive", "confirm", "destructive", "risk",
+        "安全", "风险", "确认", "危险", "敏感",
+    ),
+    # 40 — workflow playbooks
+    "workflow": (
+        "workflow", "playbook", "triage", "troubleshoot", "debug",
+        "工作流", "排查", "调试", "诊断流程",
+    ),
+    # 50 — checklists
+    "checklist": (
+        "checklist", "pre-change", "post-change", "verify", "rollback",
+        "检查清单", "核对", "变更前", "变更后",
+    ),
+    # 60 — frontend inspect
+    "frontend": (
+        "frontend", "FrontendInspect", "snapshot", "exec_js", "tap",
+        "navigate", "scroll", "shadow DOM", "interactable",
+        "屏幕", "页面", "点击", "界面", "前端",
+    ),
+    # 61 — dashboard card
+    "dashboard": (
+        "dashboard", "lovelace", "DashboardCard", "card", "view",
+        "html-card-pro", "仪表盘", "卡片", "视图", "面板",
+    ),
+    # 62 — config entries
+    "integration": (
+        "integration", "integrations", "ConfigEntries", "config_entry",
+        "flow", "reload", "repair", "repairs",
+        "集成", "修复", "配置条目",
+    ),
+    # 63 — ha control
+    "ha control": (
+        "HAControl", "shell", "ssh", "asyncssh", "check_config",
+        "restart", "reboot", "reload_integration", "system_log",
+        "命令行", "远程", "重启",
+    ),
+    # 64 — automation
+    "automation": (
+        "automation", "automations", "Automation", "trigger", "condition",
+        "action", "trace", "traces", "script", "scripts",
+        "自动化", "脚本", "触发器", "条件",
+    ),
+    # 65 — registry
+    "registry": (
+        "Registry", "registry", "area", "floor", "label", "category",
+        "entity", "device", "rename",
+        "区域", "楼层", "房间", "标签", "注册表",
+    ),
+    # 66 — memory tools
+    "memory": (
+        "memory", "ConversationMemory", "MemoryGraph", "remember", "recall",
+        "forget", "link", "knowledge graph",
+        "记忆", "记住", "偏好", "知识图谱",
+    ),
+    # 67 — batch control
+    "batch": (
+        "batch", "BatchControl", "bulk", "multiple", "turn_off", "turn_on",
+        "toggle", "批量", "批量控制", "多设备",
+    ),
+    # 68 — config file
+    "config file": (
+        "ConfigFile", "configuration.yaml", "yaml", "stage_write",
+        "stage_delete", "approval", "config directory",
+        "配置文件", "文件编辑",
+    ),
+    # 69 — hacs
+    "hacs": (
+        "HACS", "hacs", "repository", "custom_component", "github",
+        "install", "update", "uninstall", "store",
+        "商店", "自定义组件", "第三方",
+    ),
+    # 70 — execute python
+    "python": (
+        "ExecutePython", "python", "sandbox", "inline", "code",
+        "requirements", "OUTPUT_DIR", "TMP_DIR",
+        "执行", "代码", "脚本执行",
+    ),
+    # 71 — helper manager
+    "helper": (
+        "HelperManager", "helper", "input_boolean", "input_number",
+        "input_text", "input_select", "input_datetime", "input_button",
+        "timer", "counter", "template sensor",
+        "辅助实体", "计时器", "计数器",
+    ),
+    # 72 — query tools
+    "query": (
+        "GetLiveContext", "EntityQuery", "SmartDiscovery", "AreaDevices",
+        "HistoryQuery", "GetSystemIndex", "ListServices", "ServiceHelp",
+        "ValidateService", "query", "state", "history",
+        "查询", "状态", "实体查询", "历史",
+    ),
+    # 73 — web search
+    "web search": (
+        "WebSearch", "UrlFetch", "WebReadChunk", "StockQuery",
+        "search", "web", "url", "fetch", "google", "bing",
+        "搜索", "网页", "抓取", "股票",
+    ),
+    # 74 — skill tools
+    "skill": (
+        "skill", "skills", "InstallSkill", "ListInstalledSkills",
+        "GetInstalledSkill", "DeleteSkill", "HomeAssistantGuide",
+        "workspace", "ListWorkspaceDocs", "GetWorkspaceDoc",
+        "SetWorkspaceDoc", "GetMasterPrompt", "SetMasterPrompt",
+        "技能", "工作区",
+    ),
+    # 75 — self edit
+    "self edit": (
+        "ProposeSelfEdit", "ReviewSelfSkills", "ListProposals",
+        "GetProposal", "ApplyProposal", "DiscardProposal",
+        "GetSelfChangelog", "UpsertGuideDoc", "DeleteGuideDoc",
+        "proposal", "self-edit", "changelog",
+        "自我编辑", "提案",
+    ),
+    # 76 — misc tools
+    "misc": (
+        "ParallelToolCall", "Notify", "AgentHandoff", "NextAgentHandoff",
+        "SetConversationState", "HeartbeatManager", "ReadFile",
+        "GetConversationHistory", "notification", "parallel",
+        "通知", "并行", "心跳", "对话历史",
+    ),
+    # 77 — entity tools
+    "entity": (
+        "CustomEntityManager", "ExposeEntity", "IntentCall",
+        "entity", "expose", "sensor", "binary_sensor", "switch",
+        "button", "template sensor",
+        "实体", "暴露", "自定义实体",
+    ),
+    # 78 — media tools
+    "media": (
+        "CameraCapture", "MediaAnalyze", "camera", "snapshot",
+        "analyze", "image", "photo", "视觉",
+        "摄像头", "拍照", "图片", "分析",
+    ),
+    # 79 — service call
+    "service call": (
+        "ServiceCall", "service", "domain", "entity_id", "data",
+        "brightness", "temperature", "turn_on", "turn_off",
+        "服务调用", "调用服务",
+    ),
+    # 80 — system control
+    "system control": (
+        "SystemControl", "output_mode", "global_inject", "status",
+        "brief", "detailed", "系统控制", "输出模式",
+    ),
+    # 81 — plugin system
+    "plugin": (
+        "plugin", "plugins", "PluginManager", "hermes", "install",
+        "uninstall", "unload", "hot_reload", "reload_all",
+        "plugin.yaml", "register", "PluginContext", "approval",
+        "standalone", "privileged", "call_tool",
+        "插件", "插件系统", "热加载", "卸载",
+    ),
+    # cross-cutting topics (not tied to a single guide)
+    "calendar": ("calendar", "calendars", "日历", "日程"),
+    "todo": ("todo", "shopping list", "待办", "任务", "清单", "购物"),
+    "backup": ("backup", "restore", "rollback", "备份", "恢复", "回滚"),
+    "diagnostics": ("diagnostics", "logs", "trace", "error_log", "日志", "诊断"),
+    "esphome": ("esphome", "esp", "ota", "firmware", "固件", "节点"),
+    "naming context": ("alias", "aliases", "friendly name", "命名", "名称", "别名"),
+    "template": ("template", "jinja", "jinja2", "state_attr", "模板"),
+    "blueprint": ("blueprint", "blueprints", "蓝图"),
     "scene": ("scene", "scenes", "场景", "快照"),
-    "zigbee": ("zigbee", "zha", "z2m", "zigbee2mqtt", "coordinator", "配对", "pairing"),
+    "zigbee": ("zigbee", "zha", "z2m", "zigbee2mqtt", "coordinator", "pairing", "配对"),
     "zwave": ("zwave", "z-wave", "zwavejs", "s2", "dsk"),
-    "addon": ("add-on", "addon", "supervisor", "插件", "附加组件"),
-    "yaml config": ("yaml", "configuration.yaml", "customize", "package", "packages"),
-    "network": ("ssl", "certificate", "dns", "duckdns", "nginx", "proxy", "远程访问", "external_url"),
-    "energy": ("energy", "电量", "用电", "solar", "太阳能", "utility_meter"),
-    "recorder": ("recorder", "数据库", "database", "purge", "statistics"),
-    "voice": ("tts", "piper", "whisper", "语音", "voice", "assist", "stt"),
-    "presence": ("device_tracker", "zone", "person", "位置", "在家", "离家", "geofence"),
-    "custom component": ("custom_component", "hacs", "自定义组件", "第三方"),
-    "area floor": ("area", "floor", "区域", "楼层", "房间", "label"),
+    "network": ("ssl", "certificate", "dns", "duckdns", "nginx", "proxy", "external_url", "远程访问"),
+    "energy": ("energy", "solar", "utility_meter", "电量", "用电", "太阳能"),
+    "recorder": ("recorder", "database", "purge", "statistics", "数据库", "记录器"),
+    "voice": ("tts", "piper", "whisper", "voice", "assist", "stt", "语音"),
+    "presence": ("device_tracker", "zone", "person", "geofence", "位置", "在家", "离家"),
 }
 
 _TOOL_GUIDE_MAP: dict[str, str] = {
@@ -91,6 +254,7 @@ _TOOL_GUIDE_MAP: dict[str, str] = {
     "HAControl": "63_ha_control.md",
     "Automation": "64_automation.md",
     "Script": "64_automation.md",
+    "ScriptExecute": "64_automation.md",
     "Registry": "65_registry.md",
     "ConversationMemory": "66_memory_tools.md",
     "MemoryGraph": "66_memory_tools.md",
@@ -146,6 +310,7 @@ _TOOL_GUIDE_MAP: dict[str, str] = {
     "MediaAnalyze": "78_media_tools.md",
     "ServiceCall": "79_service_call.md",
     "SystemControl": "80_system_control.md",
+    "PluginManager": "81_plugin_system.md",
 }
 
 _TOOL_GUIDE_SEEN: set[str] = set()

@@ -367,6 +367,9 @@ def analyze_plugin(manifest: PluginManifest, hass: HomeAssistant | None = None) 
             loaded.module = module
         except Exception as e:
             LOGGER.warning("Plugin %s register() failed: %s", manifest.name, e)
+            loaded.load_error = f"register() failed: {e}"
+            _PLUGIN_STORE[manifest.key] = loaded
+            return loaded
     registered_tools = get_all_plugin_tools()
     plugin_tools = {k: v for k, v in registered_tools.items() if v.get("_plugin") == manifest.name}
     try:

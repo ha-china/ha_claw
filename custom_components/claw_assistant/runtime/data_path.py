@@ -198,21 +198,54 @@ def _import_legacy_skill_dir(source_dir: Path, target_root: Path, *, label: str)
         )
 
 
-_SYSTEM_UPDATE_VERSION = "8.5.0"
+_SYSTEM_UPDATE_VERSION = "8.6.0"
 
-_FORCE_UPDATE_ENTRIES = [
+_FORCE_OVERWRITE_FILES = [
     "prompts/runtime_context.md",
     "prompts/memory_routing.md",
     "prompts/native_mode.md",
     "prompts/skill_mode.md",
     "workspace/AGENTS.md",
-    "workspace/BOOTSTRAP.md",
-    "homeassistant_guide",
 ]
+
+_INCREMENTAL_FILES = [
+    "workspace/BOOTSTRAP.md",
+]
+
+_PATCH_LINES: list[tuple[str, str, str]] = []
 
 _VERSIONED_BUNDLED_DOCS: tuple[str, ...] = (
     "prompts/runtime_context.md",
     "skills/homeassistant_runtime_guide.md",
+    "homeassistant_guide/runtime/00_overview.md",
+    "homeassistant_guide/runtime/10_builtin_intents.md",
+    "homeassistant_guide/runtime/15_llm_tools_reference.md",
+    "homeassistant_guide/runtime/20_services_reference.md",
+    "homeassistant_guide/runtime/30_safety_and_workflows.md",
+    "homeassistant_guide/runtime/40_workflow_playbooks.md",
+    "homeassistant_guide/runtime/50_checklists_and_naming.md",
+    "homeassistant_guide/runtime/60_frontend_inspect.md",
+    "homeassistant_guide/runtime/61_dashboard_card.md",
+    "homeassistant_guide/runtime/62_config_entries.md",
+    "homeassistant_guide/runtime/63_ha_control.md",
+    "homeassistant_guide/runtime/64_automation.md",
+    "homeassistant_guide/runtime/65_registry.md",
+    "homeassistant_guide/runtime/66_memory_tools.md",
+    "homeassistant_guide/runtime/67_batch_control.md",
+    "homeassistant_guide/runtime/68_config_file.md",
+    "homeassistant_guide/runtime/69_hacs.md",
+    "homeassistant_guide/runtime/70_execute_python.md",
+    "homeassistant_guide/runtime/71_helper_manager.md",
+    "homeassistant_guide/runtime/72_query_tools.md",
+    "homeassistant_guide/runtime/73_web_search.md",
+    "homeassistant_guide/runtime/74_skill_tools.md",
+    "homeassistant_guide/runtime/75_self_edit_tools.md",
+    "homeassistant_guide/runtime/76_misc_tools.md",
+    "homeassistant_guide/runtime/77_entity_tools.md",
+    "homeassistant_guide/runtime/78_media_tools.md",
+    "homeassistant_guide/runtime/79_service_call.md",
+    "homeassistant_guide/runtime/80_system_control.md",
+    "homeassistant_guide/runtime/81_plugin_system.md",
 )
 
 _VERSION_MARKER_RE = re.compile(
@@ -267,23 +300,54 @@ def _sync_versioned_docs(root: Path) -> None:
             )
 
 
+def _patch_file_lines(dst: Path, anchor: str, new_line: str) -> bool:
+    """Insert *new_line* after *anchor* in *dst* if not already present."""
+    if not dst.exists():
+        return False
+    try:
+        text = dst.read_text(encoding="utf-8")
+    except OSError:
+        return False
+    if new_line in text:
+        return False
+    idx = text.find(anchor)
+    if idx == -1:
+        return False
+    insert_pos = text.index("\n", idx) + 1 if "\n" in text[idx:] else len(text)
+    patched = text[:insert_pos] + new_line + "\n" + text[insert_pos:]
+    dst.write_text(patched, encoding="utf-8")
+    LOGGER.info("Patched %s: inserted line after '%s'", dst.name, anchor[:40])
+    return True
+
+
 def _apply_system_update(root: Path) -> None:
     version_file = root / ".update_version"
     current = version_file.read_text(encoding="utf-8").strip() if version_file.exists() else ""
     if current == _SYSTEM_UPDATE_VERSION:
         return
-    for entry in _FORCE_UPDATE_ENTRIES:
+
+    for entry in _FORCE_OVERWRITE_FILES:
         src = BUNDLED_DATA_DIR / entry
         dst = root / entry
-        if not src.exists():
+        if not src.exists() or not src.is_file():
             continue
-        if src.is_dir():
-            if dst.exists():
-                shutil.rmtree(dst)
-            shutil.copytree(src, dst)
-        else:
+        dst.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(src, dst)
+
+    for entry in _INCREMENTAL_FILES:
+        src = BUNDLED_DATA_DIR / entry
+        dst = root / entry
+        if not src.exists() or not src.is_file():
+            continue
+        if not dst.exists():
             dst.parent.mkdir(parents=True, exist_ok=True)
             shutil.copy2(src, dst)
+            LOGGER.info("Incremental file added: %s", entry)
+
+    for rel_path, anchor, new_line in _PATCH_LINES:
+        dst = root / rel_path
+        _patch_file_lines(dst, anchor, new_line)
+
     version_file.write_text(_SYSTEM_UPDATE_VERSION, encoding="utf-8")
     LOGGER.info("System files updated to %s", _SYSTEM_UPDATE_VERSION)
 
