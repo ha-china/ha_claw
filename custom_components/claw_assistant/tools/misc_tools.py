@@ -2932,17 +2932,17 @@ class PluginManagerTool(llm.Tool):
     name = "PluginManager"
     description = (
         "Manage Hermes-compatible plugins in Home Assistant. "
-        "Supports installing plugins from GitHub (clone to plugins dir). "
-        "Actions: list (all), loaded (active), load/unload/hot_reload (single), "
-        "reload_all, validate (check source), guide (install help), call_tool (invoke a loaded plugin tool). "
-        "For plugin-related user requests, use this bridge first: loaded/list to inspect, call_tool to execute. "
-        "Do not use IntentCall for Claw plugins. "
+        "Actions: list (all), loaded (active + their tool names), "
+        "load/unload/hot_reload (single), reload_all, "
+        "validate (check source), guide (install help), "
+        "install (clone from GitHub), uninstall (unload + delete from disk), "
+        "call_tool (invoke a loaded plugin tool by name + args). "
         "Plugins dir: .storage/claw_assistant/plugins/. "
         "HOT reload - no HA restart needed."
     )
     parameters = vol.Schema({
         vol.Required("action"): vol.In([
-            "list", "loaded", "load", "unload", "hot_reload", "reload_all",
+            "list", "loaded", "load", "unload", "uninstall", "hot_reload", "reload_all",
             "validate", "guide", "install", "pending", "cancel_approval", "call_tool"
         ]),
         vol.Optional("plugin_name", default=""): str,
@@ -3068,6 +3068,30 @@ class PluginManagerTool(llm.Tool):
                 }
             except Exception as e:
                 return {"success": False, "error": str(e)}
+
+        if action == "uninstall":
+            if not plugin_name:
+                return {"success": False, "error": "plugin_name required"}
+            import shutil
+            target_dir = plugins_dir / plugin_name
+            if not target_dir.exists():
+                return {"success": False, "error": f"Plugin '{plugin_name}' not found in {plugins_dir}"}
+            unload_result = hot_unload_plugin(hass, plugin_name)
+            try:
+                await hass.async_add_executor_job(shutil.rmtree, str(target_dir))
+            except Exception as e:
+                return {
+                    "success": False,
+                    "error": f"Unloaded from memory but failed to delete: {e}",
+                    "unload_result": unload_result,
+                }
+            return {
+                "success": True,
+                "action": "uninstalled",
+                "plugin": plugin_name,
+                "path": str(target_dir),
+                "unload_result": unload_result,
+            }
 
         if action == "pending":
             pending = list_pending_plugin_approvals(hass)

@@ -202,8 +202,6 @@ class AutomationTool(llm.Tool):
         for state in hass.states.async_all():
             if not state.entity_id.startswith("automation."):
                 continue
-            if not entity_is_exposed(hass, state.entity_id, llm_context):
-                continue
             auto_id = state.entity_id.removeprefix("automation.")
             if component is not None:
                 auto = component.get_entity(state.entity_id)

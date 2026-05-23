@@ -652,7 +652,6 @@ Available actions:
   params: {domain: "optional_filter", entry_id: "optional_filter"}. Returns id, name, manufacturer, model, area_id, etc.
 - reload_integration: Reload one integration (params: {domain: "integration_domain"})
 - rename_entry: Rename a config entry (params: {domain: "integration_domain", name: "new_name"})
-- navigate: Navigate to a page (path: "/lovelace", "/config", "/developer-tools/service", etc.)
 - reload_themes/reload_resources/reload_scripts/reload_automations: Reload related HA resources
 - get_system_log: Get recent HA system error/warning log entries from memory (params: {limit: 20})
 - get_error_log: Read the HA error log file tail (params: {lines: 50}). Works even if shell is unavailable.

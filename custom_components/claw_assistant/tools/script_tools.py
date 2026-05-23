@@ -216,8 +216,6 @@ class ScriptTool(llm.Tool):
         for state in hass.states.async_all():
             if not state.entity_id.startswith("script."):
                 continue
-            if not entity_is_exposed(hass, state.entity_id, llm_context):
-                continue
             obj_id = state.entity_id.removeprefix("script.")
             reg_entry = registry.async_get(state.entity_id)
             cat_id = reg_entry.categories.get("script") if reg_entry else None
