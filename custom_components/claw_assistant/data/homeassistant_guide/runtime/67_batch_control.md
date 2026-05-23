@@ -1,3 +1,4 @@
+<!-- version: 1 -->
 # BatchControl - Control Multiple Devices
 
 ## Params

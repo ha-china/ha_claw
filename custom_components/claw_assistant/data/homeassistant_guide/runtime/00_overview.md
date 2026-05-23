@@ -1,3 +1,4 @@
+<!-- version: 1 -->
 # HA Runtime Guide
 
 ## Index
@@ -10,7 +11,7 @@
 - **40** Workflow playbooks
 - **50** Checklists
 
-### Tool Guides (60-78)
+### Tool Guides (60-81)
 - **60** FrontendInspect (UI interaction)
 - **61** DashboardCard (Lovelace management)
 - **62** ConfigEntries (integration install/manage)
@@ -32,6 +33,7 @@
 - **78** Media tools (CameraCapture/MediaAnalyze)
 - **79** ServiceCall (call any HA service)
 - **80** SystemControl (system settings)
+- **81** Plugin system (PluginManager/install/uninstall/lifecycle)
 
 ## Core Rules
 - Device control → Intent first, ServiceCall only when no intent

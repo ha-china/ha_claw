@@ -1,4 +1,5 @@
-# Kadermanager Workflow Playbooks
+<!-- version: 2 -->
+# Workflow Playbooks
 
 ## Automation Triage
 1. Confirm the trigger event actually happened.
@@ -20,6 +21,18 @@
 3. Consolidate duplicate cards and controls.
 4. Verify unavailable-state behavior and navigation.
 
+## Integration Install
+1. ConfigEntries flow/init with handler → fill form → flow/configure.
+2. If flow returns more steps, keep configuring.
+3. Verify with ConfigEntries get.
+
+## Diagnostics / Repair
+1. HAControl get_system_log → identify errors.
+2. HAControl get_error_log → full error context.
+3. Isolate the integration/entity causing issues.
+4. Reload integration or check config.
+5. Report findings and propose fix.
+
 ## Execution Rule
-- When the user asks for "how to do this in Home Assistant", use `HomeAssistantGuideSkill` to pull the relevant playbook first.
-- Then translate the playbook into `claw_assistant` internal tools and actions.
+- When the user asks "how to do this in HA", use `HomeAssistantGuide` tool to pull the relevant playbook first.
+- Then translate the playbook into concrete tool calls.

@@ -1,3 +1,4 @@
+<!-- version: 1 -->
 # Built-in Intent Quick Reference
 
 All intents use slots: `name`(fuzzy match), `area`, `floor`. Omitting `name` + providing `area` targets all matching entities in that area.

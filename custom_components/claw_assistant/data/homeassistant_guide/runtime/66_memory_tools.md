@@ -1,3 +1,4 @@
+<!-- version: 2 -->
 # Memory Tools
 
 ## ConversationMemory - Simple Key-Value
@@ -12,9 +13,13 @@ For user preferences and short facts. Auto-injected into prompt.
 | clear | - |
 
 ```json
-{"action": "save", "key": "user_name", "value": "张三"}
+{"action": "save", "key": "user_name", "value": "John"}
+{"action": "save", "key": "fav_color", "value": "blue", "target": "user"}
 {"action": "get", "key": "user_name"}
+{"action": "list"}
 ```
+
+`target`: `memory` (default, AI workspace) or `user` (user-facing preferences).
 
 ## MemoryGraph - Knowledge Graph
 
@@ -29,13 +34,27 @@ For decisions, bug fixes, causal links needing graph traversal.
 | forget | id |
 | get | id |
 | stats | - |
-| cleanup | - (dedup + remove junk) |
+| cleanup | - (dedup + remove junk + rebuild edges) |
+
+Backed by SQLite + FTS5 with BM25 ranking.
+
+### Kind Types
+
+decision, bug_fix, preference, observation, fact, rule, insight
+
+### Examples
 
 ```json
-{"action": "remember", "kind": "decision", "title": "选择方案A", "body": "因为性能更好"}
-{"action": "recall", "query": "方案", "limit": 5}
-{"action": "link", "src_id": 1, "dst_id": 2, "relation": "caused_by"}
+{"action": "remember", "kind": "decision", "title": "Chose plan A", "body": "Better performance", "confidence": 0.9}
+{"action": "recall", "query": "plan", "limit": 5, "expand": true}
+{"action": "link", "src_id": 1, "dst_id": 2, "relation": "caused_by", "weight": 1.0}
+{"action": "pin", "id": 1, "pinned": true}
+{"action": "forget", "id": 3}
+{"action": "stats"}
+{"action": "cleanup"}
 ```
+
+`expand`: follow edges to return linked nodes. `pin`: prevent cleanup from removing.
 
 ## Notes
 

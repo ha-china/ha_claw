@@ -1,3 +1,4 @@
+<!-- version: 2 -->
 # Entity Tools
 
 ## CustomEntityManager
@@ -10,6 +11,8 @@ Create dynamic AI entities under claw_assistant device.
 | binary_sensor | Jinja2 template binary sensor |
 | switch | Toggle switch |
 | button | Press action button |
+
+Full params: action, platform, name, entity_id, state_template, icon, device_class, state_class, unit_of_measurement, press_action.
 
 ### Create
 
@@ -92,6 +95,6 @@ Do not use `IntentCall` for Claw plugins, plugin tools, skills, slash commands, 
 {
   "action": "call",
   "intent_type": "HassLightSet",
-  "slots": {"name": "客厅灯", "brightness": 80}
+  "slots": {"name": "living room light", "brightness": 80}
 }
 ```

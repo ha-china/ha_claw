@@ -1,3 +1,4 @@
+<!-- version: 2 -->
 # ServiceCall - Call Any HA Service
 
 ## Params
@@ -50,8 +51,24 @@ If unsure about params:
 3. ServiceCall with correct params
 ```
 
+## Common Domain Params
+
+| Domain | Service | Key Params |
+|--------|---------|------------|
+| light | turn_on | brightness_pct(0-100), color_name, rgb_color([r,g,b]), color_temp_kelvin, hs_color |
+| climate | set_temperature | temperature, hvac_mode(heat/cool/auto/off) |
+| climate | set_hvac_mode | hvac_mode |
+| fan | set_percentage | percentage(0-100) |
+| fan | set_preset_mode | preset_mode |
+| cover | set_cover_position | position(0-100) |
+| media_player | volume_set | volume_level(0.0-1.0) |
+| media_player | play_media | media_content_id, media_content_type |
+| alarm_control_panel | alarm_arm_away | code |
+| lock | lock/unlock | code (if required) |
+
 ## Notes
 
 - entity_id supports fuzzy matching ("living room light" → light.living_room)
 - data params are flat or nested dict
-- Use real param names (brightness_pct, not user's colloquial terms)
+- Use real param names (brightness_pct, not "brightness" in other languages)
+- When in doubt: ListServices → ServiceHelp → ServiceCall

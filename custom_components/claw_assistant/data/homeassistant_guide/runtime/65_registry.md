@@ -1,3 +1,4 @@
+<!-- version: 2 -->
 # Registry - Manage HA Registries
 
 ## Registries
@@ -35,6 +36,14 @@
 
 // Create label
 {"registry": "label", "action": "create", "params": {"name": "Important", "color": "red"}}
+```
+
+## Label Operations
+
+Label rename: `action=update` with `params:{name:"new_name"}`. `action=rename` is accepted as alias for update.
+
+```json
+{"registry": "label", "action": "update", "label_id": "important", "params": {"name": "Critical", "color": "red"}}
 ```
 
 ## Notes

@@ -1,3 +1,4 @@
+<!-- version: 2 -->
 # Query Tools
 
 ## GetLiveContext
@@ -13,7 +14,7 @@ Get real-time state of all exposed entities. No params.
 Query single entity state. Supports fuzzy matching.
 
 ```json
-{"entity_id": "客厅灯"}
+{"entity_id": "living room light"}
 {"entity_id": "light.living_room"}
 ```
 
@@ -27,11 +28,13 @@ Query entity history.
 
 ## GetSystemIndex
 
-Get system structure (areas/domains/device classes/automations/scripts).
+Get system structure overview: areas, floors, domains, device classes, people, automations, scripts.
 
 ```json
 {"force_refresh": false}
 ```
+
+Use this first to understand the HA installation before querying specific entities.
 
 ## SmartDiscovery
 
@@ -51,7 +54,7 @@ Smart entity discovery with filters.
 
 ```json
 {"area": "living_room", "domain": "light"}
-{"name_contains": "温度", "domain": "sensor"}
+{"name_contains": "temperature", "domain": "sensor"}
 ```
 
 ## AreaDevices
@@ -59,7 +62,7 @@ Smart entity discovery with filters.
 Get all devices in area.
 
 ```json
-{"area": "客厅"}
+{"area": "living_room"}
 ```
 
 ## ListServices
@@ -72,8 +75,19 @@ List services for domain.
 
 ## ServiceHelp
 
-Get service help.
+Get service help (schema, fields, description).
 
 ```json
+{"domain": "light"}
 {"domain": "light", "service": "turn_on"}
 ```
+
+## ValidateService
+
+Validate service call params before executing. Returns errors and suggestions.
+
+```json
+{"domain": "light", "service": "turn_on", "data": {"brightness_pct": 50, "entity_id": "light.desk"}}
+```
+
+Use when unsure about param correctness — cheaper than a failed ServiceCall.

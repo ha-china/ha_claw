@@ -1,3 +1,4 @@
+<!-- version: 1 -->
 # Tool Selection — Intent vs ServiceCall Routing
 
 ALWAYS prefer Hass* intent tools for device control. They handle entity matching, area resolution, and error reporting natively. Only fall back to ServiceCall when NO intent covers the operation.

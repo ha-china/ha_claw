@@ -1,3 +1,4 @@
+<!-- version: 2 -->
 # Misc Tools
 
 ## ParallelToolCall
@@ -24,7 +25,7 @@ Send notification.
 | target | persistent_notification |
 
 ```json
-{"message": "任务完成", "title": "通知"}
+{"message": "Task completed", "title": "Notification"}
 {"message": "Hello", "target": "notify.mobile_app"}
 ```
 
@@ -63,12 +64,12 @@ Do NOT use for simple queries.
 
 ## HeartbeatManager
 
-Manage follow-up tasks.
+Manage scheduled follow-up tasks (replaces blind polling).
 
 | Action | Params |
 |--------|--------|
 | list | - |
-| upsert | slug, title, schedule, objective, steps |
+| upsert | slug, title, schedule, objective, steps, notes, status, enabled, delete_after_success, notify_channel |
 | delete | slug |
 | record | slug, note |
 | clear_state | slug |
@@ -77,11 +78,19 @@ Manage follow-up tasks.
 {
   "action": "upsert",
   "slug": "daily-check",
-  "title": "Daily Check",
+  "title": "Daily System Check",
   "schedule": "0 9 * * *",
-  "objective": "Check system status"
+  "objective": "Check system status and report issues",
+  "steps": ["get_system_log", "check integrations", "report"],
+  "enabled": true,
+  "delete_after_success": false,
+  "notify_channel": "wechat:account_id:user_id"
 }
+{"action": "record", "slug": "daily-check", "note": "All systems normal"}
+{"action": "list"}
 ```
+
+`notify_channel` format: `wechat:account_id:user_id` or `qq:user:openid`.
 
 ## ReadFile
 
@@ -98,3 +107,22 @@ Read temp/output file.
 {"action": "read", "path": "/tmp/output.txt"}
 {"action": "search", "path": "/tmp/log.txt", "query": "error"}
 ```
+
+## GetConversationHistory
+
+Inspect or manage conversation history across sessions.
+
+| Action | Purpose | Key Params |
+|--------|---------|------------|
+| get | Current conversation turns | max_turns, include_tools |
+| recent | Recent turns across ALL conversations | recent_minutes (default 60) |
+| clear | Wipe history | scope (current/all) |
+| stats | History statistics | - |
+
+```json
+{"action": "recent", "recent_minutes": 30}
+{"action": "get", "max_turns": 10, "include_tools": true}
+{"action": "clear", "scope": "current"}
+```
+
+Use `recent` when the window/conversation_id was closed or changed.

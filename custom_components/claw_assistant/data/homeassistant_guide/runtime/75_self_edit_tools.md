@@ -1,3 +1,4 @@
+<!-- version: 1 -->
 # Self-Edit Tools (Proposal System)
 
 All self-edits go through proposal → approval workflow.

@@ -1,3 +1,4 @@
+<!-- version: 2 -->
 # Skill Tools
 
 ## Skill Markdown Structure
@@ -86,7 +87,7 @@ Read skill content.
 
 ## InstallSkill
 
-Install new skill. The `markdown` field MUST include proper YAML frontmatter.
+Install new skill into `.storage/claw_assistant/skills` only. Legacy paths (`~/.openclaw/workspace/skills`, `config/skills`) are import-only, never install targets. The `markdown` field MUST include proper YAML frontmatter.
 
 ```json
 {"name": "my-skill", "markdown": "---\nname: my-skill\ndescription: What this skill does\n---\n\n# Skill Content\n...", "overwrite": false}

@@ -1,3 +1,4 @@
+<!-- version: 1 -->
 # SystemControl - System Settings
 
 ## Actions
