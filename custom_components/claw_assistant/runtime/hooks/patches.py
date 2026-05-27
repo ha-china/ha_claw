@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import re
+import time
 
 from typing import Any
 
@@ -20,7 +21,7 @@ from ...const import (
 from homeassistant.components.conversation.chat_log import AssistantContent
 
 from ..tools.tool_result_summary import build_synthesized_assistant_from_chat_log
-from ..core.state import get_conversation_status
+from ..core.state import get_conversation_status, get_runtime_store
 
 LOGGER = logging.getLogger(__name__)
 
@@ -32,11 +33,13 @@ _ALLOWED_INTENTS = {
     "HassBroadcast",
     "HassTurnOn",
     "HassTurnOff",
-    "HassToggle",
     "HassLightSet",
     "HassSetPosition",
     "HassOpenCover",
     "HassCloseCover",
+    "GetDateTime",
+    "GetSkillIndex",
+    "HassGetDateTime",
 }
 
 
@@ -464,6 +467,8 @@ def patch_hide_tool_calls_from_pipeline(hass: HomeAssistant) -> None:
         ) == CONVERSATION_MODE_DETAILED
 
     def filtered_process_event(self, event) -> None:
+        if get_conversation_status(hass).get("is_internal_llm"):
+            return
         delta = (event.data or {}).get("chat_log_delta")
 
         if (
@@ -491,7 +496,7 @@ def patch_hide_tool_calls_from_pipeline(hass: HomeAssistant) -> None:
                 for k, v in delta.items()
                 if k not in ("thinking_content", "tool_calls")
             }
-            if not cleaned or set(cleaned.keys()) == {"role"}:
+            if not cleaned:
                 return
             return original_process_event(
                 self,
@@ -513,6 +518,14 @@ def patch_hide_tool_calls_from_pipeline(hass: HomeAssistant) -> None:
             and delta.get("role") != "assistant"
         ):
             return
+
+        if (
+            event.type == PipelineEventType.INTENT_PROGRESS
+            and isinstance(delta, dict)
+            and not delta
+        ):
+            return
+
         if (
             event.type == PipelineEventType.INTENT_PROGRESS
             and isinstance(delta, dict)
@@ -722,6 +735,21 @@ def _wrap_listener_for_tracking(chat_log, original_listener):
         
         skip_tts = delta.pop("_claw_skip_tts", False)
         content = delta.get("content")
+        
+        if content:
+            try:
+                from homeassistant.core import async_get_hass
+                from ..core.state import get_runtime_store
+                hass = async_get_hass()
+                conv_id = getattr(log, "conversation_id", None) or "default"
+                runtime_store = get_runtime_store(hass)
+                parts = runtime_store.setdefault("live_response_parts", {}).setdefault(conv_id, [])
+                parts.append(content)
+                if len(parts) > 50:
+                    parts[:] = parts[-30:]
+            except Exception:
+                pass
+        
         if content:
             last = getattr(chat_log, "_claw_last_char", "\n")
             if last == "\n":
@@ -1446,39 +1474,63 @@ def unpatch_websocket_binary_handler_noise() -> None:
 
 
 _AIHUB_TIMEOUT_PATCHED = "_claw_aihub_timeout_patched"
+_AIHUB_TIMEOUT_CURRENT = "_claw_aihub_timeout_current"
 _AIHUB_TIMEOUT_ORIGINAL = 60.0
 
 
-_AIHUB_TIMEOUT_TARGET = 300.0
+def _aihub_timeout_target(hass: HomeAssistant) -> float:
+    from ...const import CONF_PIPELINE_TIMEOUT, DEFAULT_PIPELINE_TIMEOUT, DOMAIN
+
+    minimum_timeout = 300.0
+    entries = hass.config_entries.async_entries(DOMAIN)
+    if not entries:
+        return max(minimum_timeout, float(DEFAULT_PIPELINE_TIMEOUT))
+    configured_timeout = entries[0].options.get(
+        CONF_PIPELINE_TIMEOUT,
+        DEFAULT_PIPELINE_TIMEOUT,
+    )
+    return max(minimum_timeout, float(configured_timeout))
 
 
 def patch_aihub_provider_timeout(hass: HomeAssistant) -> None:
     try:
         from custom_components.ai_hub.providers.base import BaseProviderConfig
+        target_timeout = _aihub_timeout_target(hass)
         if getattr(BaseProviderConfig, _AIHUB_TIMEOUT_PATCHED, False):
+            BaseProviderConfig.__dataclass_fields__["timeout"].default = target_timeout
+            _bump_existing_providers(hass)
+            setattr(BaseProviderConfig, _AIHUB_TIMEOUT_CURRENT, target_timeout)
             return
         global _AIHUB_TIMEOUT_ORIGINAL
         _AIHUB_TIMEOUT_ORIGINAL = BaseProviderConfig.__dataclass_fields__["timeout"].default
-        BaseProviderConfig.__dataclass_fields__["timeout"].default = _AIHUB_TIMEOUT_TARGET
+        BaseProviderConfig.__dataclass_fields__["timeout"].default = target_timeout
         original_init = BaseProviderConfig.__init__
 
         def _patched_init(self, *args, **kwargs):
             original_init(self, *args, **kwargs)
             if self.timeout == _AIHUB_TIMEOUT_ORIGINAL:
-                self.timeout = _AIHUB_TIMEOUT_TARGET
+                self.timeout = BaseProviderConfig.__dataclass_fields__["timeout"].default
 
         BaseProviderConfig.__init__ = _patched_init
         BaseProviderConfig._claw_original_init = original_init
 
         _bump_existing_providers(hass)
         setattr(BaseProviderConfig, _AIHUB_TIMEOUT_PATCHED, True)
-        LOGGER.debug("Patched ai_hub provider timeout: %s -> %ss", _AIHUB_TIMEOUT_ORIGINAL, _AIHUB_TIMEOUT_TARGET)
+        setattr(BaseProviderConfig, _AIHUB_TIMEOUT_CURRENT, target_timeout)
+        LOGGER.debug("Patched ai_hub provider timeout: %s -> %ss", _AIHUB_TIMEOUT_ORIGINAL, target_timeout)
     except Exception as exc:
         LOGGER.debug("ai_hub provider timeout patch skipped: %s", exc)
 
 
 def _bump_existing_providers(hass: HomeAssistant) -> None:
     try:
+        from custom_components.ai_hub.providers.base import BaseProviderConfig
+        target_timeout = _aihub_timeout_target(hass)
+        previous_timeout = getattr(
+            BaseProviderConfig,
+            _AIHUB_TIMEOUT_CURRENT,
+            BaseProviderConfig.__dataclass_fields__["timeout"].default,
+        )
         data = hass.data.get("ai_hub")
         if not data:
             return
@@ -1489,8 +1541,11 @@ def _bump_existing_providers(hass: HomeAssistant) -> None:
                 providers = providers.values()
             for provider in providers:
                 cfg = getattr(provider, "config", None)
-                if cfg and getattr(cfg, "timeout", None) == _AIHUB_TIMEOUT_ORIGINAL:
-                    cfg.timeout = _AIHUB_TIMEOUT_TARGET
+                if cfg and getattr(cfg, "timeout", None) in (
+                    _AIHUB_TIMEOUT_ORIGINAL,
+                    previous_timeout,
+                ):
+                    cfg.timeout = target_timeout
     except Exception:
         pass
 
@@ -1505,6 +1560,8 @@ def unpatch_aihub_provider_timeout() -> None:
             BaseProviderConfig.__init__ = original_init
             delattr(BaseProviderConfig, "_claw_original_init")
         BaseProviderConfig.__dataclass_fields__["timeout"].default = _AIHUB_TIMEOUT_ORIGINAL
+        if hasattr(BaseProviderConfig, _AIHUB_TIMEOUT_CURRENT):
+            delattr(BaseProviderConfig, _AIHUB_TIMEOUT_CURRENT)
         delattr(BaseProviderConfig, _AIHUB_TIMEOUT_PATCHED)
         LOGGER.debug("Restored ai_hub provider timeout to %s", _AIHUB_TIMEOUT_ORIGINAL)
     except Exception as exc:
@@ -1903,3 +1960,172 @@ def unpatch_aihub_image_url_retry() -> None:
         except Exception:
             pass
     LOGGER.debug("Restored ai_hub complete_stream")
+
+
+_PIPELINE_WS_DETACH_PATCHED = "_claw_pipeline_ws_detach_patched"
+
+
+def patch_pipeline_websocket_detach(hass: HomeAssistant) -> None:
+    """Hook assist_pipeline/run so the pipeline task is NOT cancelled when
+    the WebSocket connection drops (browser refresh). Instead, the task
+    continues in the background, and its events are buffered for replay."""
+    from homeassistant.components.assist_pipeline import websocket_api as ap_ws
+
+    if getattr(ap_ws, _PIPELINE_WS_DETACH_PATCHED, False):
+        return
+
+    original_ws_run = ap_ws.websocket_run.__wrapped__ if hasattr(ap_ws.websocket_run, "__wrapped__") else None
+
+    original_run_fn = ap_ws.websocket_run
+
+    from homeassistant.components import websocket_api as ws_api
+
+    @ws_api.async_response
+    async def detached_websocket_run(hass_inner, connection, msg):
+        from homeassistant.components.assist_pipeline.pipeline import (
+            PipelineInput,
+            PipelineRun,
+            PipelineEvent,
+            PipelineEventType,
+            PipelineStage,
+        )
+        from homeassistant.components.assist_pipeline import async_get_pipeline
+        from homeassistant.components.assist_pipeline.const import DEFAULT_PIPELINE_TIMEOUT
+        from homeassistant.helpers import chat_session
+        from .official_websocket_hook import _buffer_live_event, _domain_data
+
+        pipeline_id = msg.get("pipeline")
+        try:
+            pipeline = async_get_pipeline(hass_inner, pipeline_id=pipeline_id)
+        except Exception:
+            return await original_run_fn(hass_inner, connection, msg)
+
+        start_stage = PipelineStage(msg["start_stage"])
+        if start_stage != PipelineStage.INTENT:
+            return await original_run_fn(hass_inner, connection, msg)
+
+        timeout = msg.get("timeout", DEFAULT_PIPELINE_TIMEOUT)
+        conversation_id = msg.get("conversation_id") or ""
+
+        dd = _domain_data(hass_inner)
+        detached_runs = dd.setdefault("_claw_detached_pipeline_runs", {})
+        
+        runtime_store = get_runtime_store(hass_inner)
+        _now = time.time()
+        runtime_store.setdefault("turn_start_times", {})[conversation_id] = _now
+        _window_starts = runtime_store.setdefault("window_start_times", {})
+        if conversation_id not in _window_starts:
+            _window_starts[conversation_id] = _now
+
+        def resilient_event_callback(event):
+            evt_dict = {"type": event.type, "data": event.data}
+            _buffer_live_event(hass_inner, conversation_id, {
+                "conversation_id": conversation_id,
+                "event_type": event.type,
+                "data": event.data or {},
+            })
+            try:
+                connection.send_event(msg["id"], evt_dict)
+            except Exception:
+                pass
+
+        run = PipelineRun(
+            hass_inner,
+            context=connection.context(msg),
+            pipeline=pipeline,
+            start_stage=start_stage,
+            end_stage=PipelineStage(msg["end_stage"]),
+            event_callback=resilient_event_callback,
+            runner_data={"timeout": timeout},
+        )
+
+        with chat_session.async_get_chat_session(hass_inner, msg.get("conversation_id")) as session:
+            pipeline_input = PipelineInput(
+                intent_input=msg["input"]["text"],
+                device_id=msg.get("device_id"),
+                run=run,
+                session=session,
+            )
+            try:
+                await pipeline_input.validate()
+            except Exception as err:
+                connection.send_error(msg["id"], "pipeline-error", str(err))
+                return
+
+            connection.send_result(msg["id"])
+
+            run_task = hass_inner.async_create_background_task(
+                pipeline_input.execute(),
+                name=f"claw_pipeline_{conversation_id}",
+            )
+            detached_runs[conversation_id] = run_task
+            
+            from ...chat_commands import _task_registry
+            if conversation_id:
+                _task_registry(hass_inner)[conversation_id] = run_task
+
+            def _on_unsub():
+                LOGGER.info("Pipeline WS unsubscribed for %s — task continues detached", conversation_id)
+
+            connection.subscriptions[msg["id"]] = _on_unsub
+
+            try:
+                async with asyncio.timeout(timeout):
+                    await asyncio.shield(run_task)
+            except asyncio.CancelledError:
+                LOGGER.info("Pipeline WS cancelled for %s — task continues", conversation_id)
+            except TimeoutError:
+                resilient_event_callback(PipelineEvent(
+                    PipelineEventType.ERROR,
+                    {"code": "timeout", "message": "Timeout running pipeline"},
+                ))
+            except Exception:
+                LOGGER.exception("Pipeline detached run error for %s", conversation_id)
+            finally:
+                detached_runs.pop(conversation_id, None)
+                from ...chat_commands import _task_registry as _tr
+                _tr(hass_inner).pop(conversation_id, None)
+                _buffer_live_event(hass_inner, conversation_id, {
+                    "conversation_id": conversation_id,
+                    "event_type": "stream_end",
+                    "data": {},
+                })
+
+    wrapped = detached_websocket_run
+    for attr in ("_ws_command",):
+        if hasattr(original_run_fn, attr):
+            setattr(wrapped, attr, getattr(original_run_fn, attr))
+
+    ap_ws.websocket_run = wrapped
+
+    handlers = hass.data.get("websocket_api", {})
+    if "assist_pipeline/run" in handlers:
+        old_entry = handlers["assist_pipeline/run"]
+        if isinstance(old_entry, tuple) and len(old_entry) == 2:
+            handlers["assist_pipeline/run"] = (wrapped, old_entry[1])
+        else:
+            handlers["assist_pipeline/run"] = wrapped
+
+    setattr(ap_ws, _PIPELINE_WS_DETACH_PATCHED, True)
+    setattr(ap_ws, "_claw_original_ws_run", original_run_fn)
+    LOGGER.info("Patched assist_pipeline/run for detached execution on WS disconnect")
+
+
+def unpatch_pipeline_websocket_detach(hass: HomeAssistant) -> None:
+    from homeassistant.components.assist_pipeline import websocket_api as ap_ws
+
+    if not getattr(ap_ws, _PIPELINE_WS_DETACH_PATCHED, False):
+        return
+    original = getattr(ap_ws, "_claw_original_ws_run", None)
+    if original:
+        ap_ws.websocket_run = original
+        handlers = hass.data.get("websocket_api", {})
+        if "assist_pipeline/run" in handlers:
+            old_entry = handlers["assist_pipeline/run"]
+            if isinstance(old_entry, tuple) and len(old_entry) == 2:
+                handlers["assist_pipeline/run"] = (original, old_entry[1])
+            else:
+                handlers["assist_pipeline/run"] = original
+    if hasattr(ap_ws, _PIPELINE_WS_DETACH_PATCHED):
+        delattr(ap_ws, _PIPELINE_WS_DETACH_PATCHED)
+    LOGGER.info("Restored assist_pipeline/run to original")
