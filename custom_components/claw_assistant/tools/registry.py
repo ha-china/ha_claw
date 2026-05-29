@@ -21,7 +21,7 @@ from .ha_core_tools import (
     ListServicesTool,
     NextAgentHandoffTool,
     NotifyTool,
-    ReadFileTool,
+    ReadRuntimeArtifactTool,
     RegistryTool,
     ScriptExecuteTool,
     ServiceCallTool,
@@ -72,6 +72,7 @@ from .self_edit_tools import (
     ReviewSelfSkillsTool,
     UpsertGuideDocTool,
 )
+from ..delegation.tool import DelegateTaskTool, DelegateBatchTool, DelegateStatusTool, DelegateAskParentTool, DelegateGetPendingQuestionsTool
 
 TOOL_REGISTRY: dict[str, dict[str, Any]] = {
     "ServiceCall": {"category": "device", "desc": "Call a HA entity service. Params may be data dict or flat fields. entity_id required/fuzzy-matched. Only for services that target entities ([entity] in ListServices); system services (reload/restart/purge) are auto-bridged to HAControl. Use real service parameter names, not boolean word keys: light.turn_on uses color_name='white' or rgb_color=[r,g,b] or color_temp_kelvin, brightness/brightness_pct; climate uses temperature/hvac_mode; fan uses percentage; media volume uses volume_level(0-1). Service auto-routed per domain.", "priority": 2},
@@ -115,14 +116,14 @@ TOOL_REGISTRY: dict[str, dict[str, Any]] = {
     "HelperManager": {"category": "system", "desc": "Create/list/delete HA native helpers (input_boolean/input_number/input_text/input_select/input_datetime/input_button/timer/counter/template sensor/binary_sensor). Use this tool (NOT HAControl/shell) to manage helpers. All params are flat (no nested dict). action=create: helper_type+name+type-specific params. action=delete: entity_id or helper_type+name.", "priority": 1},
     "GetSystemIndex": {"category": "query", "desc": "Get the system structure index (areas/domains/device classes/people/automations/scripts overview). Params: force_refresh (default false)", "priority": 2},
     "SetConversationState": {"category": "core", "desc": "Set conversation state ONLY for complex multi-turn interactions. DO NOT use for simple device control or queries — the system auto-detects completion. Params: expecting_response(bool), reason", "priority": 3},
-    "AgentHandoff": {"category": "core", "desc": "Consult another AI agent synchronously. You keep control. Params: agent_id(optional), question(required), context(optional), intent(consult|request|review). Reply comes back as tool result.", "priority": 2},
+    "AgentHandoff": {"category": "core", "desc": "Consult another AI agent synchronously. You keep control. agent_id accepts real entity_id, agent_name, or aliases from available_agents. Params: agent_id(optional), question(required), context(optional), intent(consult|request|review). Reply comes back as tool result.", "priority": 2},
     "NextAgentHandoff": {"category": "core", "desc": "Consult the next available AI agent. Shortcut for AgentHandoff. Params: question(required), context(optional). Reply comes back as tool result.", "priority": 2},
     "ValidateService": {"category": "query", "desc": "Validate service call parameters. Params: domain, service, data. Returns validity, errors, and suggestions.", "priority": 2},
     "ServiceHelp": {"category": "query", "desc": "Get help for a domain or service. Params: domain (required), service (optional)", "priority": 2},
     "SmartDiscovery": {"category": "query", "desc": "Smart entity discovery. Params: area/domain/state/name_contains/name_pattern/device_class/inferred_type/person_name/pet_name/limit", "priority": 2},
     "IntentCall": {"category": "query", "desc": "List or call third-party Home Assistant intent handlers only. Do NOT use for Claw plugins, plugin tools, skills, slash commands, or tools already listed in the function schema. Plugin tools are separate tools and must be called directly by tool name. action=list discovers HA intents; action=call executes one with required slots.", "priority": 2},
     "ConfigFile": {"category": "system", "desc": "Access the Home Assistant config directory. Params: action(list/read/stage_write/stage_append/stage_mkdir/stage_delete/apply/cancel/list_pending), path/content/approval_id, user_consent(bool, only required for delete apply), consent_quote(str, audit). write/append/mkdir auto-apply on `apply` (reversible). delete is destructive — describe in chat what/why, judge the user's reply yourself (no keyword list), then `apply` with user_consent=true and consent_quote=\"<their words>\". For automations.yaml/configuration.yaml/sensors.yaml, prefer the Automation tool.", "priority": 3},
-    "ReadFile": {"category": "system", "desc": "Read or search a Claw Assistant temp/output text file. action=read(default, no char limit, use offset+max_chars for pagination), action=search(exact case-insensitive), action=search_fuzzy(multi-keyword fuzzy match), action=info(file size only). Params: path, action, offset, max_chars, query, context_chars.", "priority": 1},
+    "ReadRuntimeArtifact": {"category": "system", "desc": "Read or search a Claw Assistant temp/output runtime artifact text file. Not for workspace docs; use GetWorkspaceDoc for .storage/claw_assistant/workspace/*.md. action=read(default, no char limit, use offset+max_chars for pagination), action=search(exact case-insensitive), action=search_fuzzy(multi-keyword fuzzy match), action=info(file size only). Params: path, action, offset, max_chars, query, context_chars.", "priority": 1},
     "DeleteSkill": {"category": "core", "desc": "Delete an installed Markdown skill (audited in changelog). Params: name, reason", "priority": 2},
     "UpsertGuideDoc": {"category": "core", "desc": "Create or overwrite a runtime Home Assistant guide Markdown. Params: relative_path, markdown, reason", "priority": 2},
     "DeleteGuideDoc": {"category": "core", "desc": "Delete a runtime Home Assistant guide Markdown (source/ is protected). Params: relative_path, reason", "priority": 2},
@@ -138,6 +139,11 @@ TOOL_REGISTRY: dict[str, dict[str, Any]] = {
     "DashboardCard": {"category": "system", "desc": "Create/manage Lovelace dashboard views and cards. Supports masonry and sections view types. html-card-pro cards use content; other cards use card_config or card_yaml. Workflow: list_dashboards→get_dashboard→get_card/add_view/add_card/update_card. Run check_dependency only before creating custom:html-pro-card. Params: action, dashboard_url, view_index, card_index, section_index(-1=auto for sections views), title, icon, content(HTML/CSS/JS), card_config, card_yaml. Returns mandatory _action_required instructions.", "priority": 2},
     "ExposeEntity": {"category": "system", "desc": "Expose or unexpose entities to the conversation assistant. ⚠️ PRIVACY: Before exposing, inform user: 'I need to expose [entity] to control it. Data stays local, not sent externally. Proceed?' action=list: list unexposed. action=expose: expose entity. Params: action(expose/list), entity_id, expose(bool), domain", "priority": 1},
     "PluginManager": {"category": "system", "desc": "Stable bridge for Hermes-compatible Claw plugins. Use this first for plugin-related requests. action=loaded/list inspect plugins and available plugin tools; action=call_tool executes a loaded plugin tool by tool_name with tool_args; load/unload/hot_reload/reload_all manage hot loading; install/validate/guide handle plugin installation. Do NOT use IntentCall for Claw plugins.", "priority": 2},
+    "DelegateTask": {"category": "core", "desc": "Spawn async subagent (returns immediately with task_id). Use DelegateStatus(task_id, include_logs=true) to see detailed progress. Subagent can use DelegateAskParent to ask questions. Params: goal(required), context, role(leaf|orchestrator), timeout_seconds(default 1200)", "priority": 2},
+    "DelegateBatch": {"category": "core", "desc": "Spawn multiple async subagents in parallel. Returns task_ids immediately. Use DelegateStatus to check results. Params: tasks(list of {goal, context, role})", "priority": 2},
+    "DelegateStatus": {"category": "core", "desc": "Check subagent status/result/logs. Call after DelegateTask. Params: task_id, include_logs(default false), log_limit(default 50)", "priority": 2},
+    "DelegateAskParent": {"category": "core", "desc": "Subagent only: Ask parent AI a question. Use when need user clarification. Params: question(required), timeout_seconds(default 300)", "priority": 2},
+    "DelegateGetPendingQuestions": {"category": "core", "desc": "Parent only: Check if any subagent has pending questions for user. Params: task_id(optional)", "priority": 2},
 }
 
 CORE_TOOLS = [
@@ -198,7 +204,7 @@ def build_tool_map() -> dict[str, type]:
         "ServiceHelp": ServiceHelpTool,
         "SmartDiscovery": SmartDiscoveryTool,
         "GetLiveContext": GetLiveContextTool,
-        "ReadFile": ReadFileTool,
+        "ReadRuntimeArtifact": ReadRuntimeArtifactTool,
         "ConfigFile": ConfigFileTool,
         "DeleteSkill": DeleteSkillTool,
         "UpsertGuideDoc": UpsertGuideDocTool,
@@ -218,6 +224,11 @@ def build_tool_map() -> dict[str, type]:
         "FrontendInspect": FrontendInspectTool,
         "ExposeEntity": ExposeEntityTool,
         "PluginManager": PluginManagerTool,
+        "DelegateTask": DelegateTaskTool,
+        "DelegateBatch": DelegateBatchTool,
+        "DelegateStatus": DelegateStatusTool,
+        "DelegateAskParent": DelegateAskParentTool,
+        "DelegateGetPendingQuestions": DelegateGetPendingQuestionsTool,
     }
 
 
@@ -237,7 +248,6 @@ def build_tool_list(
             continue
         tools.append(tool_cls())
     
-    # Add plugin tools
     if include_plugins:
         from ..runtime.storage.plugin_store import get_plugin_tools
         plugin_tools = get_plugin_tools()
