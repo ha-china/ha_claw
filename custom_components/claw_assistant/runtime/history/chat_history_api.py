@@ -35,7 +35,7 @@ def clear_resume_history_binding(hass: HomeAssistant) -> None:
     status.pop(_RESUME_HISTORY_WINDOW_ID_KEY, None)
 
 
-_INTERNAL_TAG_RE = re.compile(r"\[- \w+:.*?\]", re.DOTALL)
+_INTERNAL_TAG_RE = re.compile(r"\[-\s*\w+[:：][\s\S]*?\]", re.DOTALL)
 _ACTIVITY_BLOCK_RE = re.compile(
     r"<\s*activity-context\s*>[\s\S]*?</\s*activity-context\s*>",
     flags=re.IGNORECASE,
@@ -101,41 +101,12 @@ async def websocket_chat_history_list(
     msg: dict,
 ) -> None:
     history = get_conversation_history()
+    history.consolidate_duplicates()
     now = time.time()
     conversations = []
 
-    seen_fingerprints: dict[str, str] = {}
-    shadow_ids: set[str] = set()
-
     for conv_id, turns in history._histories.items():
         if not turns:
-            continue
-        first_msg = (turns[0].user_message or "").strip()[:120]
-        first_ts = turns[0].timestamp
-        if first_msg:
-            fp = f"{int(first_ts // 20)}:{first_msg}"
-            if fp in seen_fingerprints:
-                existing_id = seen_fingerprints[fp]
-                existing_turns = history._histories.get(existing_id, [])
-                if len(turns) <= len(existing_turns):
-                    primary_id, donor_id = existing_id, conv_id
-                else:
-                    primary_id, donor_id = conv_id, existing_id
-                    seen_fingerprints[fp] = conv_id
-                primary_turns = history._histories.get(primary_id, [])
-                donor_turns = history._histories.get(donor_id, [])
-                existing_ts = {t.timestamp for t in primary_turns}
-                merged = [t for t in donor_turns if t.timestamp not in existing_ts]
-                if merged:
-                    primary_turns.extend(merged)
-                    primary_turns.sort(key=lambda t: t.timestamp)
-                    history._histories[primary_id] = primary_turns
-                shadow_ids.add(donor_id)
-            else:
-                seen_fingerprints[fp] = conv_id
-
-    for conv_id, turns in history._histories.items():
-        if not turns or conv_id in shadow_ids:
             continue
         first_ts = turns[0].timestamp
         last_ts = turns[-1].timestamp
@@ -154,8 +125,6 @@ async def websocket_chat_history_list(
         })
 
     for conv_id, progress in history._in_progress.items():
-        if conv_id in shadow_ids:
-            continue
         existing = next((c for c in conversations if c["conversation_id"] == conv_id), None)
         if existing:
             existing["in_progress"] = True
