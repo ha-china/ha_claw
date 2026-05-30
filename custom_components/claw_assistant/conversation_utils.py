@@ -323,6 +323,71 @@ class ConversationHistory:
 
         return removed
 
+    def consolidate_duplicates(self) -> int:
+
+        from .runtime.core.state import is_im_channel
+
+        seen: Dict[str, str] = {}
+        donors: List[str] = []
+
+        for conv_id, turns in list(self._histories.items()):
+            if not turns:
+                continue
+            first_msg = (turns[0].user_message or "").strip()[:120]
+            if not first_msg:
+                continue
+
+            scope = conv_id if is_im_channel(conv_id) else "ha"
+            fingerprint = f"{scope}:{int(turns[0].timestamp // 20)}:{first_msg}"
+
+            primary_id = seen.get(fingerprint)
+            if primary_id is None:
+                seen[fingerprint] = conv_id
+                continue
+
+            primary_turns = self._histories.get(primary_id, [])
+            if len(turns) > len(primary_turns):
+                donor_id = primary_id
+                primary_id = conv_id
+                seen[fingerprint] = conv_id
+            else:
+                donor_id = conv_id
+
+            primary_turns = self._histories.get(primary_id, [])
+            donor_turns = self._histories.get(donor_id, [])
+
+            existing_ts = {t.timestamp for t in primary_turns}
+            merged = [t for t in donor_turns if t.timestamp not in existing_ts]
+            if merged:
+                primary_turns.extend(merged)
+                primary_turns.sort(key=lambda t: t.timestamp)
+                if len(primary_turns) > self.max_turns:
+                    primary_turns = primary_turns[-self.max_turns:]
+                self._histories[primary_id] = primary_turns
+
+            if primary_turns and donor_turns:
+                primary_meta = primary_turns[0].metadata
+                donor_title = str((donor_turns[0].metadata or {}).get("title", "") or "").strip()
+                if donor_title and not primary_meta.get("title"):
+                    primary_meta["title"] = donor_title
+
+            donor_last = self._last_touched.get(donor_id)
+            if donor_last is not None:
+                prev = self._last_touched.get(primary_id, 0)
+                self._last_touched[primary_id] = max(prev, donor_last)
+
+            donors.append(donor_id)
+
+        for donor_id in donors:
+            self._histories.pop(donor_id, None)
+            self._last_touched.pop(donor_id, None)
+            self._in_progress.pop(donor_id, None)
+
+        if donors:
+            self._schedule_save()
+
+        return len(donors)
+
     def get_stats(self) -> Dict[str, Any]:
 
         total_conversations = len(self._histories)
