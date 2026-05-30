@@ -5,7 +5,7 @@
         if (e.reason?.message?.includes('nextSibling')) e.preventDefault();
     });
     
-    const HACRACK_VERSION = '8.9.0';
+    const HACRACK_VERSION = '9.0.0';
     if (window.__hacrackVersion && window.__hacrackVersion !== HACRACK_VERSION) {
         const reloadKey = '__hacrackReloadCount';
         const reloads = parseInt(sessionStorage.getItem(reloadKey) || '0', 10);
@@ -121,7 +121,13 @@
             }).catch(() => {});
         } catch(e) {}
     }
-    
+
+
+    function clawIsLiveSnapshot(snap) {
+        if (!snap || !snap.active) return false;
+        return !snap.recovered;
+    }
+
     function getMainPanel() {
         return document.querySelector('home-assistant')?.shadowRoot?.querySelector('home-assistant-main')?.shadowRoot;
     }
@@ -3592,7 +3598,7 @@
             if (!h?.connection) return;
             try {
                 const snap = await h.connection.sendMessagePromise({ type: 'ha_crack/live_turn_snapshot' });
-                if (snap?.active && snap.conversation_id) {
+                if (clawIsLiveSnapshot(snap) && snap.conversation_id) {
                     const dock = ensureDock();
                     if (dock) {
                         _resumeConversation(dock, snap.conversation_id);
@@ -3824,7 +3830,7 @@
             let turns = [];
             let historyTokens = 0;
             try {
-                const r = await h.connection.sendMessagePromise({ type: 'ha_crack/chat_history_get', conversation_id: convId });
+                const r = await h.connection.sendMessagePromise({ type: 'ha_crack/chat_history_get', conversation_id: convId, max_turns: 50, display_depth: 0 });
                 turns = r?.turns || [];
                 historyTokens = r?.tokens_used || 0;
             } catch (_) {}
@@ -3842,7 +3848,7 @@
             conversation.push({ who: 'hass', text: welcomeText, thinking: '', tool_calls: {} });
             for (const t of turns) {
                 if (t.user) {
-                    conversation.push({ who: 'user', text: t.user });
+                    conversation.push({ who: 'user', text: t.user, thinking: '', tool_calls: {} });
                 }
                 if (t.assistant) {
                     conversation.push({
@@ -3850,6 +3856,8 @@
                         text: t.assistant_display || t.assistant,
                         agent_id: t.agent_id || '',
                         agent_name: t.agent_name || '',
+                        thinking: '',
+                        tool_calls: {},
                     });
                 }
             }
@@ -4140,7 +4148,7 @@
                 }
                 if (state.resetting) return;
                 if (!settings.continuous_conversation) return;
-                if (Array.isArray(this._conversation) && this._conversation.length > 0) {
+                if (Array.isArray(this._conversation) && this._conversation.length > 0 && !isFreshConversation(this._conversation)) {
                     state.conversation = this._conversation.map(m => ({...m, tool_calls: m.tool_calls || {}}));
                 }
                 if (this._conversationId) {
@@ -4178,7 +4186,7 @@
             };
             proto.disconnectedCallback = function() {
                 if (settings.continuous_conversation) {
-                    if (Array.isArray(this._conversation)) {
+                    if (Array.isArray(this._conversation) && this._conversation.length > 0 && !isFreshConversation(this._conversation)) {
                         state.conversation = this._conversation.map(m => ({...m, tool_calls: m.tool_calls || {}}));
                     }
                     if (this._conversationId) {
@@ -4230,7 +4238,7 @@
                         return;
                     }
                     if (settings.continuous_conversation) {
-                        if (Array.isArray(this._conversation)) {
+                        if (Array.isArray(this._conversation) && this._conversation.length > 0 && !isFreshConversation(this._conversation)) {
                             state.conversation = this._conversation.map(m => ({...m, tool_calls: m.tool_calls || {}}));
                         }
                         if (this._conversationId) {
@@ -4254,18 +4262,20 @@
                 const r = await hass.connection.sendMessagePromise({ type: 'ha_crack/get_settings' });
                 fileUploadEnabled = !!r?.enable_file_upload;
             } catch(e) {}
-            const sr = deepQuery('ha-assist-chat')?.shadowRoot;
-            if (!sr) return;
-            const slot = sr.querySelector('#claw-attach-slot');
-            if (slot) slot.style.display = fileUploadEnabled ? '' : 'none';
-            if (!fileUploadEnabled) {
-                const zone = sr.querySelector('.claw-upload-zone');
-                if (zone) zone.classList.remove('active');
-                const popup = sr.querySelector('.claw-upload-popup');
-                if (popup) { popup.innerHTML = ''; popup.style.display = 'none'; }
-                pendingFiles.length = 0;
-                updateAttachBtn(sr);
-            }
+            if (!fileUploadEnabled) pendingFiles.length = 0;
+            deepQueryAll('ha-assist-chat').forEach((chat) => {
+                const sr = chat.shadowRoot;
+                if (!sr) return;
+                const slot = sr.querySelector('#claw-attach-slot');
+                if (slot) slot.style.display = fileUploadEnabled ? '' : 'none';
+                if (!fileUploadEnabled) {
+                    const zone = sr.querySelector('.claw-upload-zone');
+                    if (zone) zone.classList.remove('active');
+                    const popup = sr.querySelector('.claw-upload-popup');
+                    if (popup) { popup.innerHTML = ''; popup.style.display = 'none'; }
+                    updateAttachBtn(sr);
+                }
+            });
         };
         refreshUploadSetting();
         hass.connection.subscribeEvents(() => refreshUploadSetting(), 'ha_crack_settings_changed').catch(() => {});
@@ -4453,10 +4463,19 @@
             if (btn) btn.classList.toggle('has-files', pendingFiles.length > 0);
         };
 
+        // Render the pending-files preview/badge into EVERY open chat window
+        // (sidebar dock + integration more-info), so the feature is mirrored
+        // rather than living in whichever window happened to be first.
+        const renderAllPreviews = () => {
+            deepQueryAll('ha-assist-chat').forEach((chat) => {
+                const sr = chat.shadowRoot;
+                if (sr) { renderPreviewBar(sr); updateAttachBtn(sr); }
+            });
+        };
+
         const uploadFile = async (fileObj) => {
-            const sr = deepQuery('ha-assist-chat')?.shadowRoot;
             fileObj.status = 'uploading'; fileObj.progress = 0;
-            if (sr) renderPreviewBar(sr);
+            renderAllPreviews();
             try {
                 const form = new FormData();
                 form.append('file', fileObj.file, fileObj.name);
@@ -4468,7 +4487,7 @@
                     xhr.upload.onprogress = (e) => {
                         if (e.lengthComputable) {
                             fileObj.progress = Math.round((e.loaded / e.total) * 90);
-                            if (sr) renderPreviewBar(sr);
+                            renderAllPreviews();
                         }
                     };
                     xhr.onload = () => {
@@ -4485,7 +4504,7 @@
                 fileObj.status = 'error';
                 pendingFiles.splice(pendingFiles.indexOf(fileObj), 1);
             }
-            if (sr) { renderPreviewBar(sr); updateAttachBtn(sr); }
+            renderAllPreviews();
         };
 
         const MAX_ATTACHMENTS = 5;
@@ -4506,8 +4525,7 @@
                 pendingFiles.push(entry);
                 uploadFile(entry);
             }
-            const sr = deepQuery('ha-assist-chat')?.shadowRoot;
-            if (sr) { renderPreviewBar(sr); updateAttachBtn(sr); }
+            renderAllPreviews();
         };
 
         const buildAttachmentTags = () => {
@@ -4518,13 +4536,11 @@
             pendingFiles.length = 0;
         };
 
-        let _lastUploadChat = null;
         const installUploadUI = () => {
-            const chat = deepQuery('ha-assist-chat');
+          deepQueryAll('ha-assist-chat').forEach((chat) => {
             if (!chat?.shadowRoot) return;
             const sr = chat.shadowRoot;
-            if (chat === _lastUploadChat && sr.querySelector('.claw-attach-btn')) return;
-            _lastUploadChat = chat;
+            if (sr.querySelector('.claw-attach-btn')) return;
             injectUploadCSS(sr);
 
             const haInput = sr.querySelector('ha-input#message-input');
@@ -4572,6 +4588,7 @@
                 for(const item of items) { if(item.kind==='file'){const f=item.getAsFile();if(f)files.push(f);} }
                 if(files.length){ e.preventDefault(); addFiles(files); }
             });
+          });
         };
 
         const ATTACH_RE = /\[ATTACHMENT:[^\]]+\]/g;
@@ -4601,8 +4618,7 @@
                         const userText = (inp?.value || '').trim();
                         const fullText = (userText ? userText + ' ' : '') + tags;
                         clearPending();
-                        const sr = this.shadowRoot;
-                        if (sr) { renderPreviewBar(sr); updateAttachBtn(sr); }
+                        renderAllPreviews();
                         if (inp) { inp.value = ''; this._showSendButton = false; }
                         if (fullText && typeof this._processText === 'function') {
                             window.__clawLastSendChars = fullText.length;
@@ -4623,8 +4639,7 @@
                         const userText = (t?.value || '').trim();
                         const fullText = (userText ? userText + ' ' : '') + tags;
                         clearPending();
-                        const sr = this.shadowRoot;
-                        if (sr) { renderPreviewBar(sr); updateAttachBtn(sr); }
+                        renderAllPreviews();
                         if (t) { t.value = ''; this._showSendButton = false; }
                         if (fullText && typeof this._processText === 'function') {
                             window.__clawLastSendChars = fullText.length;
@@ -4688,7 +4703,7 @@
             }
             if (tickTimer) { clearInterval(tickTimer); tickTimer = null; }
             if (removeBar) {
-                deepQuery('ha-assist-chat')?.shadowRoot?.getElementById(BAR_ID)?.remove();
+                deepQueryAll('ha-assist-chat').forEach(c => c.shadowRoot?.getElementById(BAR_ID)?.remove());
             } else {
                 render();
             }
@@ -4805,103 +4820,10 @@
                     if (_lastMsr) {
                         _lastMsr.querySelectorAll('.claw-ta-panel, .claw-ta-card').forEach(n => n.remove());
                     }
-                    const wrappedCb = (ev) => {
+                    const deliver = (ev) => {
                         const t = ev.type, d = ev.data;
                         if (t === 'intent-progress' && d?.chat_log_delta) {
-                            const delta = d.chat_log_delta;
-                            if (delta.role === 'assistant') phase = S_REPLYING;
-                            if ((delta.content || delta._tts_skip_content) && !delta._claw_thinking) {
-                                const streamText = delta.content || delta._tts_skip_content || '';
-                                _mdStreamActive = true;
-                                totalChars += streamText.length;
-                                _pushTurnText(streamText);
-                                if (typeof window.__clawOnStreamDelta === 'function') window.__clawOnStreamDelta(delta);
-                                _scheduleToolRender();
-                            }
-                            if (delta._claw_thinking) {
-                                if (window.__clawToolDetailsEnabled) {
-                                    const markerId = '_thinking_singleton';
-                                    const parts = window.__clawTurnParts || (window.__clawTurnParts = []);
-                                    if (!parts.some(p => p.type === 'tool' && p.id === markerId)) {
-                                        parts.push({ type: 'tool', id: markerId });
-                                    }
-                                    let existing = window.__clawToolActivities.find(a => a.tool_name === '_thinking');
-                                    if (existing) {
-                                        existing._thinkText = delta._claw_thinking;
-                                        existing._endTime = Date.now();
-                                    } else {
-                                        window.__clawToolActivities.push({
-                                            id: markerId,
-                                            tool_call_id: markerId,
-                                            marker_id: markerId,
-                                            tool_name: '_thinking',
-                                            tool_args: {},
-                                            result: 'ok',
-                                            error: null,
-                                            _thinkText: delta._claw_thinking,
-                                            _startTime: Date.now(),
-                                            _endTime: Date.now(),
-                                        });
-                                    }
-                                    _scheduleToolRender();
-                                } else {
-                                    window.__clawThinkingText = delta._claw_thinking;
-                                    _scheduleToolRender();
-                                }
-                            }
-                            if (delta._claw_tool_info) {
-                                _mdStreamActive = true;
-                                const ti = delta._claw_tool_info;
-                                window.__clawToolActivitySeen = true;
-                                const act = _upsertToolActivity(ti);
-                                _pushTurnTool(act.marker_id || act.tool_call_id);
-                                phase = S_TOOL;
-                                _scheduleToolRender();
-                            }
-                            if (delta._claw_tool_result) {
-                                _mdStreamActive = true;
-                                const tr = delta._claw_tool_result;
-                                window.__clawToolActivitySeen = true;
-                                const completed = _completeToolActivity(tr);
-                                const parsed = completed ? completed.result : tr.tool_result;
-                                if (parsed?._navigate_to) setTimeout(() => softNavigate(parsed._navigate_to), 500);
-                                _scheduleToolRender();
-                            }
-                            if (delta.tool_calls) {
-                                _mdStreamActive = true;
-                                if (window.__clawToolActivitySeen) {
-                                    render();
-                                    callback(ev);
-                                    return;
-                                }
-                                phase = S_TOOL; totalChars += JSON.stringify(delta.tool_calls).length;
-                                const calls = Array.isArray(delta.tool_calls) ? delta.tool_calls : [delta.tool_calls];
-                                for (const tc of calls) {
-                                    const act = _upsertToolActivity({
-                                        tool_call_id: tc.id || tc.tool_call_id,
-                                        tool_name: tc.tool_name || tc.name || 'tool',
-                                        tool_args: tc.tool_args || tc.arguments || tc.tool_input,
-                                    });
-                                    _pushTurnTool(act.marker_id || act.tool_call_id);
-                                }
-                                _scheduleToolRender();
-                            }
-                            if (delta.tool_result !== undefined) {
-                                if (window.__clawToolActivitySeen) {
-                                    render();
-                                    callback(ev);
-                                    return;
-                                }
-                                phase = S_TOOL;
-                                totalChars += JSON.stringify(delta.tool_result).length;
-                                const completed = _completeToolActivity(delta);
-                                const parsed = completed ? completed.result : delta.tool_result;
-                                if (parsed?._navigate_to) {
-                                    setTimeout(() => softNavigate(parsed._navigate_to), 500);
-                                }
-                                _scheduleToolRender();
-                            }
-                            if (delta.tool_call_id && !delta.tool_calls && delta.tool_result === undefined) phase = S_TOOL;
+                            clawApplyLiveDelta(d.chat_log_delta);
                             render();
                         } else if (t === 'run-start') {
                             phase = S_THINKING;
@@ -4925,9 +4847,37 @@
                                 endTurn();
                             }
                         }
-                        callback(ev);
+                        // ha-assist-chat's own handler does `const unsub = await
+                        // runAssistPipeline(...)` and calls unsub() from inside this
+                        // callback on intent-end/error. Any throw there (e.g. the unsub
+                        // TDZ when an event lands before the await resolves) must NOT
+                        // escape into connection._handleMessage's forEach, or it kills
+                        // the entire live WS dispatch for every subscriber.
+                        try {
+                            callback(ev);
+                        } catch (err) {
+                            console.debug('[claw] assist-chat callback threw, isolated from WS dispatch', err);
+                        }
                     };
-                    return origSubscribe(wrappedCb, msg, ...rest);
+                    // Hold delivery until the subscription promise has resolved so that
+                    // ha-assist-chat's `unsub` binding is initialized before we feed it
+                    // any event (otherwise intent-end on refresh hits a TDZ and crashes
+                    // the stream). The setTimeout(0) guarantees we run *after* the
+                    // component's await-continuation that assigns unsub.
+                    let _subReady = false;
+                    const _pending = [];
+                    const wrappedCb = (ev) => {
+                        if (!_subReady) { _pending.push(ev); return; }
+                        deliver(ev);
+                    };
+                    const _subP = origSubscribe(wrappedCb, msg, ...rest);
+                    Promise.resolve(_subP).catch(() => {}).then(() => {
+                        setTimeout(() => {
+                            _subReady = true;
+                            while (_pending.length) deliver(_pending.shift());
+                        }, 0);
+                    });
+                    return _subP;
                 }
                 return origSubscribe(callback, msg, ...rest);
             };
@@ -4963,14 +4913,7 @@
             sr.appendChild(s);
         };
 
-        const render = () => {
-            const chat = deepQuery('ha-assist-chat');
-            if (!chat?.shadowRoot) return;
-            const sr = chat.shadowRoot;
-            if (!settings.enable_context_status_bar) {
-                sr.getElementById(BAR_ID)?.remove();
-                return;
-            }
+        const renderBarInto = (sr, vals) => {
             injectCSS(sr);
             let bar = sr.getElementById(BAR_ID);
             if (!bar) {
@@ -4988,6 +4931,23 @@
                 if (inp) inp.parentNode.insertBefore(bar, inp);
                 else { const m=sr.querySelector('.messages'); if(m) m.parentNode.insertBefore(bar,m.nextSibling); else sr.appendChild(bar); }
             }
+            const $ = (r) => bar.querySelector(`[data-r="${r}"]`);
+            $('tok').textContent = (hasTurn ? fmt(vals.tk) : '--') + ' / ' + fmtR(vals.ctxW);
+            $('bar').innerHTML = vals.barSvg;
+            const pctEl = $('pct');
+            pctEl.textContent = hasTurn ? Math.max(1, vals.pct)+'%' : '--%';
+            pctEl.style.color = vals.barColor;
+            $('win').textContent = hasTurn ? vals.windowTimer : '--';
+            $('timer').textContent = vals.timer;
+        };
+
+        const render = () => {
+            const chats = deepQueryAll('ha-assist-chat').filter(c => c?.shadowRoot);
+            if (!chats.length) return;
+            if (!settings.enable_context_status_bar) {
+                chats.forEach(c => c.shadowRoot.getElementById(BAR_ID)?.remove());
+                return;
+            }
 
             const currentChars = calcCurrentChars();
             if (currentChars > totalChars) totalChars = currentChars;
@@ -5004,10 +4964,7 @@
             if (active && turnStart) timer = ftime(Math.round((now-turnStart)/1000));
             else if (turnStart && turnEnd) timer = ftime(Math.round((turnEnd-turnStart)/1000));
 
-            const $ = (r) => bar.querySelector(`[data-r="${r}"]`);
-            $('tok').textContent = (hasTurn ? fmt(tk) : '--') + ' / ' + fmtR(ctxW);
             const barW = 14;
-            const barEl = $('bar');
             const cellW = 5, cellH = 9, dotSize = 1, dotGap = 2;
             const svgW = barW * cellW;
             let rects = '';
@@ -5044,13 +5001,10 @@
                     }
                 }
             }
-            barEl.innerHTML = `<svg width="${svgW}" height="${cellH}" viewBox="0 0 ${svgW} ${cellH}" style="display:block">${rects}</svg>`;
+            const barSvg = `<svg width="${svgW}" height="${cellH}" viewBox="0 0 ${svgW} ${cellH}" style="display:block">${rects}</svg>`;
             const barColor = hasTurn ? pc : 'var(--secondary-text-color)';
-            const pctEl = $('pct');
-            pctEl.textContent = hasTurn ? Math.max(1, pct)+'%' : '--%';
-            pctEl.style.color = barColor;
-            $('win').textContent = hasTurn ? windowTimer : '--';
-            $('timer').textContent = timer;
+            const vals = { tk, ctxW, pct, barSvg, barColor, windowTimer, timer };
+            chats.forEach((chat) => renderBarInto(chat.shadowRoot, vals));
         };
 
         window.addEventListener('claw-chat-updated', () => {
@@ -5074,7 +5028,7 @@
             liveEndCheckAt = now;
             try {
                 const snapshot = await hass.connection.sendMessagePromise({ type: 'ha_crack/live_turn_snapshot' });
-                if (!snapshot?.active || snapshot.conversation_id !== convId) {
+                if (!clawIsLiveSnapshot(snapshot) || snapshot.conversation_id !== convId) {
                     window.__clawLiveStreamSubscribed = false;
                     window.__clawLiveStreamChecked = false;
                     endTurn();
@@ -5083,6 +5037,95 @@
             } finally {
                 liveEndCheckPending = false;
             }
+        };
+
+        const clawApplyLiveDelta = (delta) => {
+            if (!delta) return;
+            if (delta.role === 'assistant') phase = S_REPLYING;
+            if ((delta.content || delta._tts_skip_content) && !delta._claw_thinking) {
+                const streamText = delta.content || delta._tts_skip_content || '';
+                _mdStreamActive = true;
+                totalChars += streamText.length;
+                _pushTurnText(streamText);
+                if (typeof window.__clawOnStreamDelta === 'function') window.__clawOnStreamDelta(delta);
+                _scheduleToolRender();
+            }
+            if (delta._claw_thinking) {
+                if (window.__clawToolDetailsEnabled) {
+                    const markerId = '_thinking_singleton';
+                    const parts = window.__clawTurnParts || (window.__clawTurnParts = []);
+                    if (!parts.some(p => p.type === 'tool' && p.id === markerId)) {
+                        parts.push({ type: 'tool', id: markerId });
+                    }
+                    let existing = window.__clawToolActivities.find(a => a.tool_name === '_thinking');
+                    if (existing) {
+                        existing._thinkText = delta._claw_thinking;
+                        existing._endTime = Date.now();
+                    } else {
+                        window.__clawToolActivities.push({
+                            id: markerId,
+                            tool_call_id: markerId,
+                            marker_id: markerId,
+                            tool_name: '_thinking',
+                            tool_args: {},
+                            result: 'ok',
+                            error: null,
+                            _thinkText: delta._claw_thinking,
+                            _startTime: Date.now(),
+                            _endTime: Date.now(),
+                        });
+                    }
+                    _scheduleToolRender();
+                } else {
+                    window.__clawThinkingText = delta._claw_thinking;
+                    _scheduleToolRender();
+                }
+            }
+            if (delta._claw_tool_info) {
+                _mdStreamActive = true;
+                const ti = delta._claw_tool_info;
+                window.__clawToolActivitySeen = true;
+                const act = _upsertToolActivity(ti);
+                _pushTurnTool(act.marker_id || act.tool_call_id);
+                phase = S_TOOL;
+                _scheduleToolRender();
+            }
+            if (delta._claw_tool_result) {
+                _mdStreamActive = true;
+                const tr = delta._claw_tool_result;
+                window.__clawToolActivitySeen = true;
+                const completed = _completeToolActivity(tr);
+                const parsed = completed ? completed.result : tr.tool_result;
+                if (parsed?._navigate_to) setTimeout(() => softNavigate(parsed._navigate_to), 500);
+                _scheduleToolRender();
+            }
+            if (delta.tool_calls) {
+                _mdStreamActive = true;
+                if (window.__clawToolActivitySeen) return;
+                phase = S_TOOL; totalChars += JSON.stringify(delta.tool_calls).length;
+                const calls = Array.isArray(delta.tool_calls) ? delta.tool_calls : [delta.tool_calls];
+                for (const tc of calls) {
+                    const act = _upsertToolActivity({
+                        tool_call_id: tc.id || tc.tool_call_id,
+                        tool_name: tc.tool_name || tc.name || 'tool',
+                        tool_args: tc.tool_args || tc.arguments || tc.tool_input,
+                    });
+                    _pushTurnTool(act.marker_id || act.tool_call_id);
+                }
+                _scheduleToolRender();
+            }
+            if (delta.tool_result !== undefined) {
+                if (window.__clawToolActivitySeen) return;
+                phase = S_TOOL;
+                totalChars += JSON.stringify(delta.tool_result).length;
+                const completed = _completeToolActivity(delta);
+                const parsed = completed ? completed.result : delta.tool_result;
+                if (parsed?._navigate_to) {
+                    setTimeout(() => softNavigate(parsed._navigate_to), 500);
+                }
+                _scheduleToolRender();
+            }
+            if (delta.tool_call_id && !delta.tool_calls && delta.tool_result === undefined) phase = S_TOOL;
         };
 
         const startStatusBar = () => {
@@ -5100,7 +5143,7 @@
                         try {
                             const snapshot = await hass.connection.sendMessagePromise({ type: 'ha_crack/live_turn_snapshot' });
                             
-                            if (!snapshot?.active && snapshot?.conversation_id && settings.continuous_conversation) {
+                            if (!clawIsLiveSnapshot(snapshot) && snapshot?.conversation_id && settings.continuous_conversation) {
                                 const state = window.__clawAssistChatState;
                                 if (state?.conversationId === snapshot.conversation_id) {
                                     try {
@@ -5125,27 +5168,20 @@
                                 }
                             }
                             
-                            if (snapshot?.active && snapshot.conversation_id) {
+                            if (clawIsLiveSnapshot(snapshot) && snapshot.conversation_id) {
                                 window.__clawLiveStreamSubscribed = true;
                                 window.__clawLiveConvId = snapshot.conversation_id;
-                                window.__clawLiveText = (snapshot.response_parts || []).join('');
-                                
-                                const canInjectDom = !!settings.continuous_conversation;
-                                
-                                const getLastMd = () => {
-                                    if (!canInjectDom) return null;
-                                    const msgs = chat.shadowRoot?.querySelectorAll('.message.hass');
-                                    const lastMsg = msgs?.[msgs.length - 1];
-                                    return lastMsg?.querySelector('ha-markdown');
-                                };
-                                
-                                const updateMd = (text, final) => {
-                                    const md = getLastMd();
-                                    if (md) md.content = final ? text : (text + '…');
-                                };
-                                
-                                if (window.__clawLiveText) updateMd(window.__clawLiveText, false);
-                                
+                                window.__clawTurnParts = [];
+                                window.__clawToolActivities = [];
+                                window.__clawToolActivitySeen = false;
+                                window.__clawThinkingText = '';
+                                window.__clawLiveText = '';
+                                _turnEnded = false;
+                                _mdStreamActive = true;
+
+                                const _lastMsr = chat.shadowRoot?.querySelector('.message.hass:last-of-type ha-markdown')?.shadowRoot;
+                                if (_lastMsr) _lastMsr.querySelectorAll('.claw-ta-panel, .claw-ta-card').forEach(n => n.remove());
+
                                 hasTurn = true;
                                 turnStart = snapshot.turn_start_time ? (snapshot.turn_start_time * 1000) : Date.now();
                                 turnEnd = null;
@@ -5155,35 +5191,35 @@
                                 }
                                 const snapshotPhase = snapshot.phase || 'thinking';
                                 phase = snapshotPhase === 'replying' ? S_REPLYING : snapshotPhase === 'tool_call' ? S_TOOL : S_THINKING;
-                                totalChars = calcCurrentChars() + (window.__clawLiveText?.length || 0);
+                                totalChars = calcCurrentChars();
                                 if (!tickTimer) tickTimer = setInterval(render, 200);
+                                _scheduleToolRender();
                                 render();
-                                
+
                                 hass.connection.subscribeMessage(
                                     (evt) => {
                                         if (!evt) return;
                                         const evtType = evt.event_type || evt.type;
                                         const evtData = evt.data || {};
-                                        
+
                                         if (evtType === 'stream_end' || evtType === 'run-end' || evtType === 'intent-end') {
                                             window.__clawLiveStreamSubscribed = false;
                                             if (evtType === 'intent-end') {
                                                 const resp = evtData.intent_output?.response?.speech?.plain?.speech;
-                                                if (resp) window.__clawLiveText = resp;
+                                                const hasText = (window.__clawTurnParts || []).some(p => p.type === 'text' && p.text);
+                                                if (resp && !hasText) _pushTurnText(resp);
                                             }
-                                            updateMd(window.__clawLiveText, true);
+                                            _mdStreamActive = false;
+                                            _turnEnded = true;
+                                            _scheduleToolRender();
                                             endTurn();
                                             return;
                                         }
-                                        
+
                                         if (evtType === 'intent-progress') {
                                             const delta = evtData.chat_log_delta || evtData.delta || evtData;
-                                            const text = delta.content || delta._tts_skip_content || '';
-                                            if (text) {
-                                                window.__clawLiveText = (window.__clawLiveText || '') + text;
-                                                updateMd(window.__clawLiveText, false);
-                                                totalChars += text.length;
-                                            }
+                                            clawApplyLiveDelta(delta);
+                                            render();
                                         }
                                     },
                                     { type: 'ha_crack/subscribe_live_stream', conversation_id: snapshot.conversation_id }
