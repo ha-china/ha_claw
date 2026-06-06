@@ -1,15 +1,3 @@
-"""Delegation command handler for /ooo.
-
-/ooo is a hint to the main AI to use DelegateTask tool for background execution.
-When user types /ooo <task>, the command is rewritten and passed to the AI,
-which then decides whether to use DelegateTask or handle it directly.
-
-Usage:
-  /ooo <task>           - Tell AI to handle this task (may use DelegateTask)
-  /ooo list             - List active subagents
-  /ooo stop <task_id>   - Stop a running subagent
-"""
-
 from __future__ import annotations
 
 import logging
@@ -30,13 +18,6 @@ async def handle_delegate_command(
     agent_id: str | None = None,
     language: str | None = None,
 ) -> dict[str, Any]:
-    """Handle the /ooo command.
-    
-    Returns a dict with:
-      - response: Text response to show user (if handled directly)
-      - handled: True if command was fully handled here
-      - rewrite: Rewritten text to pass to AI (if not handled here)
-    """
     args = (args or "").strip()
     lang = language or hass.config.language
     
@@ -54,7 +35,6 @@ async def handle_delegate_command(
 
 
 def _help_response(language: str | None) -> dict[str, Any]:
-    """Return help text."""
     title = t("delegation_help_title", language)
     usage = t("delegation_help_usage", language)
     start_desc = t("delegation_help_start", language)
@@ -88,7 +68,6 @@ def _help_response(language: str | None) -> dict[str, Any]:
 
 
 async def _list_subagents(language: str | None) -> dict[str, Any]:
-    """List active subagents."""
     from .executor import list_active_subagents
     
     subagents = await list_active_subagents()
@@ -123,7 +102,6 @@ async def _list_subagents(language: str | None) -> dict[str, Any]:
 
 
 async def _stop_subagent(task_id: str, language: str | None) -> dict[str, Any]:
-    """Stop a running subagent."""
     from .executor import interrupt_subagent
     
     if not task_id:
@@ -152,11 +130,6 @@ async def _stop_subagent(task_id: str, language: str | None) -> dict[str, Any]:
 
 
 def _rewrite_for_ai(task: str, language: str | None) -> dict[str, Any]:
-    """Rewrite /ooo command as instruction for AI to use DelegateTask tool.
-    
-    The AI receives this as a user message and should call DelegateTask tool
-    to spawn a subagent. The subagent runs independently and returns results.
-    """
     instruction = t("delegation_ooo_instruction", language)
     rewritten = f"{instruction}\n\n{task}"
     

@@ -1,11 +1,3 @@
-"""Kernel sidechain state management.
-
-Kernel planner steps are stored in a separate sidechain, NOT in the main chat log.
-This prevents kernel step progress from polluting the main conversation context.
-
-Only the final answer is written to the main chat log.
-"""
-
 from __future__ import annotations
 
 import logging
@@ -31,10 +23,6 @@ class KernelStep:
 
 @dataclass
 class KernelSidechain:
-    """Sidechain state for kernel planner execution.
-    
-    This is separate from the main chat log to avoid context pollution.
-    """
     conversation_id: str
     user_text: str
     steps: list[KernelStep] = field(default_factory=list)
@@ -52,7 +40,6 @@ class KernelSidechain:
         expected_output: str = "",
         fingerprint: str = "",
     ) -> KernelStep:
-        """Add a new step to the sidechain."""
         step = KernelStep(
             index=index,
             kind=kind,
@@ -76,7 +63,6 @@ class KernelSidechain:
         success: bool,
         observation: str,
     ) -> None:
-        """Finalize the last step with result."""
         if not self.steps:
             return
         step = self.steps[-1]
@@ -88,7 +74,6 @@ class KernelSidechain:
         )
     
     def get_completed_steps_summary(self) -> list[dict[str, Any]]:
-        """Get summary of completed steps for final answer rendering."""
         return [
             {
                 "index": step.index,
@@ -103,7 +88,6 @@ class KernelSidechain:
         ]
     
     def close(self) -> None:
-        """Mark sidechain as inactive."""
         self.is_active = False
         LOGGER.debug(
             "Kernel sidechain closed: conversation_id=%s steps=%d",
@@ -117,7 +101,6 @@ _current_kernel_sidechain: ContextVar[KernelSidechain | None] = ContextVar(
 
 
 def get_current_kernel_sidechain() -> KernelSidechain | None:
-    """Get the current kernel sidechain, if any."""
     return _current_kernel_sidechain.get()
 
 
@@ -125,7 +108,6 @@ def create_kernel_sidechain(
     conversation_id: str,
     user_text: str,
 ) -> KernelSidechain:
-    """Create a new kernel sidechain for the current context."""
     sidechain = KernelSidechain(
         conversation_id=conversation_id,
         user_text=user_text,
@@ -139,7 +121,6 @@ def create_kernel_sidechain(
 
 
 def close_kernel_sidechain() -> KernelSidechain | None:
-    """Close and return the current kernel sidechain."""
     sidechain = _current_kernel_sidechain.get()
     if sidechain:
         sidechain.close()

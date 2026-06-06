@@ -1,11 +1,3 @@
-"""Script management tool for Home Assistant.
-
-Mirrors the official frontend pipeline used by the config panel:
-- YAML source of truth is scripts.yaml (a dict keyed by object_id).
-- EditScriptConfigView is used to rewrite entries under the mutation lock.
-- async_validate_config_item validates a single script's config.
-- icon / area_id are entity registry fields, not YAML fields.
-"""
 from __future__ import annotations
 
 import json
@@ -34,8 +26,6 @@ _LOGGER = logging.getLogger(__name__)
 
 
 class ScriptTool(llm.Tool):
-    """Manage Home Assistant scripts via official APIs."""
-
     name = "Script"
     description = (
         "Manage Home Assistant scripts via official APIs. "
@@ -165,7 +155,6 @@ class ScriptTool(llm.Tool):
 
     @staticmethod
     def _resolve_script_id(entity_id: str, script_id: str) -> str:
-        """Derive the object_id (= unique_id / YAML key) from user input."""
         if script_id:
             return script_id
         if entity_id:
@@ -178,13 +167,6 @@ class ScriptTool(llm.Tool):
     async def _load_existing_config(
         self, hass: HomeAssistant, object_id: str, *, from_yaml: bool = False,
     ) -> dict | None:
-        """Return the current raw config dict for a script, or None.
-
-        Prefer in-memory entity (runtime truth); fall back to scripts.yaml.
-
-        Set from_yaml=True to skip in-memory cache and read the YAML file
-        directly — use this for post-write verification.
-        """
         if not from_yaml:
             component = self._get_component(hass)
             if component is not None:
@@ -210,7 +192,6 @@ class ScriptTool(llm.Tool):
     async def _list_scripts(
         self, hass: HomeAssistant, *, llm_context: llm.LLMContext | None = None, page: int = 1, page_size: int = 10
     ) -> JsonObjectType:
-        """List scripts with pagination."""
         registry = er.async_get(hass)
         all_items = []
         for state in hass.states.async_all():
@@ -293,7 +274,6 @@ class ScriptTool(llm.Tool):
         self, hass: HomeAssistant, entity_id: str,
         *, icon=None, area_id=None, labels=None, name=None, category_id=None, sentinel=None,
     ) -> dict[str, object]:
-        """Apply icon/area_id/labels/name/category to entity registry."""
         touch_icon = icon is not sentinel
         touch_area = area_id is not sentinel
         touch_labels = labels is not sentinel
@@ -363,7 +343,6 @@ class ScriptTool(llm.Tool):
         category_id=None,
         sentinel=None,
     ) -> JsonObjectType:
-        """Create or update a script via the same pipeline as the frontend."""
         from homeassistant.components.config.script import EditScriptConfigView
         from homeassistant.helpers import config_validation as cv
 
@@ -525,7 +504,6 @@ class ScriptTool(llm.Tool):
         category_id=None,
         sentinel=None,
     ) -> JsonObjectType:
-        """Apply surgical anchor patches to a script's YAML config."""
         if not isinstance(patches, list) or not patches:
             return {"success": False, "error": "'patches' must be a non-empty list"}
 
@@ -633,7 +611,6 @@ class ScriptTool(llm.Tool):
     async def _get_traces(
         self, hass: HomeAssistant, entity_id: str, script_id: str
     ) -> JsonObjectType:
-        """List execution traces for a script."""
         from homeassistant.components.trace.util import async_list_traces
 
         object_id = self._resolve_script_id(entity_id, script_id)
@@ -664,7 +641,6 @@ class ScriptTool(llm.Tool):
     async def _get_trace_detail(
         self, hass: HomeAssistant, entity_id: str, script_id: str, run_id: str
     ) -> JsonObjectType:
-        """Get detailed trace for a specific run."""
         from homeassistant.components.trace.util import async_get_trace
 
         object_id = self._resolve_script_id(entity_id, script_id)

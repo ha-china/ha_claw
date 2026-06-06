@@ -1,13 +1,3 @@
-"""Markdown → graph node extraction.
-
-The workspace markdown files remain the human-editable source of truth.
-This module converts their current content into graph nodes so the graph
-store can be used as a derived retrieval index.
-
-Intentionally stdlib-only; no Home Assistant imports so it stays unit
-testable in isolation.
-"""
-
 from __future__ import annotations
 
 import re
@@ -54,8 +44,6 @@ def _is_placeholder(value: str) -> bool:
 
 
 def _skip_line(line: str) -> bool:
-    """Headings, italics/subtitles and code fences are not node-worthy."""
-
     if not line.strip():
         return True
     if line.lstrip().startswith("#"):
@@ -78,11 +66,6 @@ class ExtractedNode:
 def extract_nodes_from_markdown(
     doc_name: str, markdown: str
 ) -> list[ExtractedNode]:
-    """Parse ``markdown`` and yield one node per meaningful line.
-
-    Pure function: no I/O, no DB. Safe to unit test.
-    """
-
     default_kind = _DOC_DEFAULT_KIND.get(doc_name.upper(), "note")
     out: list[ExtractedNode] = []
     seen: set[tuple[str, str]] = set()
@@ -131,14 +114,6 @@ def reindex_markdown(
     *,
     confidence: float = 1.0,
 ) -> dict[str, int]:
-    """Upsert every extractable node from ``markdown`` into ``store``.
-
-    Idempotent via checksum: rerunning on unchanged markdown only bumps
-    ``access_count`` / ``last_accessed_at``. Nodes removed from the
-    markdown are *not* purged here — that is a separate reconciliation
-    concern handled by a future GC pass.
-    """
-
     inserted = 0
     updated = 0
     for node in extract_nodes_from_markdown(doc_name, markdown):
@@ -159,8 +134,6 @@ def reindex_markdown(
 def reindex_many(
     store: GraphStore, documents: Iterable[tuple[str, str]]
 ) -> dict[str, int]:
-    """Batch convenience wrapper over :func:`reindex_markdown`."""
-
     totals = {"inserted": 0, "updated": 0}
     for doc_name, markdown in documents:
         result = reindex_markdown(store, doc_name, markdown)

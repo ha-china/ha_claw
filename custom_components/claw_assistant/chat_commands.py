@@ -148,16 +148,6 @@ def _build_result(
 
 
 def _format_command_result(hass, result: conversation.ConversationResult | None) -> None:
-    """Apply the same reply-prefix formatting commands as normal agent replies.
-
-    Command replies (``/stop``, ``/new``, ``/help`` ...) short-circuit before
-    the global ``_maybe_apply_global_response_format`` hook runs, so previously
-    they never received the ``(name) 回复:`` prefix while LLM answers did. That
-    made the two kinds of bubbles render inconsistently in the frontend. Routing
-    every command result through this single chokepoint makes commands honor the
-    configured ``conversation_mode`` exactly like a model reply (no prefix in
-    ``no_name`` mode, prefixed otherwise).
-    """
     if result is None or result.response is None or not result.response.speech:
         return
     from .runtime.llm.response_format import apply_system_reply_format
@@ -947,12 +937,6 @@ async def async_handle_chat_command(
     hass,
     user_input: conversation.ConversationInput,
 ) -> ChatCommandOutcome | None:
-    """Public entry: dispatch a chat command and format its reply uniformly.
-
-    All command outputs flow through this single chokepoint so the reply prefix
-    is applied in exactly one place (see ``_format_command_result``). Outcomes
-    that only rewrite the text (passthrough to the agent) are left untouched.
-    """
     outcome = await _dispatch_chat_command(hass, user_input)
     if outcome is not None and outcome.rewritten_text is None:
         _format_command_result(hass, outcome.result)
@@ -1527,7 +1511,6 @@ async def _handle_plugin_tool_invoke(
 
 
 def _filter_plugin_tool_result(result: dict) -> dict:
-    """Filter sensitive fields from plugin tool result."""
     if not isinstance(result, dict):
         return result
     sensitive_keys = {
@@ -1552,7 +1535,6 @@ async def _handle_ooo_command(
     user_input: conversation.ConversationInput,
     args: str,
 ) -> ChatCommandOutcome:
-    """Handle /ooo command for subagent delegation."""
     from .delegation.command import handle_delegate_command
     
     result = await handle_delegate_command(

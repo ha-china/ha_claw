@@ -1,4 +1,3 @@
-"""Automation management tools for Home Assistant."""
 from __future__ import annotations
 
 import json
@@ -27,8 +26,6 @@ _LOGGER = logging.getLogger(__name__)
 
 
 class AutomationTool(llm.Tool):
-    """Manage Home Assistant automations via official APIs."""
-
     name = "Automation"
     description = (
         "Manage Home Assistant automations via official APIs. "
@@ -90,7 +87,6 @@ class AutomationTool(llm.Tool):
     async def async_call(
         self, hass: HomeAssistant, tool_input: llm.ToolInput, llm_context: llm.LLMContext
     ) -> JsonObjectType:
-        """Execute automation tool action."""
         action = tool_input.tool_args.get("action", "list")
         entity_id = tool_input.tool_args.get("entity_id", "")
         automation_id = str(tool_input.tool_args.get("automation_id", "")).strip()
@@ -174,12 +170,6 @@ class AutomationTool(llm.Tool):
     def _resolve_config_id(
         self, hass: HomeAssistant, entity_id: str, automation_id: str,
     ) -> tuple[str, str]:
-        """Resolve entity_id and the YAML config id (unique_id).
-
-        entity object_id (automation.xxx) != YAML id in many cases.
-        The entity's unique_id IS the YAML id field.
-        Returns (entity_id, config_id).
-        """
         if not entity_id and automation_id:
             entity_id = f"automation.{automation_id}"
         component = hass.data.get(DATA_COMPONENT)
@@ -237,7 +227,6 @@ class AutomationTool(llm.Tool):
     async def _get_automation(
         self, hass: HomeAssistant, entity_id: str, automation_id: str
     ) -> JsonObjectType:
-        """Get full config of a single automation."""
         if not entity_id and automation_id:
             entity_id = f"automation.{automation_id}"
         if not entity_id:
@@ -272,15 +261,6 @@ class AutomationTool(llm.Tool):
     async def _load_existing_config(
         self, hass: HomeAssistant, automation_id: str, *, from_yaml: bool = False,
     ) -> dict | None:
-        """Return the current raw config dict for an automation, or None.
-
-        Prefer the in-memory loaded entity (fast, reflects runtime state). Fall
-        back to reading automations.yaml directly when the entity is not loaded
-        (e.g. disabled or failed to load).
-
-        Set from_yaml=True to skip in-memory cache and read the YAML file
-        directly — use this for post-write verification.
-        """
         if not from_yaml:
             component = hass.data.get(DATA_COMPONENT)
             if component is not None:
@@ -310,11 +290,6 @@ class AutomationTool(llm.Tool):
         automation_id: str,
         entry: dict,
     ) -> None:
-        """Write automation entry to YAML and reload.
-
-        Mirrors EditAutomationConfigView.post() exactly:
-        data_validator → mutation_lock → _write_value → atomic write → post_write_hook.
-        """
         from homeassistant.components.config.automation import EditAutomationConfigView
         from homeassistant.helpers import config_validation as cv
 
@@ -343,7 +318,6 @@ class AutomationTool(llm.Tool):
         self, hass: HomeAssistant, entity_id: str,
         *, icon=None, area_id=None, labels=None, name=None, category_id=None, sentinel=None,
     ) -> dict[str, object]:
-        """Apply icon/area_id/labels/name/category to entity registry. Returns applied dict."""
         touch_icon = icon is not sentinel
         touch_area = area_id is not sentinel
         touch_labels = labels is not sentinel
@@ -400,7 +374,6 @@ class AutomationTool(llm.Tool):
         return applied
 
     def _parse_config(self, config) -> dict | str:
-        """Parse config from dict or JSON string. Returns dict or error string."""
         if isinstance(config, str):
             try:
                 config = json.loads(config)
@@ -424,7 +397,6 @@ class AutomationTool(llm.Tool):
         category_id=None,
         sentinel=None,
     ) -> JsonObjectType:
-        """Create a new automation. If same id/alias already exists, auto-promote to in-place update."""
         parsed = self._parse_config(config)
         if isinstance(parsed, str):
             return {"success": False, "error": parsed}
@@ -502,12 +474,6 @@ class AutomationTool(llm.Tool):
         category_id=None,
         sentinel=None,
     ) -> JsonObjectType:
-        """Update automation with safety guarantees.
-
-        - Metadata only (icon/area/labels/name): apply to registry directly.
-        - Config changes (alias/description/trigger/condition/action): validate →
-          atomic write → reload → post-verify.
-        """
         parsed = self._parse_config(config)
         if isinstance(parsed, str):
             return {"success": False, "error": parsed}
@@ -597,15 +563,6 @@ class AutomationTool(llm.Tool):
         category_id=None,
         sentinel=None,
     ) -> JsonObjectType:
-        """Apply surgical anchor patches to an automation's YAML config.
-
-        Workflow:
-        1. Load current config.
-        2. Dump to YAML text.
-        3. Apply text patches atomically.
-        4. Parse patched YAML back to a dict.
-        5. Feed the full dict into ``_inplace_update`` (full replacement).
-        """
         if not isinstance(patches, list) or not patches:
             return {"success": False, "error": "'patches' must be a non-empty list"}
 
@@ -665,10 +622,6 @@ class AutomationTool(llm.Tool):
     async def _confirm_draft(
         self, hass: HomeAssistant, automation_id: str, entity_id: str
     ) -> JsonObjectType:
-        """Deprecated: update is now atomic in-place. Kept for backward compat.
-
-        If a legacy draft (<id>_draft) exists, promote it via in-place update.
-        """
         if not automation_id and entity_id:
             automation_id = entity_id.removeprefix("automation.")
         if not automation_id:
@@ -706,7 +659,6 @@ class AutomationTool(llm.Tool):
     async def _delete_automation(
         self, hass: HomeAssistant, entity_id: str, automation_id: str
     ) -> JsonObjectType:
-        """Delete automation using HA's config view API (same as frontend)."""
         from homeassistant.components.config.automation import EditAutomationConfigView
         from homeassistant.helpers import config_validation as cv
 
@@ -735,7 +687,6 @@ class AutomationTool(llm.Tool):
             return {"success": False, "error": "automation_id or entity_id is required"}
 
         async def delete_hook(action: str, config_key: str) -> None:
-            """Post-delete hook that removes entity from registry."""
             ent_reg = er.async_get(hass)
             reg_entity_id = ent_reg.async_get_entity_id(
                 AUTOMATION_DOMAIN, AUTOMATION_DOMAIN, config_key
@@ -787,7 +738,6 @@ class AutomationTool(llm.Tool):
     async def _get_traces(
         self, hass: HomeAssistant, entity_id: str, automation_id: str
     ) -> JsonObjectType:
-        """List execution traces for an automation."""
         from homeassistant.components.trace.util import async_list_traces
 
         _, config_id = self._resolve_config_id(hass, entity_id, automation_id)
@@ -819,7 +769,6 @@ class AutomationTool(llm.Tool):
     async def _get_trace_detail(
         self, hass: HomeAssistant, entity_id: str, automation_id: str, run_id: str
     ) -> JsonObjectType:
-        """Get detailed trace for a specific run."""
         from homeassistant.components.trace.util import async_get_trace
 
         _, config_id = self._resolve_config_id(hass, entity_id, automation_id)

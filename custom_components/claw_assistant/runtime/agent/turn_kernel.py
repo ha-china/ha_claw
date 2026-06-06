@@ -42,15 +42,6 @@ def _build_kernel_planner_prompt(
     step_index: int,
     extra_system_prompt: str | None = None,
 ) -> str:
-    """Build an independent kernel planner prompt.
-    
-    This is a standalone protocol prompt, NOT appended to the main conversation prompt.
-    The kernel planner only needs:
-    1. Step contract (output format)
-    2. Tool catalog (what tools are available)
-    3. Completed steps (what has been done)
-    4. Planner rules (current goal and constraints)
-    """
     sections = [
         "# Kernel Planner Mode",
         "You are a step-by-step planner. Your job is to decide the next action to achieve the user's goal.",

@@ -125,7 +125,6 @@ def _convert_schema_to_vol(schema: dict) -> vol.Schema:
 
 
 def _extract_description(schema: dict | None, fallback: str = "") -> str:
-    """Extract description from schema dict with multiple fallback locations."""
     if not schema or not isinstance(schema, dict):
         return fallback or ""
     

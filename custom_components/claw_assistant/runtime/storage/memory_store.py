@@ -404,8 +404,6 @@ async def async_clear_memory_entries(hass: HomeAssistant, *, target: str = "memo
 async def async_delete_memory_entry(
     hass: HomeAssistant, key: str, *, target: str = "memory"
 ) -> tuple[Path, bool]:
-    """Remove a single memory entry by key. Returns (path, deleted)."""
-
     target = _normalize_target(target)
     normalized_key = _normalize_key(key)
     markdown = await hass.async_add_executor_job(_read_memory_markdown, target)

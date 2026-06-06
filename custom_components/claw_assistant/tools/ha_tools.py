@@ -1030,7 +1030,6 @@ DISCIPLINE: 1) Follow the exact workflow steps above — no exploratory calls. 2
     async def _detect_config_method(
         hass: HomeAssistant, entry: config_entries.ConfigEntry
     ) -> dict[str, object]:
-        """Probe whether an entry supports options, subentries, or both."""
         info: dict[str, object] = {}
         try:
             handler = await config_entries._async_get_flow_handler(

@@ -86,8 +86,6 @@ _OUTPUT_MODE_VALUES = sorted(_OUTPUT_MODE_ALIASES)
 
 
 def _has_top_level_async(tree) -> bool:
-    """Return True when module code requires top-level await execution."""
-
     import ast
 
     class _Finder(ast.NodeVisitor):
@@ -121,18 +119,6 @@ def _has_top_level_async(tree) -> bool:
 
 
 class _MainLoopProxy:
-    """Route HA core method calls back to the main event loop.
-
-    Used by ExecutePython (inline mode, top-level-await branch) so that user
-    code runs on a worker-thread event loop — synchronous I/O inside user
-    code (e.g. ``Path.write_bytes``) no longer blocks HA's main loop.
-
-    Rule for AI: every ``hass.*`` method call must be ``await``-ed, including
-    ones that used to be synchronous (e.g. ``hass.config.path``,
-    ``hass.states.get``). Non-callable attributes (``hass.config.config_dir``)
-    pass through unchanged.
-    """
-
     __slots__ = ("_t", "_loop")
 
     def __init__(self, target: Any, main_loop: "asyncio.AbstractEventLoop") -> None:
@@ -148,17 +134,6 @@ class _MainLoopProxy:
 
 
 def _smart_wrap_for_main_loop(attr: Any, main_loop: "asyncio.AbstractEventLoop") -> Any:
-    """Wrap a HA attribute so it executes on ``main_loop``.
-
-    - Callable + not a class: returns an async wrapper (user must ``await``).
-      The wrapper schedules execution on ``main_loop`` via
-      ``run_coroutine_threadsafe`` and transparently awaits any returned
-      coroutine / Future before delivering the result back to the worker
-      thread's event loop.
-    - HA core sub-object (services / states / bus / config / ...): wrapped
-      recursively as another ``_MainLoopProxy``.
-    - Other values (str, primitives, dicts): returned untouched.
-    """
     import inspect as _inspect
 
     if callable(attr) and not isinstance(attr, type):
@@ -228,7 +203,6 @@ def _tool_call_error(result: object) -> str | None:
 
 
 def _ensure_json_serializable(obj: object) -> object:
-    """Ensure an object is JSON serializable, converting non-serializable types."""
     if obj is None or isinstance(obj, (bool, int, float, str)):
         return obj
     if isinstance(obj, dict):
@@ -351,10 +325,6 @@ def _cap_string(value: str, limit: int) -> str:
 
 
 def _trim_stream(value: str, limit: int = _PY_STREAM_MAX_CHARS) -> str:
-    """Trim stdout/stderr keeping the head and tail (loses middle).
-
-    Useful for long output where both the setup and the final error matter.
-    """
     if not value or len(value) <= limit:
         return value
     half = limit // 2
@@ -418,14 +388,6 @@ async def _inline_install_requirements(
     *,
     pip_index_url: str | None = None,
 ) -> dict[str, Any]:
-    """Install pip ``requirements`` into the HA venv.
-
-    Returns a structured report so the caller (and ultimately the AI) can tell
-    *what happened at each phase*: which packages were already present, which
-    were freshly installed, which failed and why. This is fed back through the
-    tool result under the ``install`` key.
-    """
-
     from homeassistant.requirements import pip_kwargs as _ha_pip_kwargs
     from homeassistant.util import package as _ha_pkg_util
 
@@ -624,8 +586,6 @@ class ExecutePythonTool(llm.Tool):
     async def _run_inline(
         self, hass: HomeAssistant, code: str, *, timeout: int, dry_run: bool
     ) -> JsonObjectType:
-        """Inline execution with full builtins, stdout/stderr capture, top-level
-        await, automatic trailing-expression result and structured errors."""
         import ast
         import builtins as _builtins
         import contextlib
@@ -693,14 +653,6 @@ class ExecutePythonTool(llm.Tool):
         )
 
         def _output_url_for(name: str) -> str:
-            """Public URL helper injected as ``output_url`` in AI globals.
-
-            Returns an absolute URL when HA has an internal/external URL
-            configured so the AI can hand the link directly to chat apps,
-            emails, etc.; falls back to the relative ``/local/...`` path
-            otherwise.
-            """
-
             return _absolute_output_url(hass, name)
 
         _system_tmp_candidates = [
@@ -737,13 +689,6 @@ class ExecutePythonTool(llm.Tool):
         redirects: list[dict[str, str]] = []
 
         def _redirect_if_system_tmp(candidate: Path) -> Path:
-            """Return either ``candidate`` or a TMP_DIR equivalent.
-
-            If the write target falls under a recognised system temp root we
-            rewrite it to ``TMP_DIR/<leaf>`` (flattened — we do not mirror
-            deep system paths). Every redirect is recorded for the AI.
-            """
-
             try:
                 resolved_cand = candidate.resolve(strict=False)
             except OSError:
@@ -2968,7 +2913,6 @@ _PLUGIN_RESULT_SENSITIVE_KEYS = frozenset({
 
 
 def _filter_plugin_result(result: dict) -> dict:
-    """Filter sensitive fields from plugin tool result to prevent leakage."""
     if not isinstance(result, dict):
         return result
     filtered = {}

@@ -1,10 +1,3 @@
-"""Optional IM delivery bridge helpers.
-
-claw_assistant only talks to IM transports through the public
-``cn_im_hub.send_message`` service contract. This keeps the runtime resilient
-when cn_im_hub is absent, old, or internally refactored.
-"""
-
 from __future__ import annotations
 
 from typing import Any

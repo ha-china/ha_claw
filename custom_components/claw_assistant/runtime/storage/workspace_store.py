@@ -228,12 +228,6 @@ async def async_setup_workspace_store(hass: HomeAssistant) -> None:
 
 
 async def async_set_bootstrap_active(hass: HomeAssistant, active: bool) -> None:
-    """Force-set bootstrap_active flag and hot-reload snapshot.
-
-    Bypasses the completeness gate in async_finalize_bootstrap_if_ready. Used
-    when the AI decides bootstrap is done even if some fields are blank, or
-    when re-entering bootstrap manually.
-    """
     await hass.async_add_executor_job(
         _write_workspace_state, {"bootstrap_active": bool(active)}
     )

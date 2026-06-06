@@ -472,7 +472,6 @@ async def streaming_websocket_process(
 
 
 async def _await_task(task):
-    """Await a task without cancelling it when the awaiter is cancelled."""
     try:
         return await asyncio.shield(task)
     except asyncio.CancelledError:
@@ -551,7 +550,6 @@ async def websocket_subscribe_live_stream(
     connection: websocket_api.ActiveConnection,
     msg: dict,
 ) -> None:
-    """Subscribe to live event stream, replaying buffered events first."""
     from ..core.state import get_active_conversation_state, get_conversation_status
 
     requested_conv_id = msg.get("conversation_id") or ""
@@ -599,7 +597,6 @@ async def websocket_live_turn_snapshot(
     connection: websocket_api.ActiveConnection,
     msg: dict,
 ) -> None:
-    """Return snapshot of any in-progress conversation turn for frontend recovery after refresh."""
     from ..core.state import (
         get_conversation_status,
         get_active_conversation_state,
@@ -824,15 +821,6 @@ _BINARY_MAGIC_PREFIXES: tuple[bytes, ...] = (
 
 
 def _sniff_is_text(head: bytes) -> bool:
-    """Best-effort detection of text content from the first chunk of a file.
-
-    The check is intentionally conservative: a file is treated as text only if
-    (a) it does not start with a known binary magic, (b) it does not contain
-    NUL bytes in the sniffed window, and (c) the chunk decodes cleanly as
-    UTF-8 (or UTF-8 with a BOM). Anything else is served as binary so we
-    never accidentally rewrite a media file's content-type and break the
-    browser's renderer.
-    """
     if not head:
         return False
     for sig in _BINARY_MAGIC_PREFIXES:
@@ -855,17 +843,6 @@ def _sniff_is_text(head: bytes) -> bool:
 
 
 class ClawFileView(HomeAssistantView):
-    """Serve files from ``<config>/www/claw_assistant/`` with explicit
-    ``charset=utf-8`` for text content-types.
-
-    HA's built-in ``/local/...`` static handler derives ``Content-Type`` from
-    ``mimetypes.guess_type()`` which returns e.g. ``text/markdown`` *without*
-    a charset parameter. Browsers running in a Chinese locale then default to
-    GBK and render UTF-8 files as mojibake. This view routes claw_assistant
-    output files through HA's HTTP stack with a guaranteed
-    ``Content-Type: text/<x>; charset=utf-8`` header for text extensions.
-    """
-
     url = "/claw_file/{filename:.+}"
     name = "claw_assistant:file"
     requires_auth = False

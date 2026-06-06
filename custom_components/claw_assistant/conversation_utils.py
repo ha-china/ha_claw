@@ -147,7 +147,6 @@ class ConversationHistory:
         self._schedule_save()
 
     def mark_turn_in_progress(self, conversation_id: str, user_message: str) -> None:
-        """Mark a turn as in-progress so it appears in history immediately."""
         if conversation_id not in self._histories:
             self._histories[conversation_id] = []
         self._in_progress[conversation_id] = {
@@ -157,11 +156,9 @@ class ConversationHistory:
         self._last_touched[conversation_id] = time.time()
 
     def clear_in_progress(self, conversation_id: str) -> None:
-        """Clear in-progress marker after turn completes."""
         self._in_progress.pop(conversation_id, None)
 
     def get_in_progress(self, conversation_id: str) -> dict | None:
-        """Get in-progress turn data if any."""
         return self._in_progress.get(conversation_id)
 
     def set_conversation_title(self, conversation_id: str, title: str) -> None:
@@ -236,10 +233,6 @@ class ConversationHistory:
         minutes: float = 30.0,
         max_turns_per_conv: int = 5,
     ) -> List[Dict[str, Any]]:
-        """Return turns from all conversations whose last_touched is within the last N minutes.
-
-        Useful after a window/conversation_id has been closed to recall what the user
-        was just discussing."""
         now = time.time()
         cutoff = now - minutes * 60
         result: List[Dict[str, Any]] = []
@@ -404,7 +397,6 @@ class ConversationHistory:
 
 
     def attach_store(self, store: "Store") -> None:
-        """Attach an HA Store; subsequent mutations will schedule debounced saves."""
         self._store = store
 
     def _data_to_save(self) -> Dict[str, Any]:
@@ -434,7 +426,6 @@ class ConversationHistory:
             _LOGGER.debug("Failed to schedule history save: %s", err)
 
     def load_from_dict(self, data: Dict[str, Any]) -> int:
-        """Load persisted data and drop anything older than max_age_seconds."""
         if not data:
             return 0
         histories = data.get("histories") or {}
@@ -483,10 +474,6 @@ _conversation_history: Optional[ConversationHistory] = None
 
 
 async def async_setup_history_store(hass: "HomeAssistant") -> ConversationHistory:
-    """Load persisted history from disk and attach the store for future saves.
-
-    Safe to call multiple times; subsequent calls are no-ops if already attached.
-    """
     from homeassistant.helpers.storage import Store
 
     history = get_conversation_history()
@@ -509,7 +496,6 @@ async def async_setup_history_store(hass: "HomeAssistant") -> ConversationHistor
 
 
 async def async_flush_history_store(hass: "HomeAssistant") -> None:
-    """Force-flush any pending history save (called on unload)."""
     history = get_conversation_history()
     if history._store is None:
         return

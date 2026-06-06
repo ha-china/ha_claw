@@ -98,8 +98,6 @@ def record_user_turn(hass: HomeAssistant, *, text: str) -> dict[str, Any]:
 
 
 def reset_execution_control_for_turn(hass: HomeAssistant) -> dict[str, Any]:
-    """Reset per-user-turn execution guards without clearing conversation history."""
-
     task_loop = get_task_loop_state(hass)
     task_loop["thought_count"] = 0
     task_loop["step_count"] = 0
@@ -327,14 +325,11 @@ PARALLEL_REPEAT_STOP_PROMPT = (
 
 
 def _args_signature(tool_args: dict | None) -> str:
-    """Create a hashable signature from tool args."""
     import json
     return json.dumps(tool_args or {}, sort_keys=True, ensure_ascii=False)
 
 
 def get_execution_control_limits(hass: HomeAssistant) -> dict[str, int]:
-    """Return configured execution limits with safe defaults."""
-
     max_repeat = DEFAULT_MAX_TOOL_REPEAT
     identical_warn = DEFAULT_IDENTICAL_CALL_WARN
     identical_stop = DEFAULT_IDENTICAL_CALL_STOP
@@ -351,8 +346,6 @@ def get_execution_control_limits(hass: HomeAssistant) -> dict[str, int]:
 
 
 def get_configured_pipeline_timeout(hass: HomeAssistant) -> int:
-    """Return the configured pipeline timeout in seconds."""
-
     timeout = DEFAULT_PIPELINE_TIMEOUT
     for entry in hass.config_entries.async_entries(DOMAIN):
         timeout = int(entry.options.get(CONF_PIPELINE_TIMEOUT, timeout))
@@ -393,11 +386,6 @@ def check_tool_repeat(
     identical_warn: int = 10,
     identical_stop: int = 20,
 ) -> tuple[str | None, bool]:
-    """
-    Check for tool repeat. Returns (prompt, should_stop).
-    - prompt: warning/error message to inject, or None
-    - should_stop: True if loop should be forcibly terminated
-    """
     task_loop = get_task_loop_state(hass)
     records = [
         *task_loop.get("steps", []),

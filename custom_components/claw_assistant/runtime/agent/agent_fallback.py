@@ -69,14 +69,7 @@ from ..storage.live_turn_store import async_save_live_turn_snapshot
 
 LOGGER = logging.getLogger(__name__)
 
-_IM_CHANNEL_PREFIXES = {
-    "wechat:": "WeChat",
-    "feishu:": "Feishu",
-    "dingtalk:": "DingTalk",
-    "qq:": "QQ",
-    "wecom:": "WeCom",
-    "xiaoyi:": "XiaoYi",
-}
+from ..core.state import IM_CHANNEL_NAMES as _IM_CHANNEL_PREFIXES
 
 
 def _detect_channel(conversation_id: str | None, conv_status: dict[str, Any]) -> str:
@@ -104,7 +97,6 @@ def _get_chat_log_content(hass: HomeAssistant, conversation_id: str) -> list:
 
 
 def _get_last_assistant_content(hass: HomeAssistant, conversation_id: str) -> str:
-    """Get the last assistant content from chat log (partial streaming output)."""
     from homeassistant.components.conversation.chat_log import AssistantContent
     content = _get_chat_log_content(hass, conversation_id)
     if not content:
@@ -181,13 +173,11 @@ async def _trim_chat_log_for_context_overflow(hass: HomeAssistant, conversation_
 
 
 def _schedule_background_compression_if_needed(hass: HomeAssistant, conversation_id: str, *, summary_agent_id: str = "") -> None:
-    """Schedule background compression after turn completes (non-blocking)."""
     from ..llm.context_compressor import schedule_background_compression
     schedule_background_compression(hass, conversation_id, summary_agent_id=summary_agent_id)
 
 
 def _strip_image_blocks_from_chat(chat_content: list) -> int:
-    """Strip image_url content blocks from chat history. Returns count of stripped blocks."""
     stripped = 0
     for item in chat_content:
         content = getattr(item, "content", None)
@@ -270,7 +260,6 @@ def _resolve_history_write_id(
     conversation_id,
     conv_history,
 ) -> str:
-    """Return the persisted history bucket for this turn."""
     current_id = str(conversation_id or "default")
     resume_id = get_active_resume_history_id(hass)
     if resume_id and conv_history.get_history(resume_id):
@@ -866,13 +855,6 @@ def _resolve_history_context_id(
     conversation_id,
     conv_history,
 ) -> str | None:
-    """Resolve the history ID to inject for the current window.
-
-    The HA window/session conversation ID can differ from the history entry
-    selected in the sidebar. ``chat_history_resume`` records the selected
-    history ID separately; only that explicit resume marker may recover
-    context from a different window ID.
-    """
     current_id = str(conversation_id or "default")
     status = get_conversation_status(hass)
 
@@ -934,12 +916,6 @@ def _build_fallback_extra_prompt(
     pending_handoff_context: str,
     previous_tool_results: list[dict[str, Any]],
 ) -> str | None:
-    """Build fallback extra prompt.
-
-    base_prompt is the stable prefix built by orchestrator. Per-turn user task
-    context is carried in the user message so it does not churn the system
-    prefix and break DeepSeek prefix caching.
-    """
     del hass
     del user_text
 
@@ -1155,7 +1131,6 @@ _EMPTY_CONTENT_ERROR_KEYWORDS = (
 
 
 def _is_agent_unavailable_error(err: Exception, err_lower: str) -> bool:
-    """Return true only for configuration/registration errors."""
     return any(kw in err_lower for kw in _UNAVAILABLE_ERROR_KEYWORDS)
 
 

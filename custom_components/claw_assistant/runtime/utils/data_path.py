@@ -43,8 +43,6 @@ _OUTPUT_MEDIA_EXTENSIONS = frozenset(
 
 
 def get_output_dir(hass: HomeAssistant) -> Path:
-    """Return ``<config>/www/claw_assistant/`` (created if missing)."""
-
     out = output_dir_path(hass)
     out.mkdir(parents=True, exist_ok=True)
     return out
@@ -59,7 +57,6 @@ def is_output_media_file(path: Path) -> bool:
 
 
 def get_tmp_dir(hass: HomeAssistant) -> Path:
-    """Return ``<config>/.storage/claw_assistant/tmp/`` (created if missing)."""
 
     tmp = tmp_dir_path(hass)
     tmp.mkdir(parents=True, exist_ok=True)
@@ -71,13 +68,6 @@ def tmp_dir_path(hass: HomeAssistant) -> Path:
 
 
 def output_url_for(filename: str) -> str:
-    """Return the relative ``/local/...`` URL for a file under ``OUTPUT_DIR``.
-
-    This is a pure string helper with no HA dependency; use
-    :func:`absolute_output_url` when a link that can be shared outside the
-    HA frontend (chat apps, emails, etc.) is required.
-    """
-
     name = str(filename).lstrip("/")
     return f"/local/{_OUTPUT_SUBDIR}/{name}"
 
@@ -277,8 +267,6 @@ def _version_tuple(value: str) -> tuple[int, ...]:
 
 
 def _sync_versioned_docs(root: Path) -> None:
-    """Force-copy bundled markdown whose version marker is newer than user's."""
-
     for entry in _VERSIONED_BUNDLED_DOCS:
         src = BUNDLED_DATA_DIR / entry
         if not src.exists() or not src.is_file():
@@ -301,7 +289,6 @@ def _sync_versioned_docs(root: Path) -> None:
 
 
 def _patch_file_lines(dst: Path, anchor: str, new_line: str) -> bool:
-    """Insert *new_line* after *anchor* in *dst* if not already present."""
     if not dst.exists():
         return False
     try:

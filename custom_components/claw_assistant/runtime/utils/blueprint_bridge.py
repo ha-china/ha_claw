@@ -1,4 +1,3 @@
-"""Bridge: push claw tool events to Blueprint Studio frontend."""
 from __future__ import annotations
 
 import logging

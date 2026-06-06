@@ -113,13 +113,11 @@ _LARGE_TEXT_THRESHOLD = 1500
 
 
 def _write_large_text_file(filepath: Path, text: str) -> None:
-    """Blocking write for async executor."""
     filepath.parent.mkdir(parents=True, exist_ok=True)
     filepath.write_text(text, encoding="utf-8")
 
 
 async def _segment_large_text(text: str, hass: HomeAssistant | None = None) -> tuple[str, bool]:
-    """For large text (>1500 chars), save to temp file and return instruction for AI to read it."""
     if not text or len(text) <= _LARGE_TEXT_THRESHOLD:
         return text, False
 
@@ -202,14 +200,6 @@ def _compress_image_blocking(raw: bytes) -> bytes | None:
 
 
 def _sanitize_attachment(mime: str, fpath: str, tmp_dir: Path | None = None) -> tuple[str, Path] | None:
-    """Validate, size-check and (for images) re-encode an attachment.
-
-    Goals:
-    - Never let a malformed file crash the conversation pipeline.
-    - Strip EXIF / container metadata via a clean PIL re-encode.
-    - Cap oversized images so downstream vision models don't OOM / overflow.
-    Returns ``None`` when the source is unusable.
-    """
     try:
         p = Path(fpath)
         if not p.is_file():

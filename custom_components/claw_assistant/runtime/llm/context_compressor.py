@@ -1,19 +1,3 @@
-"""Automatic context window compression for long conversations.
-
-Adapted from Hermes Agent's ContextCompressor. Operates on HA's ChatLog.content
-(list of frozen dataclass objects: SystemContent, UserContent, AssistantContent,
-ToolResultContent) instead of OpenAI-format dicts.
-
-Compression strategy:
-  1. Prune old tool results (cheap, no LLM call) — replace large outputs
-     with informative one-line summaries
-  2. Protect head messages (system prompt + first exchange)
-  3. Protect tail messages by token budget (most recent context)
-  4. Summarize middle turns via a configured conversation agent
-  5. Iterative summary updates across multiple compactions
-  6. Anti-thrashing: skip if recent compressions were ineffective
-"""
-
 from __future__ import annotations
 
 import logging
@@ -53,13 +37,6 @@ _CONTEXT_PROBE_TIERS = [
 
 
 def _parse_context_limit_from_error(error_text: str) -> int | None:
-    """Extract the real context limit from an API error message.
-
-    Providers often include the limit in the error, e.g.:
-      'maximum context length is 128000 tokens'
-      'context window exceeds limit (131072)'
-      'max_tokens: 32768'
-    """
     import re
     patterns = [
         r"maximum context length is (\d[\d,]+)",
@@ -156,7 +133,6 @@ _PRESERVE_KEYWORDS = (
 
 
 def _should_preserve_tool_result(tool_name: str, result_text: str) -> bool:
-    """Check if tool result contains critical info that must be preserved."""
     if tool_name in _PRESERVE_TOOLS:
         return True
     text_lower = result_text.lower()
@@ -360,7 +336,6 @@ class ContextCompressor:
         return compressed
 
     def step_down_context(self, error_text: str = "") -> bool:
-        """Parse API error for real limit and step down. Returns True if stepped."""
         old = self.context_length
         parsed = _parse_context_limit_from_error(error_text) if error_text else None
         if parsed and parsed < old:
@@ -381,7 +356,6 @@ class ContextCompressor:
         return True
 
     def preflight_check(self, content: list) -> bool:
-        """Return True if content already exceeds threshold (compress before API call)."""
         n = len(content)
         if n <= self.protect_first_n + 4:
             return False
@@ -960,7 +934,6 @@ async def _background_compress_task(
     summary_agent_id: str,
     focus_topic: str,
 ) -> None:
-    """Background compression task - runs async without blocking main conversation."""
     try:
         compressor = get_compressor()
         compressed = await compressor.compress(
@@ -990,7 +963,6 @@ def schedule_background_compression(
     summary_agent_id: str = "",
     focus_topic: str = "",
 ) -> bool:
-    """Mark conversation for compression on next user turn. Returns True if marked."""
     if conversation_id in _PENDING_COMPRESSIONS:
         return False
     if conversation_id in _DEFERRED_COMPRESSIONS:
@@ -1020,7 +992,6 @@ def schedule_background_compression(
 
 
 def run_deferred_compression(hass: HomeAssistant, conversation_id: str) -> bool:
-    """Start deferred compression if marked. Call at start of new user turn."""
     deferred = _DEFERRED_COMPRESSIONS.pop(conversation_id, None)
     if not deferred:
         return False
@@ -1052,7 +1023,6 @@ def run_deferred_compression(hass: HomeAssistant, conversation_id: str) -> bool:
 
 
 def apply_pending_compression(hass: HomeAssistant, conversation_id: str) -> bool:
-    """Apply pending compression result if available. Returns True if applied."""
     compressed = _COMPRESSION_RESULTS.pop(conversation_id, None)
     if compressed is None:
         return False
@@ -1074,5 +1044,4 @@ def apply_pending_compression(hass: HomeAssistant, conversation_id: str) -> bool
 
 
 def has_pending_compression(conversation_id: str) -> bool:
-    """Check if compression is pending or result is ready."""
     return conversation_id in _PENDING_COMPRESSIONS or conversation_id in _COMPRESSION_RESULTS

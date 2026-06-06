@@ -121,14 +121,6 @@ def _daily_window_elapsed(state: dict[str, Any], now: datetime) -> bool:
 
 
 def should_run_idle(now: datetime | None = None) -> bool:
-    """Decide whether the curator should run automatically right now.
-
-    Conditions (all required):
-      * curator is not paused
-      * at least ``_IDLE_MIN_TURNS`` conversation turns since last successful run
-      * the assistant has been quiet for at least ``_IDLE_QUIET_AFTER``
-      * the daily 24h window has elapsed since the last run
-    """
     if is_paused():
         return False
     if now is None:
@@ -150,12 +142,6 @@ def should_run_idle(now: datetime | None = None) -> bool:
 
 
 def record_turn_activity(hass: HomeAssistant) -> None:
-    """Record one finished conversation turn.
-
-    Bumps ``turns_since_last_run`` and refreshes ``last_turn_at``.
-    Called from agent finalizers — never from background tasks.
-    """
-
     def _bump() -> None:
         try:
             state = load_state()

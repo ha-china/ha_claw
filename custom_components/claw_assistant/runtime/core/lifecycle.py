@@ -103,11 +103,6 @@ async def async_setup_runtime(hass: HomeAssistant, entry: ConfigEntry) -> None:
 
 
 def _patch_ai_hub_intent_bypass() -> None:
-    """Monkey-patch ai_hub to skip intent processing for peer-AI consult calls.
-
-    When ai_hub sees [PEER-CONSULT] in the user input text, it bypasses
-    local/built-in intent matching and goes straight to LLM.
-    """
     try:
         from custom_components.ai_hub.conversation import AIHubConversationAgent
         original = getattr(AIHubConversationAgent, "_async_handle_local_and_builtin_intents", None)

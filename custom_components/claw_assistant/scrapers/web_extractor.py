@@ -272,7 +272,6 @@ _EMBEDDED_JS_PATTERNS = (
 
 
 def _parse_js_object_fallback(raw_js: str) -> Any:
-    """Parse JS object using Python's json with preprocessing, fallback when chompjs unavailable."""
     import json
     cleaned = raw_js.strip()
     cleaned = re.sub(r"'([^']*)':", r'"\1":', cleaned)

@@ -527,8 +527,6 @@ def build_runtime_tool_list() -> list[llm.Tool]:
 
 
 def invalidate_runtime_tool_cache() -> None:
-    """Drop the memoized runtime tool list (call after dynamic tool edits)."""
-
     global _CACHED_RUNTIME_TOOLS
     _CACHED_RUNTIME_TOOLS = None
 

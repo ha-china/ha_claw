@@ -165,16 +165,6 @@ def get_runtime_store(hass: HomeAssistant) -> dict[str, Any]:
 
 
 def reset_live_response_parts(hass: HomeAssistant, conversation_id: str) -> None:
-    """Drop accumulated live-stream text for a conversation at turn start.
-
-    ``live_response_parts`` is appended to for every assistant content delta
-    but is never trimmed per turn, so the live-turn snapshot would otherwise
-    surface stale fragments left over from a previous turn. That makes the WS
-    live view disagree with the single final answer persisted to history. By
-    clearing at the start of each turn, the live snapshot stays scoped to the
-    current turn and converges to what is stored, so the refreshed re-display
-    from history is consistent.
-    """
     if not conversation_id:
         return
     parts_map = get_runtime_store(hass).get("live_response_parts")
@@ -227,14 +217,7 @@ def get_should_end_flag(hass: HomeAssistant) -> dict[str, Any]:
 
 
 def consume_should_end_flag(hass: HomeAssistant) -> bool:
-    """Atomically read-and-clear the /stop signal.
 
-    Single consumption point so the flag is honored in exactly one operation
-    instead of every caller doing its own ``["value"] = False``. That ad-hoc
-    pattern previously let the flag leak into the next turn or get cleared
-    before the continuation loop could see it. Callers that merely want to peek
-    (without consuming) should keep using ``get_should_end_flag``.
-    """
     flag = _ensure_bucket(hass, "should_end_flag")
     if flag.get("value"):
         flag["value"] = False
@@ -243,7 +226,6 @@ def consume_should_end_flag(hass: HomeAssistant) -> bool:
 
 
 def reset_should_end_flag(hass: HomeAssistant) -> None:
-    """Clear the /stop signal (used when starting/resetting a conversation)."""
     _ensure_bucket(hass, "should_end_flag")["value"] = False
 
 

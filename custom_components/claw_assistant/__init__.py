@@ -119,12 +119,6 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     return True
 
 async def _async_ensure_bootstrap_on_first_install(hass: HomeAssistant) -> None:
-    """On first-ever install, materialize state.json with bootstrap_active=true.
-
-    Detects "first install" by the absence of the workspace state file. Without
-    this, the flag only exists implicitly (default-when-missing) and downstream
-    consumers that read the file directly see stale data.
-    """
     import json
     from .runtime.utils.data_path import get_data_dir
 
@@ -150,7 +144,6 @@ async def _async_ensure_bootstrap_on_first_install(hass: HomeAssistant) -> None:
 
 
 async def async_remove_entry(hass: HomeAssistant, entry: ConfigEntry) -> None:
-    """Reset bootstrap flag so the next install re-runs first-run setup."""
     import json
     from .runtime.utils.data_path import get_data_dir
 

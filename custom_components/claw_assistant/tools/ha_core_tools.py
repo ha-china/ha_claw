@@ -499,23 +499,17 @@ def _get_current_agent_id(hass: HomeAssistant) -> str:
 
 
 def _normalize_agent_selector(value: object) -> str:
-    """Normalize a user/model supplied agent selector for loose matching."""
-
     text = str(value or "").strip().lower()
     return re.sub(r"[^a-z0-9]+", " ", text).strip()
 
 
 def _agent_aliases(agent_id: str, *names: str) -> list[str]:
-    """Return stable aliases an LLM may use when selecting a peer agent."""
-
     base = agent_id.removeprefix("conversation.")
     variants = (agent_id, base, base.replace("_", "."), base.replace("_", "-"), *(alias for name in names for alias in (name, name.replace(" ", "/"), name.replace(" ", "-"))))
     return list(dict.fromkeys(alias for alias in variants if _normalize_agent_selector(alias)))
 
 
 def _resolve_agent_selector(agent_selector: str, peers: list[dict[str, Any]]) -> str | None:
-    """Resolve an agent entity_id from id, display name, or normalized alias."""
-
     wanted = _normalize_agent_selector(agent_selector)
     if not wanted:
         return None
@@ -543,7 +537,6 @@ def _resolve_agent_selector(agent_selector: str, peers: list[dict[str, Any]]) ->
 
 
 def _resolve_peer_agents(hass: HomeAssistant) -> list[dict[str, Any]]:
-    """Get configured conversation agents with names and is_you flag."""
     from ..runtime.core.state import get_runtime_store
     from homeassistant.helpers import entity_registry as er
 
@@ -604,12 +597,6 @@ async def _consult_agent(
     max_rounds: int = 30,
     timeout: int = 120,
 ) -> dict[str, str]:
-    """Call another conversation agent for one or more dialogue rounds.
-
-    When max_rounds > 1 the two AIs converse: the peer's reply is sent back
-    as the next user message with a [Peer-AI] prefix, continuing until the
-    peer signals done, gives a short conclusive answer, or max_rounds is hit.
-    """
     from homeassistant.components.conversation import agent_manager
     from homeassistant.components import conversation
     from homeassistant.helpers import entity_registry as er
@@ -2188,7 +2175,6 @@ class RegistryTool(llm.Tool):
                 lreg = lr.async_get(hass)
 
                 def _resolve_or_create(item, *, auto_create: bool) -> str | None:
-                    """Accept a string (id/name) or a dict with {name, icon, color, description}."""
                     if isinstance(item, dict):
                         ident = str(item.get("name") or item.get("label_id") or "").strip()
                         extras = {

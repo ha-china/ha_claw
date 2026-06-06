@@ -75,11 +75,6 @@ class DynamicBinarySensor(BinarySensorEntity):
         return self._attr_is_on is not None
 
     async def async_added_to_hass(self) -> None:
-        """Render reactively instead of polling on a fixed interval.
-
-        A broken template is evaluated once at setup rather than re-rendered
-        (and re-logged) every poll tick.
-        """
         await super().async_added_to_hass()
         tpl = self._definition.get("state_template", "")
         if not tpl:

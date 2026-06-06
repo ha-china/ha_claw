@@ -1,9 +1,3 @@
-"""Local rich-media parsing helpers used by claw_assistant runtime.
-
-This keeps heartbeat delivery logic decoupled from cn_im_hub internals so
-older or mismatched cn_im_hub versions do not break claw_assistant startup.
-"""
-
 from __future__ import annotations
 
 import re

@@ -85,7 +85,6 @@ def _event_seen(hass: HomeAssistant) -> dict[str, float]:
 
 
 def record_system_event(hass: HomeAssistant, event_data: dict[str, Any]) -> bool:
-    """Record a system event if not debounced. Returns True if recorded."""
     now = time.time()
     entity_id = str(event_data.get("entity_id", "") or "")
     title = str(event_data.get("title", "") or "")
@@ -119,11 +118,6 @@ def get_recent_system_events(hass: HomeAssistant, limit: int = _MAX_EVENTS) -> l
 
 
 def build_system_events_prompt_section(hass: HomeAssistant) -> str:
-    """Build prompt section for pending system events.
-
-    Events are injected as background context. The AI should NOT proactively
-    mention them unless the user explicitly asks about issues or anomalies.
-    """
     events = get_recent_system_events(hass)
     if not events:
         return ""
@@ -153,7 +147,6 @@ def build_system_events_prompt_section(hass: HomeAssistant) -> str:
 
 @callback
 def async_setup_event_listener(hass: HomeAssistant) -> None:
-    """Register listeners for system events on the HA event bus."""
     domain = hass.data.setdefault("claw_assistant", {})
     if _EVENT_UNSUB_KEY in domain:
         return
@@ -203,7 +196,6 @@ def async_setup_event_listener(hass: HomeAssistant) -> None:
 
 @callback
 def async_unload_event_listener(hass: HomeAssistant) -> None:
-    """Unregister the event listeners."""
     domain = hass.data.get("claw_assistant", {})
     unsubs = domain.pop(_EVENT_UNSUB_KEY, None)
     if unsubs:

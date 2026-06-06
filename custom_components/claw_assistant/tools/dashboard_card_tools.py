@@ -277,8 +277,6 @@ _INSTRUCTIONS_SENT_KEY = "claw_dashboard_card_instructions_sent"
 
 
 class DashboardCardTool(llm.Tool):
-    """Create and manage Lovelace dashboard cards using html-card-pro."""
-
     name = "DashboardCard"
     description = (
         "Create and manage Lovelace dashboard views and cards powered by html-card-pro (custom:html-pro-card). "
@@ -535,7 +533,6 @@ class DashboardCardTool(llm.Tool):
         return {"success": True, "doc_name": doc_name, "content": doc}
 
     def _check_required_docs(self, hass: HomeAssistant, content: str) -> dict | None:
-        """Return blocking instruction if AI hasn't read required docs for this content."""
         read = self._docs_read(hass)
         missing = []
         if '<script' in content and 'js_api' not in read:
@@ -1050,12 +1047,6 @@ class DashboardCardTool(llm.Tool):
         target: str,
         dry_run: bool,
     ) -> JsonObjectType:
-        """Surgical anchor-based edit of an existing card.
-
-        target="content" (default): patch only the ``content`` string (HTML/CSS/JS).
-        target="card_yaml": patch the whole card's YAML text — useful for edits
-        that touch both structure and content.
-        """
         if not isinstance(patches, list) or not patches:
             return {
                 "success": False,

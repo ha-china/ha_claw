@@ -1,10 +1,3 @@
-"""Cleanup for browser-reachable media artefacts in OUTPUT_DIR.
-
-Media files under ``<config>/www/claw_assistant/`` are treated as disposable
-preview assets and are deleted hourly once they are older than
-``OUTPUT_MEDIA_RETENTION_HOURS``.
-"""
-
 from __future__ import annotations
 
 import logging

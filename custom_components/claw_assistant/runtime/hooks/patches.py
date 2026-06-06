@@ -185,7 +185,6 @@ _ALLOWED_INTENTS = {
 
 
 def early_patch_intents() -> None:
-    """Patch async_handle_intents at module load time, before ai_hub imports it."""
     from homeassistant.components import conversation as conv_module
     from homeassistant.components.conversation.default_agent import DefaultAgent
 
@@ -291,7 +290,6 @@ def patch_local_intents(hass: HomeAssistant) -> None:
     original_async_handle_intents = conv_module.async_handle_intents
 
     def _claw_intent_filter(result) -> bool:
-        """Return True to block the intent."""
         intent_name = getattr(result.intent, "name", "") if result.intent else ""
         return intent_name not in _ALLOWED_INTENTS
 
@@ -726,24 +724,6 @@ def unpatch_hide_tool_calls_from_pipeline() -> None:
 
 
 def patch_strip_thinking_content_serialization(hass: HomeAssistant) -> None:
-    """Strip thinking_content from AssistantContent.as_dict() for upstream LLM agents.
-
-    The HA frontend's chat panel reaches AssistantContent thinking_content
-    via TWO independent channels:
-
-    1. PipelineRun.process_event INTENT_PROGRESS deltas (handled by the
-       patch above on filtered_process_event).
-    2. The conversation/chat_log/subscribe websocket, which forwards
-       ChatLogEventType.CONTENT_ADDED / UPDATED / CREATED events whose
-       payloads come from AssistantContent.as_dict() and ChatLog.as_dict().
-
-    This patch closes channel 2 by removing thinking_content from the
-    serialized dict whenever the owning agent_id resolves to one of the
-    known buggy upstream LLM integrations. Internal Python access to
-    AssistantContent.thinking_content is unaffected, so history,
-    diagnostics, and any in-process logic still see the full text.
-    """
-
     from homeassistant.components.conversation.chat_log import AssistantContent
 
     if getattr(AssistantContent, _THINKING_STRIP_PATCHED, False):
@@ -806,7 +786,6 @@ def _is_tool_details_enabled(hass: HomeAssistant) -> bool:
 
 
 def _get_current_token_stats(hass: HomeAssistant, chat_log) -> tuple[int, int]:
-    """Get current token usage and context window size."""
     try:
         from ..llm.context_compressor import _estimate_total_tokens
         content = getattr(chat_log, "content", []) or []
@@ -871,8 +850,6 @@ def _clean_for_tts(text: str) -> str:
 
 
 def _wrap_listener_for_tracking(chat_log, original_listener):
-    """Wrap delta_listener to track the last emitted character, strip headings,
-    and separate TTS content (cleaned) from frontend display content (original)."""
     if getattr(chat_log, "_claw_listener_wrapped", False):
         return original_listener
 
@@ -1223,7 +1200,6 @@ def unpatch_tool_progress() -> None:
 
 
 def patch_pipeline_timeout(hass: HomeAssistant) -> None:
-    """Patch assist_pipeline default timeout to use claw_assistant config."""
     try:
         import homeassistant.components.assist_pipeline.const as pipeline_const
         import homeassistant.components.assist_pipeline.websocket_api as ws_module
@@ -1527,7 +1503,6 @@ def unpatch_apiinstance_tool_fallback() -> None:
 
 
 def unpatch_pipeline_timeout() -> None:
-    """Restore assist_pipeline default timeout to HA default (300s)."""
     try:
         import homeassistant.components.assist_pipeline.const as pipeline_const
         import homeassistant.components.assist_pipeline.websocket_api as ws_module
@@ -1543,16 +1518,6 @@ _WS_BINARY_ORIGINAL = "_claw_assistant_ws_binary_original"
 
 
 def patch_websocket_binary_handler_noise(hass: HomeAssistant) -> None:
-    """Silently drop binary chunks for handlers that were already unregistered.
-
-    Frontend voice/STT clients keep streaming PCM chunks for a short time
-    after the pipeline ends (VAD end, STT settled, user cancelled). HA core
-    logs every such chunk at ``ERROR`` level, flooding the log. The handler
-    was unregistered legitimately — the late packets are harmless protocol
-    tail, not an attack or bug. We downgrade this specific case to ``DEBUG``
-    while keeping genuinely-unknown handler ids at ``ERROR``.
-    """
-
     from homeassistant.components.websocket_api import connection as ws_conn
 
     if getattr(ws_conn.ActiveConnection, _WS_BINARY_PATCHED, False):
@@ -1999,7 +1964,6 @@ _IMAGE_OCR_INSTRUCTION = (
 
 
 def _strip_image_blocks(messages: list) -> int:
-    """Strip image_url content blocks from LLMMessage list. Returns count stripped."""
     stripped = 0
     to_remove = []
     last_user_idx = -1
@@ -2129,9 +2093,6 @@ _PIPELINE_WS_DETACH_PATCHED = "_claw_pipeline_ws_detach_patched"
 
 
 def patch_pipeline_websocket_detach(hass: HomeAssistant) -> None:
-    """Hook assist_pipeline/run so the pipeline task is NOT cancelled when
-    the WebSocket connection drops (browser refresh). Instead, the task
-    continues in the background, and its events are buffered for replay."""
     from homeassistant.components.assist_pipeline import websocket_api as ap_ws
 
     if getattr(ap_ws, _PIPELINE_WS_DETACH_PATCHED, False):

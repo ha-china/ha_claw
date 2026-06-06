@@ -1,12 +1,3 @@
-"""Self-update handler for claw_assistant.
-
-Checks upstream ha-china/ha_claw for new versions via GitHub API (proxied),
-patches HACS repository metadata so the update entity fires, and injects a
-GitHub download proxy into HACS for users behind the GFW.
-
-Zero ``from hacs`` imports — all HACS access is pure duck-typed via
-``hass.data["hacs"]``.
-"""
 from __future__ import annotations
 
 import asyncio
@@ -82,7 +73,6 @@ async def _api_get_json(session, url: str, timeout: int = 20) -> dict | None:
 
 
 async def _fetch_latest_version(session) -> tuple[str | None, str | None]:
-    """Return (tag, sha). Tries proxy first, then direct."""
     tag = None
     sha = None
 
@@ -171,7 +161,6 @@ def _notify_hacs_update(hacs: Any, repo: Any, upstream_version: str) -> None:
 
 
 def _clear_skipped_version(hass: HomeAssistant) -> None:
-    """Clear skipped_version on our HACS update entity so ignored updates reappear."""
     entity_id = None
     for eid in hass.states.async_entity_ids("update"):
         state = hass.states.get(eid)
@@ -220,7 +209,6 @@ _NOTIFICATION_ID = "claw_assistant_update"
 
 
 def _post_update_notification(hass: HomeAssistant, installed: str, upstream: str) -> None:
-    """Create a persistent notification pinned in the frontend."""
     from homeassistant.components.persistent_notification import async_create
     async_create(
         hass,
@@ -236,7 +224,6 @@ def _post_update_notification(hass: HomeAssistant, installed: str, upstream: str
 
 
 def _dismiss_update_notification(hass: HomeAssistant) -> None:
-    """Remove the update notification if versions match."""
     try:
         from homeassistant.components.persistent_notification import async_dismiss
         async_dismiss(hass, _NOTIFICATION_ID)

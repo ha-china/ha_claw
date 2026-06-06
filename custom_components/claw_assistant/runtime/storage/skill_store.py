@@ -145,12 +145,6 @@ def _parse_frontmatter(content: str) -> dict[str, Any]:
 
 
 def _strip_frontmatter_block(content: str) -> str:
-    """Remove the leading YAML frontmatter from a skill/prompt document body.
-
-    The frontmatter is consumed once via _parse_frontmatter to populate
-    structured SkillDocument fields. Leaving it inside the body would ship
-    the same metadata to the LLM as raw text on every turn, wasting tokens.
-    """
     return _FRONTMATTER_RE.sub("", content, count=1).lstrip()
 
 
@@ -163,16 +157,6 @@ def ensure_skill_store() -> None:
 
 
 def _migrate_flat_skills_to_folders() -> None:
-    """Normalize installed skills to the ``<slug>/SKILL.md`` pack layout.
-
-    Rule:
-    - Flat ``<slug>.md`` files without a sibling ``<slug>/`` folder are moved
-      to ``<slug>/SKILL.md`` so every skill lives in its own folder and can
-      carry auxiliary files (memory.md, heartbeat.md, ...).
-    - If a ``<slug>/`` folder already exists, the flat file is left alone
-      (no merge, no overwrite). Resolving that conflict is up to the user.
-    """
-
     skills_dir = _skills_dir()
     if not skills_dir.exists():
         return
@@ -216,12 +200,6 @@ def _migrate_flat_skills_to_folders() -> None:
 
 
 def _folder_skill_file(folder: Path) -> Path | None:
-    """Return the canonical Markdown file inside a skill folder, if any.
-
-    Supports Anthropic-style skill packs laid out as ``<slug>/SKILL.md``
-    (or ``README.md`` as a fallback).
-    """
-
     for candidate in ("SKILL.md", "skill.md", "README.md", "readme.md"):
         candidate_path = folder / candidate
         if candidate_path.is_file():
@@ -230,13 +208,6 @@ def _folder_skill_file(folder: Path) -> Path | None:
 
 
 def _iter_skill_entries() -> list[tuple[str, Path]]:
-    """Enumerate installed skills across both layouts.
-
-    Yields ``(slug, path)`` for:
-    - Legacy single-file skills: ``skills/<slug>.md``
-    - Pack-style skills: ``skills/<slug>/SKILL.md``
-    """
-
     entries: list[tuple[str, Path]] = []
     skills_dir = _skills_dir()
     if not skills_dir.exists():
@@ -254,14 +225,6 @@ def _iter_skill_entries() -> list[tuple[str, Path]]:
 
 
 def _resolve_skill_path(name: str, *, for_write: bool = False) -> Path:
-    """Return the on-disk path representing skill ``name``.
-
-    Preference order:
-    1. Existing pack layout ``<slug>/SKILL.md``
-    2. Existing flat file ``<slug>.md``
-    3. For writes: default to the flat file path (legacy behavior).
-    """
-
     slug = _slugify(name)
     folder = _skills_dir() / slug
     if folder.is_dir():
@@ -681,8 +644,6 @@ def _read_skill_raw(name: str) -> str | None:
 
 
 async def async_read_skill_markdown(hass: HomeAssistant, name: str) -> str:
-    """Return the raw on-disk markdown of an installed skill (or '')."""
-
     raw = await hass.async_add_executor_job(partial(_read_skill_raw, name))
     return raw or ""
 

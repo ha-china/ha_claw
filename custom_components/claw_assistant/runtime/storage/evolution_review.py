@@ -79,10 +79,6 @@ def _loaded_skills_bucket(hass: HomeAssistant) -> dict[str, list[str]]:
 def record_loaded_skill(
     hass: HomeAssistant, slug: str, *, conversation_id: str | None = None
 ) -> None:
-    """Record a skill slug as loaded by the active conversation.
-
-    Used to feed the active-update bias section of the evolution review prompt.
-    """
     if not slug:
         return
     if conversation_id is None:
@@ -105,7 +101,6 @@ def record_loaded_skill(
 def consume_loaded_skills(
     hass: HomeAssistant, conversation_id: str | None
 ) -> list[str]:
-    """Return and clear the loaded skill slugs for the given conversation."""
     bucket = _loaded_skills_bucket(hass)
     key = conversation_id or "default"
     skills = bucket.pop(key, [])

@@ -23,7 +23,6 @@ def register_delegation_system(hass: HomeAssistant) -> None:
 
 
 def _register_command(hass: HomeAssistant) -> None:
-    """Register /ooo command into the plugin command registry."""
     from ..plugins.context import _REGISTERED_COMMANDS
     from .command import handle_delegate_command
     

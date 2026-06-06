@@ -1,14 +1,3 @@
-"""Hourly cleanup of the ExecutePython tmp artefact directory.
-
-Files (or empty sub-directories) older than :data:`TMP_RETENTION_HOURS`
-inside ``<config>/.storage/claw_assistant/tmp/`` are removed. The cleanup
-runs in an executor job so file-system I/O never blocks the event loop.
-
-Lifecycle hooks:
-    * :func:`async_setup_tmp_cleanup` — register interval + run once.
-    * :func:`async_unload_tmp_cleanup` — cancel the registered listener.
-"""
-
 from __future__ import annotations
 
 import logging
@@ -28,8 +17,6 @@ _DATA_KEY = "claw_assistant_tmp_cleanup_unsub"
 
 
 def _sweep(tmp_dir: Path, retention_seconds: float) -> tuple[int, int]:
-    """Delete files older than ``retention_seconds``. Returns (files, bytes)."""
-
     if not tmp_dir.is_dir():
         return 0, 0
 
@@ -58,8 +45,6 @@ def _sweep(tmp_dir: Path, retention_seconds: float) -> tuple[int, int]:
 
 
 async def async_setup_tmp_cleanup(hass: HomeAssistant) -> None:
-    """Register the hourly sweeper and run an initial pass."""
-
     if _DATA_KEY in hass.data:
         return
 

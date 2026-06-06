@@ -288,7 +288,6 @@ _TOOL_GUIDE_SEEN: set[str] = set()
 
 
 async def async_get_tool_guide(tool_name: str, *, force: bool = False) -> str | None:
-    """Get guide content for a tool. Returns None if already seen (unless force=True)."""
     if not force and tool_name in _TOOL_GUIDE_SEEN:
         return None
     guide_file = _TOOL_GUIDE_MAP.get(tool_name)
@@ -307,7 +306,6 @@ async def async_get_tool_guide(tool_name: str, *, force: bool = False) -> str | 
 
 
 def reset_tool_guide_seen() -> None:
-    """Reset the seen set (call on new conversation)."""
     _TOOL_GUIDE_SEEN.clear()
 
 

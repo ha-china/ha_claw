@@ -1,41 +1,3 @@
-"""Anchor-based text patching engine.
-
-Pure stdlib, zero dependencies. Designed for LLM-driven surgical edits on
-arbitrary text (HTML, CSS, JS, YAML, Markdown, ...).
-
-Core principle (Linus-style): one simple primitive — match an anchor, do one
-thing to it. No diff algorithm, no fuzzy matching, no magic. If the anchor is
-ambiguous or missing, fail loudly with surrounding context so the caller can
-retry with a better anchor.
-
-Supported ops
--------------
-- ``replace``        Replace the anchor with ``new_text``.
-- ``insert_before``  Insert ``new_text`` immediately before the anchor.
-- ``insert_after``   Insert ``new_text`` immediately after the anchor.
-- ``delete``         Remove the anchor.
-- ``prepend``        Prepend ``new_text`` to the whole text (no anchor).
-- ``append``         Append ``new_text`` to the whole text (no anchor).
-- ``create``         Start from empty — set the text to ``new_text``.
-                     Allowed only when the current text is empty/blank, unless
-                     ``force=True``.
-
-Each patch may set:
-- ``anchor`` (str):   literal string, OR regex if ``regex=True``.
-- ``new_text`` (str): replacement / insertion payload.
-- ``regex`` (bool):   treat ``anchor`` as a Python regex (default False).
-- ``occurrence``:     "unique" (default, must match exactly once),
-                      "first", "last", "all", or an int index (0-based).
-- ``count`` (int):    optional guardrail — required number of matches.
-- ``force`` (bool):   allow ``create`` to overwrite non-empty text.
-
-Atomicity
----------
-``apply_patches`` runs all patches sequentially on an in-memory copy. If any
-patch fails, NO changes are returned and the error report lists which patch
-failed and why.
-"""
-
 from __future__ import annotations
 
 import difflib
@@ -58,7 +20,6 @@ _ANCHORLESS_OPS = frozenset({"prepend", "append", "create"})
 
 
 class PatchError(ValueError):
-    """Raised when a patch cannot be applied cleanly."""
 
     def __init__(self, message: str, *, index: int, patch: dict[str, Any], hint: str = ""):
         super().__init__(message)
@@ -77,8 +38,6 @@ class PatchError(ValueError):
 
 @dataclass
 class PatchReport:
-    """Summary returned by :func:`apply_patches`."""
-
     before: str
     after: str
     applied: list[dict[str, Any]] = field(default_factory=list)
@@ -103,28 +62,6 @@ def apply_patches(
     diff_context: int = 2,
     diff_limit: int = 4000,
 ) -> PatchReport:
-    """Apply a sequence of anchor patches atomically.
-
-    Parameters
-    ----------
-    text:
-        The original text. May be empty (useful for ``create``).
-    patches:
-        Ordered list of patch dicts. See module docstring.
-    label:
-        Filename-ish label used in the unified diff header.
-    diff_context / diff_limit:
-        Unified diff formatting options.
-
-    Returns
-    -------
-    :class:`PatchReport`
-
-    Raises
-    ------
-    :class:`PatchError` on any failure — caller gets nothing applied.
-    """
-
     if not isinstance(patches, list) or not patches:
         raise PatchError(
             "patches must be a non-empty list",
@@ -318,7 +255,6 @@ def _unified_diff(before: str, after: str, *, label: str, n: int, limit: int) ->
 
 
 def _suggest_near(text: str, anchor: str, *, window: int = 40) -> str:
-    """Produce a helpful hint when an anchor fails to match."""
     needle = anchor.strip().splitlines()[0][:40] if anchor else ""
     if not needle:
         return "Anchor is empty or whitespace-only."
@@ -332,7 +268,6 @@ def _suggest_near(text: str, anchor: str, *, window: int = 40) -> str:
 
 
 def _safe_patch_echo(patch: dict[str, Any]) -> dict[str, Any]:
-    """Echo the patch back, but truncate huge strings for error payloads."""
     out: dict[str, Any] = {}
     for key, value in patch.items():
         if isinstance(value, str) and len(value) > 200:

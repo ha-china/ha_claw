@@ -69,13 +69,6 @@ _MULTI_BLANK_RE = re.compile(r"\n{3,}")
 
 
 def _sanitize_skill_markdown_for_display(text: str) -> str:
-    """Strip raw HTML noise (doctype/script/style/tags) for safe editor display.
-
-    Plain Markdown is preserved. Only HTML wrapper soup produced by imported
-    web pages is removed. The cleaned string is what the editor shows and what
-    gets saved if the user submits without further edits.
-    """
-
     if not text:
         return ""
     cleaned = _HTML_COMMENT_RE.sub("", text)
@@ -467,7 +460,6 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
         )
 
     async def async_step_plugin_manager(self, user_input: dict[str, Any] | None = None) -> FlowResult:
-        """Plugin manager - list installed plugins."""
         from .runtime.storage.plugin_store import list_installed_plugins, plugins_dir
 
         if user_input is not None:
@@ -527,7 +519,6 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
         )
 
     async def async_step_plugin_detail(self, user_input: dict[str, Any] | None = None) -> FlowResult:
-        """Plugin detail - show info and actions."""
         from .runtime.storage.plugin_store import (
             get_plugin_install_guide,
             hot_load_plugin,
@@ -593,7 +584,6 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
         )
 
     async def async_step_plugin_delete_confirm(self, user_input: dict[str, Any] | None = None) -> FlowResult:
-        """Confirm plugin deletion."""
         from .runtime.storage.plugin_store import (
             hot_unload_plugin,
             plugins_dir,

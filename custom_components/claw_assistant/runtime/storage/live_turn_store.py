@@ -41,8 +41,6 @@ def _json_safe(value: Any) -> Any:
 
 
 def _backup_corrupt_store(path: Path) -> None:
-    """Move an unparseable store aside so a fresh write doesn't silently wipe
-    (potentially recoverable) data."""
     try:
         backup = path.with_name(
             f"{path.stem}.corrupt-{int(datetime.now(UTC).timestamp())}{path.suffix}"
@@ -54,12 +52,6 @@ def _backup_corrupt_store(path: Path) -> None:
 
 
 def _read_store() -> dict[str, Any]:
-    """Read the store.
-
-    Raises ``OSError`` on a read failure so write callers can abort instead of
-    clobbering a store we merely failed to read once. On JSON corruption the
-    bad file is backed up and an empty store is returned.
-    """
     path = _store_path()
     if not path.exists():
         return {"turns": {}}
@@ -74,7 +66,6 @@ def _read_store() -> dict[str, Any]:
 
 
 def _read_store_safe() -> dict[str, Any]:
-    """Tolerant read for read-only callers; never raises."""
     try:
         return _read_store()
     except OSError:
@@ -237,16 +228,6 @@ async def async_finalize_live_turn(
     conversation_id: str,
     final_text: str = "",
 ) -> None:
-    """Persist a definitive end-of-turn snapshot aligned to stored history.
-
-    Marks the turn finished (``active=False``) and pins ``text`` /
-    ``response_parts`` to the single final answer that was committed to
-    conversation history. This guarantees the recovered live-turn snapshot a
-    refresh may read matches the history re-display, instead of surfacing the
-    partial/streamed fragments that were live mid-turn. Safe for interrupted
-    turns: an empty ``final_text`` clears the live parts so the frontend falls
-    back to whatever history holds (e.g. a salvaged ``[interrupted]`` turn).
-    """
     if not conversation_id:
         return
     text = str(final_text or "").strip()

@@ -163,21 +163,6 @@ _EXISTING_HTML_MEDIA_RE = re.compile(
 def _stash_existing_html_media(
     text: str, *, prefix: str = "CLAW_HTML"
 ) -> tuple[str, list[str], str]:
-    """Hide complete ``<video>``, ``<audio>``, ``<img>``, ``<a>``, ``<source>``
-    tags from URL/path expansion.
-
-    Without this, an AI reply that already contains a ``<video src=".../local/
-    claw_assistant/foo.mp4">`` tag would have its ``src`` attribute matched by
-    the bare-path/full-URL regexes and rewritten into a *nested* ``<video>``
-    block — producing the broken
-    ``<video src="<video src='...'></video>">`` output observed in the wild.
-
-    ``prefix`` lets callers stash twice in the same pipeline without colliding
-    on ``__CLAW_HTML_0__`` placeholders (the second pass would otherwise have
-    its ``__CLAW_HTML_0__`` token collide with the first pass's, and
-    ``str.replace`` during restore would overwrite both).
-    """
-
     tokens: list[str] = []
 
     if len(text) > _LARGE_TEXT_THRESHOLD:
@@ -219,14 +204,6 @@ def _expand_ha_frontend_local_paths(text: str) -> str:
 
 
 def _expand_ha_frontend_full_urls(text: str) -> str:
-    """Render claw_assistant media referenced by full http(s) URL.
-
-    Handles strings produced by ``absolute_output_url`` such as
-    ``http://192.168.x.x:8123/local/claw_assistant/foo.mp4``. The full URL is
-    truncated to its frontend path (``/local/claw_assistant/...``) so the
-    resulting ``<video>`` / ``![img]`` tag uses a same-origin reference.
-    """
-
     def _replace(match: "re.Match[str]") -> str:
         full_url = match.group(0)
         path_match = re.search(
@@ -249,16 +226,6 @@ def _expand_ha_frontend_full_urls(text: str) -> str:
 
 
 def _route_claw_text_url(url: str) -> str:
-    """Rewrite a ``/local/claw_assistant/<name>`` path to ``/claw_file/<name>``
-    so the file is served by ``ClawFileView`` with an explicit
-    ``charset=utf-8`` header. Without this rewrite, browsers running in a
-    Chinese locale render text files (.md/.txt/.json/...) as GBK and produce
-    mojibake.
-
-    Non-claw_assistant URLs are returned unchanged so external links continue
-    to function. Media files (images/videos) keep using ``/local/...`` because
-    binary content-types are unaffected by charset.
-    """
     if not url:
         return url
     prefix = "/local/claw_assistant/"
@@ -270,13 +237,6 @@ def _route_claw_text_url(url: str) -> str:
 
 
 def _render_ha_frontend_blank_link(url: str, label: str) -> str:
-    """Render a claw_assistant file link that opens in a new browser tab.
-
-    The HA frontend chat card renders raw HTML, so emitting a fully formed
-    ``<a target="_blank">`` tag (rather than a ``[label](url)`` markdown link)
-    is the only reliable way to force a new-window open without intercepting
-    the user's chat navigation.
-    """
     routed = _route_claw_text_url(url)
     safe_label = label.replace('"', '&quot;')
     safe_url = routed.replace('"', '&quot;')
@@ -1092,21 +1052,6 @@ def apply_system_reply_format(
     *,
     agent_name: str = "Claw Assistant",
 ) -> Any:
-    """Stamp the configured reply prefix onto a system-generated result.
-
-    Both the ``/stop`` (and other) command replies and the agent-chain stop
-    response are produced outside the normal LLM formatting path *and* outside
-    the global ``_maybe_apply_global_response_format`` hook (the background
-    goal-continuation loop calls the unpatched ``original_converse``). Without a
-    single shared stamp, ``/stop`` first renders with the prefix from the
-    command reply and is then overwritten by the prefix-less agent-chain stop
-    text — exactly the "prefix flashes in then disappears" symptom.
-
-    Routing every system reply through this one helper (same ``agent_name`` and
-    same config-derived ``conversation_mode``) makes both outputs byte-identical
-    and consistent with model replies. ``no_name`` mode still yields no prefix
-    for system replies too, keeping the behavior uniform.
-    """
     if (
         result is None
         or getattr(result, "response", None) is None

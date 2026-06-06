@@ -214,16 +214,6 @@ def apply_staged_operation_sync(
     user_consent: bool = False,
     consent_quote: str = "",
 ) -> dict[str, Any]:
-    """Apply a staged operation.
-
-    Consent model (no token dictionaries, no history scanning):
-      * write / append / mkdir are reversible and apply unconditionally.
-      * delete requires ``user_consent=True``. The AI is responsible for
-        having actually asked the user in chat and judging the reply.
-        ``consent_quote`` is optional audit metadata (the user's own
-        words); it is only stored, never matched against a dictionary.
-    """
-
     state = get_config_approval_state(hass)
     operation = state.get("pending", {}).get(approval_id)
     if not operation:
