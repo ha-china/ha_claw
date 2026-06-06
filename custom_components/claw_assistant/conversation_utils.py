@@ -71,14 +71,7 @@ def detect_user_ending_intent(text: str, end_words: List[str] = None, agent_name
     return len(non_stop_words) <= 1
 
 
-_IM_PREFIXES = {
-    "wechat:": "WeChat",
-    "feishu:": "Feishu",
-    "dingtalk:": "DingTalk",
-    "qq:": "QQ",
-    "wecom:": "WeCom",
-    "xiaoyi:": "XiaoYi",
-}
+from .const import IM_CHANNEL_NAMES as _IM_PREFIXES
 
 
 def _tag_im_user_message(conversation_id: str, user_message: str) -> str:
@@ -325,7 +318,7 @@ class ConversationHistory:
 
     def consolidate_duplicates(self) -> int:
 
-        from .runtime.core.state import is_im_channel
+        im_prefixes = tuple(_IM_PREFIXES)
 
         seen: Dict[str, str] = {}
         donors: List[str] = []
@@ -337,7 +330,7 @@ class ConversationHistory:
             if not first_msg:
                 continue
 
-            scope = conv_id if is_im_channel(conv_id) else "ha"
+            scope = conv_id if conv_id.startswith(im_prefixes) else "ha"
             fingerprint = f"{scope}:{int(turns[0].timestamp // 20)}:{first_msg}"
 
             primary_id = seen.get(fingerprint)

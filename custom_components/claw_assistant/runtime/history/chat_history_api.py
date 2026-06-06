@@ -3,7 +3,6 @@ from __future__ import annotations
 import logging
 import re
 import time
-from typing import Any
 
 import voluptuous as vol
 
@@ -48,14 +47,8 @@ def _strip_internal_tags(text: str) -> str:
     return text.strip()
 
 
-_CHANNEL_PREFIXES = {
-    "wechat:": "WeChat",
-    "feishu:": "Feishu",
-    "dingtalk:": "DingTalk",
-    "qq:": "QQ",
-    "wecom:": "WeCom",
-    "xiaoyi:": "XiaoYi",
-}
+
+from ..core.state import IM_CHANNEL_NAMES as _CHANNEL_PREFIXES
 
 
 def _extract_channel_from_conversation_id(conv_id: str) -> str:

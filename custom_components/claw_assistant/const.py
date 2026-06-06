@@ -1,5 +1,14 @@
 DOMAIN = "claw_assistant"
-VERSION = "9.0.0"
+VERSION = "9.1.0"
+
+IM_CHANNEL_NAMES: dict[str, str] = {
+    "wechat:": "WeChat",
+    "feishu:": "Feishu",
+    "dingtalk:": "DingTalk",
+    "qq:": "QQ",
+    "wecom:": "WeCom",
+    "xiaoyi:": "XiaoYi",
+}
 
 CONF_PRIMARY_AGENT = "primary_agent"
 CONF_FALLBACK_AGENT = "fallback_agent"

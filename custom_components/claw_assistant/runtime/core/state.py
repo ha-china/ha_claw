@@ -7,7 +7,7 @@ from typing import Any, Callable
 
 from homeassistant.core import HomeAssistant
 
-from ...const import DOMAIN
+from ...const import DOMAIN, IM_CHANNEL_NAMES
 
 _active_conversation_id: ContextVar[str] = ContextVar(
     "claw_assistant_active_conversation_id", default="default"
@@ -23,7 +23,7 @@ def reset_active_conversation(token: Token[str]) -> None:
 
     _active_conversation_id.reset(token)
 
-_IM_PREFIXES = ("wechat:", "feishu:", "dingtalk:", "qq:")
+_IM_PREFIXES = tuple(IM_CHANNEL_NAMES)
 
 PLATFORM_ANDROID_APP_V2 = "android_app_v2"
 PLATFORM_ANDROID_APP = "android_app"
@@ -53,6 +53,16 @@ def get_channel_type(conversation_id: str | None) -> str:
         if conversation_id.startswith(prefix):
             return prefix.rstrip(":")
     return "ha"
+
+
+def get_channel_display_name(conversation_id: str | None) -> str:
+
+    if not conversation_id:
+        return ""
+    for prefix, name in IM_CHANNEL_NAMES.items():
+        if conversation_id.startswith(prefix):
+            return name
+    return ""
 
 
 def is_companion_app(platform: str | None) -> bool:
