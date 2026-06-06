@@ -67,6 +67,7 @@ _RESERVED_COMMANDS = reserved_command_names()
 _WRAPPER_PREFIX_RE = re.compile(r"^\s*[\[\<【][^\]\>】]*[\]\>】]\s*")
 _HAS_IM_TAG_RE = re.compile(r"\[IM:[^\]]*\]")
 _COMMAND_TOKEN_RE = re.compile(r"(?<![\w/])/([a-zA-Z][\w\-]*)(?:\s+(.*))?$", re.DOTALL)
+_CURRENT_REQUEST_MARKER = "[Current request]"
 
 
 def _strip_wrapper_prefix(text: str) -> str:
@@ -99,6 +100,9 @@ def _resolve_command_name(name: str) -> tuple[str, str] | None:
 def parse_chat_command(text: str) -> ChatCommand | None:
     if not text:
         return None
+    if _CURRENT_REQUEST_MARKER in text:
+        text = text.rsplit(_CURRENT_REQUEST_MARKER, 1)[-1].strip()
+
     candidates: list[str] = []
     stripped = _strip_wrapper_prefix(text).strip()
     if stripped:
@@ -107,24 +111,23 @@ def parse_chat_command(text: str) -> ChatCommand | None:
         candidates.append(text)
 
     for candidate in candidates:
-        if candidate.startswith("/"):
-            body = candidate[1:].strip()
-            if not body:
-                continue
-            parts = body.split(None, 1)
-            resolved = _resolve_command_name(parts[0])
-            if resolved is None:
-                continue
-            args = parts[1].strip() if len(parts) > 1 else ""
-            return ChatCommand(name=resolved[0], args=args, raw_name=resolved[1])
-
-        match = _COMMAND_TOKEN_RE.search(candidate)
-        if not match:
+        first_line = ""
+        for line in candidate.splitlines():
+            line = line.strip()
+            if line:
+                first_line = line
+                break
+        if not first_line.startswith("/"):
             continue
-        resolved = _resolve_command_name(match.group(1))
+
+        body = first_line[1:].strip()
+        if not body:
+            continue
+        parts = body.split(None, 1)
+        resolved = _resolve_command_name(parts[0])
         if resolved is None:
             continue
-        args = (match.group(2) or "").strip()
+        args = parts[1].strip() if len(parts) > 1 else ""
         return ChatCommand(name=resolved[0], args=args, raw_name=resolved[1])
 
     return None
