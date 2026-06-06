@@ -293,6 +293,68 @@ def _extract_discovered_entity_id(results: list[object]) -> str | None:
     return None
 
 
+async def _resolve_entity_for_query(
+    hass: HomeAssistant,
+    llm_context: llm.LLMContext | None,
+    entity_hint: str,
+    *,
+    limit: int = 5,
+) -> tuple[str | None, str | None, JsonObjectType | None]:
+    """Resolve a query target entity with privacy-safe fuzzy fallback.
+
+    Returns ``(resolved_entity_id, matched_from, error_response)``:
+    - resolved_entity_id: concrete entity_id to use (exact or discovered)
+    - matched_from: original hint when fuzzy-matched, else None
+    - error_response: pre-built tool error (privacy/not found), else None
+    """
+    hint = str(entity_hint or "").strip()
+    if not hint:
+        return None, None, {"success": False, "error": "entity_id is required"}
+
+    exact_state = hass.states.get(hint)
+    if exact_state:
+        if not entity_is_exposed(hass, hint, llm_context):
+            return None, None, privacy_blocked_response(hint)
+        return hint, None, None
+
+    from ..smart_discovery import get_smart_discovery
+
+    discovery = get_smart_discovery(hass)
+    results = await discovery.discover_entities(
+        name_contains=hint,
+        limit=max(1, min(limit, 10)),
+        assistant=llm_context.assistant if llm_context else None,
+    )
+    if results:
+        matched_entity_id = _extract_discovered_entity_id(results)
+        state = hass.states.get(matched_entity_id) if matched_entity_id else None
+        if state and entity_is_exposed(hass, matched_entity_id, llm_context):
+            return matched_entity_id, hint, None
+
+    private_results = await discovery.discover_entities(
+        name_contains=hint,
+        limit=1,
+        skip_expose_check=True,
+    )
+    if private_results:
+        return None, None, privacy_blocked_response(hint)
+
+    domain = hint.split(".", 1)[0] if "." in hint else ""
+    if domain:
+        domain_resp = domain_unexposed_response(hass, hint, domain, llm_context)
+        if domain_resp:
+            return None, None, domain_resp
+
+    return None, None, {
+        "success": False,
+        "error": f"Entity {hint} not found",
+        "hint": (
+            "Use SmartDiscovery first to find an exact exposed entity_id, then call "
+            "EntityQuery/HistoryQuery with that concrete id."
+        ),
+    }
+
+
 def _extract_service_target(data: dict) -> tuple[dict, dict]:
 
     if not isinstance(data, dict):
@@ -1200,48 +1262,43 @@ Available inferred types: person_detection, motion_detection, door_window, tempe
 
 class EntityQueryTool(llm.Tool):
     name = "EntityQuery"
-    description = "Query a Home Assistant entity state. Use this to get current device state, sensor values, and similar information. Supports entity IDs and fuzzy name matching."
+    description = (
+        "Query a Home Assistant entity state. Best practice: discover first, query second. "
+        "Use SmartDiscovery to locate the exact exposed entity_id, then call EntityQuery. "
+        "A privacy-safe fuzzy fallback is kept for compatibility when only a rough name is "
+        "provided, but do not rely on it as the primary workflow."
+    )
     parameters = vol.Schema({vol.Required("entity_id"): str})
 
     async def async_call(
         self, hass: HomeAssistant, tool_input: llm.ToolInput, llm_context: llm.LLMContext
     ) -> JsonObjectType:
-        entity_id = tool_input.tool_args.get("entity_id", "")
-        state = hass.states.get(entity_id)
-        if state:
-            if not entity_is_exposed(hass, entity_id, llm_context):
-                return {"success": False, "error": f"Entity {entity_id} not found"}
-            return {
-                "success": True,
-                "entity_id": entity_id,
-                "state": state.state,
-                "attributes": dict(state.attributes),
-                "name": state.name,
-            }
-
-        from ..smart_discovery import get_smart_discovery
-
-        discovery = get_smart_discovery(hass)
-        results = await discovery.discover_entities(
-            name_contains=entity_id,
-            limit=5,
-            assistant=llm_context.assistant if llm_context else None,
+        entity_hint = tool_input.tool_args.get("entity_id", "")
+        resolved_entity_id, matched_from, error = await _resolve_entity_for_query(
+            hass, llm_context, entity_hint, limit=5
         )
+        if error:
+            return error
 
-        if results:
-            matched_entity_id = _extract_discovered_entity_id(results)
-            state = hass.states.get(matched_entity_id) if matched_entity_id else None
-            if state and entity_is_exposed(hass, matched_entity_id, llm_context):
-                return {
-                    "success": True,
-                    "entity_id": matched_entity_id,
-                    "state": state.state,
-                    "attributes": dict(state.attributes),
-                    "name": state.name,
-                    "matched_from": entity_id,
-                }
+        state = hass.states.get(resolved_entity_id) if resolved_entity_id else None
+        if not state:
+            return {"success": False, "error": f"Entity {entity_hint} not found"}
 
-        return {"success": False, "error": f"Entity {entity_id} not found"}
+        payload: dict[str, object] = {
+            "success": True,
+            "entity_id": resolved_entity_id,
+            "state": state.state,
+            "attributes": dict(state.attributes),
+            "name": state.name,
+            "resolution_method": "exact" if not matched_from else "smart_discovery_fallback",
+        }
+        if matched_from:
+            payload["matched_from"] = matched_from
+            payload["hint"] = (
+                "Matched via SmartDiscovery fallback. Prefer passing exact entity_id "
+                "directly on future calls."
+            )
+        return payload
 
 
 class ServiceCallTool(llm.Tool):
@@ -2311,7 +2368,11 @@ class ScriptExecuteTool(llm.Tool):
 
 class HistoryQueryTool(llm.Tool):
     name = "HistoryQuery"
-    description = "Query entity history."
+    description = (
+        "Query entity history. Prefer exact entity_id discovered via SmartDiscovery. "
+        "If no exact history is found, a privacy-safe SmartDiscovery fallback is used "
+        "for compatibility."
+    )
     parameters = vol.Schema(
         {
             vol.Required("entity_id"): str,
@@ -2324,11 +2385,14 @@ class HistoryQueryTool(llm.Tool):
     ) -> JsonObjectType:
         from datetime import datetime, timedelta
 
-        entity_id = tool_input.tool_args.get("entity_id", "")
-        if hass.states.get(entity_id) and not entity_is_exposed(hass, entity_id, llm_context):
-            return {"success": False, "error": f"Entity {entity_id} not found"}
+        entity_hint = str(tool_input.tool_args.get("entity_id", "") or "").strip()
         hours = tool_input.tool_args.get("hours", 24)
-        try:
+
+        async def _query_one(target_entity_id: str) -> JsonObjectType:
+            if hass.states.get(target_entity_id) and not entity_is_exposed(
+                hass, target_entity_id, llm_context
+            ):
+                return privacy_blocked_response(target_entity_id)
             from homeassistant.components.recorder import get_instance
             from homeassistant.components.recorder.history import (
                 state_changes_during_period,
@@ -2336,15 +2400,47 @@ class HistoryQueryTool(llm.Tool):
 
             start = datetime.now() - timedelta(hours=hours)
             history = await get_instance(hass).async_add_executor_job(
-                state_changes_during_period, hass, start, None, entity_id
+                state_changes_during_period, hass, start, None, target_entity_id
             )
-            if entity_id in history:
+            if target_entity_id in history:
                 states = [
                     {"state": state.state, "time": state.last_changed.isoformat()}
-                    for state in history[entity_id][-20:]
+                    for state in history[target_entity_id][-20:]
                 ]
-                return {"success": True, "entity_id": entity_id, "history": states}
+                return {
+                    "success": True,
+                    "entity_id": target_entity_id,
+                    "history": states,
+                }
             return {"success": False, "error": "No history found"}
+
+        try:
+            direct = await _query_one(entity_hint)
+            if direct.get("success"):
+                direct["resolution_method"] = "exact"
+                return direct
+
+            resolved_entity_id, matched_from, error = await _resolve_entity_for_query(
+                hass, llm_context, entity_hint, limit=5
+            )
+            if error:
+                # Keep original "No history found" semantics when entity exists but has no records.
+                # Use resolver errors only when direct query was impossible (bad id/privacy).
+                if str(direct.get("error", "")).lower().startswith("no history"):
+                    return error
+                return error
+            if not resolved_entity_id or resolved_entity_id == entity_hint:
+                return direct
+
+            fallback = await _query_one(resolved_entity_id)
+            if fallback.get("success"):
+                fallback["matched_from"] = entity_hint
+                fallback["resolution_method"] = "smart_discovery_fallback"
+                fallback["hint"] = (
+                    "Matched via SmartDiscovery fallback. Prefer exact entity_id in "
+                    "future HistoryQuery calls."
+                )
+            return fallback
         except Exception as err:
             return {"success": False, "error": str(err)}
 
