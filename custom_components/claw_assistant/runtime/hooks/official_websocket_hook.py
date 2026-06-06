@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import base64
 import logging
+import re
 import subprocess
 from time import monotonic
 import uuid
@@ -38,6 +39,7 @@ _LOGGER = logging.getLogger(__name__)
 _UPLOAD_MAX_BYTES = 50 * 1024 * 1024
 _VIDEO_TRIM_SECONDS = 30
 _VIDEO_EXTENSIONS = frozenset({".mp4", ".mov", ".avi", ".mkv", ".webm", ".flv", ".m4v", ".ts", ".3gp"})
+_COMMAND_LINE_RE = re.compile(r"(^|\n)\s*/[a-zA-Z][\w\-]*\b", re.MULTILINE)
 
 
 def _get_duration(file_path: str) -> float:
@@ -303,13 +305,47 @@ async def streaming_websocket_process(
 
     captured_context = connection.context(msg)
     text = str(msg.get("text") or "").strip()
+    is_command_like = False
+    if text:
+        try:
+            from ...chat_commands import parse_chat_command
+
+            is_command_like = parse_chat_command(text) is not None
+        except Exception:
+            # Fallback heuristic if command parser is temporarily unavailable.
+            is_command_like = bool(re.search(r"(?<![\\w/])/[a-zA-Z][\\w\\-]*", text))
     recent_map = hass.data.setdefault("_claw_cn_recent_messages", {})
     if text in ("/new", "/reset"):
         recent_map.pop(conversation_id, None)
         _clear_live_event_buffer(hass, conversation_id)
-    elif text:
+    elif text and is_command_like:
+        # Command turns must not pollute stitched "recent user messages".
+        recent_map.pop(conversation_id, None)
+    elif text and not is_command_like:
         recent = recent_map.setdefault(conversation_id, [])
         recent.append(text)
+        # Never let slash-commands participate in "recent user message" context
+        # stitching. Otherwise an old command (e.g. "/model 12") can be replayed
+        # by later plain-text turns when the combined text is parsed.
+        filtered_recent: list[str] = []
+        for item in recent:
+            item_text = str(item or "").strip()
+            if not item_text:
+                continue
+            try:
+                from ...chat_commands import parse_chat_command
+
+                if parse_chat_command(item_text) is not None:
+                    continue
+            except Exception:
+                if re.search(r"(?<![\\w/])/[a-zA-Z][\\w\\-]*", item_text):
+                    continue
+            # Extra hard filter: drop any message that contains a slash-command
+            # line even if parser heuristics miss it.
+            if _COMMAND_LINE_RE.search(item_text):
+                continue
+            filtered_recent.append(item_text)
+        recent[:] = filtered_recent
         del recent[:-3]
         if len(recent) > 1:
             combined = "\n".join(

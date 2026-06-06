@@ -31,6 +31,7 @@ _CN_COMMAND_PATCH_KEY = "_claw_cn_command_original"
 _CN_WECHAT_DETACH_PATCH_KEY = "_claw_cn_wechat_detach_original"
 _CN_WECHAT_TASKS_KEY = "_claw_cn_wechat_message_tasks"
 _CN_RECENT_KEY = "_claw_cn_recent_messages"
+_CN_COMMAND_LINE_RE = re.compile(r"(^|\n)\s*/[a-zA-Z][\w\-]*\b", re.MULTILINE)
 
 
 def patch_cn_im_hub_interrupt_context(hass: HomeAssistant) -> None:
@@ -61,12 +62,42 @@ def patch_cn_im_hub_interrupt_context(hass: HomeAssistant) -> None:
                         user_id=user_id,
                     )
                 text = str(getattr(command, "target", "") or "").strip()
+                is_command_like = False
+                if text:
+                    try:
+                        from ...chat_commands import parse_chat_command as _parse_chat_command
+
+                        is_command_like = _parse_chat_command(text) is not None
+                    except Exception:
+                        is_command_like = bool(re.search(r"(?<![\\w/])/[a-zA-Z][\\w\\-]*", text))
                 recent_map = cmd_hass.data.setdefault(_CN_RECENT_KEY, {})
                 if text == "/new":
                     recent_map.pop(conversation_id, None)
-                elif text:
+                elif text and is_command_like:
+                    # Command turns must not pollute stitched "recent" context.
+                    recent_map.pop(conversation_id, None)
+                elif text and not is_command_like:
                     recent = recent_map.setdefault(conversation_id, [])
                     recent.append(text)
+                    # Keep command messages out of stitched "recent" context to
+                    # prevent stale slash commands from being replayed later.
+                    filtered_recent: list[str] = []
+                    for item in recent:
+                        item_text = str(item or "").strip()
+                        if not item_text:
+                            continue
+                        try:
+                            from ...chat_commands import parse_chat_command as _parse_chat_command
+
+                            if _parse_chat_command(item_text) is not None:
+                                continue
+                        except Exception:
+                            if re.search(r"(?<![\\w/])/[a-zA-Z][\\w\\-]*", item_text):
+                                continue
+                        if _CN_COMMAND_LINE_RE.search(item_text):
+                            continue
+                        filtered_recent.append(item_text)
+                    recent[:] = filtered_recent
                     del recent[:-3]
                     if len(recent) > 1:
                         combined = "\n".join(
@@ -1278,18 +1309,26 @@ async def _maybe_intercept_chat_command(
     satellite_id,
     extra_system_prompt,
 ):
-    if not text or "/" not in text:
+    if not text:
+        return None
+
+    command_text = str(text)
+    marker = "[Current request]"
+    if marker in command_text:
+        command_text = command_text.rsplit(marker, 1)[-1].strip()
+
+    if "/" not in command_text:
         return None
     try:
         from homeassistant.components import conversation as conversation_module
         from ...chat_commands import async_handle_chat_command, parse_chat_command
     except Exception:
         return None
-    if parse_chat_command(text) is None:
+    if parse_chat_command(command_text) is None:
         return None
     try:
         user_input = conversation_module.ConversationInput(
-            text=text,
+            text=command_text,
             context=context,
             conversation_id=conversation_id,
             device_id=device_id,
@@ -1301,7 +1340,7 @@ async def _maybe_intercept_chat_command(
     except TypeError:
         try:
             user_input = conversation_module.ConversationInput(
-                text=text,
+                text=command_text,
                 context=context,
                 conversation_id=conversation_id,
                 device_id=device_id,
