@@ -279,8 +279,11 @@ class ProposeSelfEditTool(llm.Tool):
         return {
             "success": True,
             "message": (
-                f"Proposal staged for {target_type}/{target_id} ({action}). "
-                f"Awaiting human approval via ApplyProposal."
+                f"Proposal staged for {target_type}/{target_id} ({action}), "
+                f"slug={proposal.get('slug')}. Present it to the user THIS turn "
+                f"and ask them to approve or discard — do not leave proposals "
+                f"pending silently. On approval call ApplyProposal(slug); if "
+                f"declined call DiscardProposal(slug)."
             ),
             **proposal,
         }
@@ -356,7 +359,10 @@ class ProposeSelfEditTool(llm.Tool):
             "success": True,
             "message": (
                 f"Patch proposal staged for {target_type}/{target_id} "
-                f"({len(report.applied)} ops). Awaiting human approval via ApplyProposal."
+                f"({len(report.applied)} ops), slug={proposal.get('slug')}. "
+                f"Present it to the user THIS turn and ask them to approve or "
+                f"discard — do not leave proposals pending silently. On approval "
+                f"call ApplyProposal(slug); if declined call DiscardProposal(slug)."
             ),
             "report": report.to_dict(),
             **proposal,

@@ -10,6 +10,7 @@ from ...conversation_utils import get_conversation_history
 from ..storage.config_file_store import build_config_approval_prompt_block
 from ..storage.ha_guide_store import build_homeassistant_topic_hint
 from ..utils.im_approval_bridge import build_im_approval_prompt_block
+from ..utils.self_edit import build_self_edit_proposal_prompt_block
 from .internal_llm import (
     _MAX_SYSTEM_PROMPT_CHARS,
     _PROMPT_SECTION_SEPARATOR,
@@ -383,6 +384,10 @@ def build_turn_context_prompt(
     im_approval_prompt = build_im_approval_prompt_block(hass)
     if im_approval_prompt:
         sections.append(im_approval_prompt)
+
+    self_edit_prompt = build_self_edit_proposal_prompt_block()
+    if self_edit_prompt:
+        sections.append(self_edit_prompt)
 
     return _fit_sections_to_budget_preserving_suffix(
         sections,

@@ -332,6 +332,63 @@ async def async_list_proposals(hass: HomeAssistant) -> list[dict[str, Any]]:
     return await hass.async_add_executor_job(_list_proposals_sync)
 
 
+_MAX_SURFACED_PROPOSALS = 6
+
+
+def build_self_edit_proposal_prompt_block() -> str:
+    """Surface staged self-edit proposals into the live turn context.
+
+    Proposals are written to ``pending/`` and otherwise never re-enter the
+    conversation, so they silently pile up (memory cleanups, skill/guide edits)
+    until something happens to call ApplyProposal/DiscardProposal. This block
+    pulls them back into the user-facing message flow so the assistant raises
+    them with the user and resolves them promptly instead of hoarding them.
+
+    Reads disk synchronously; callers must run it off the event loop (it is
+    invoked from ``build_turn_context_prompt`` inside an executor job).
+    """
+    proposals = _list_proposals_sync()
+    if not proposals:
+        return ""
+
+    from collections import Counter
+
+    total = len(proposals)
+    breakdown = Counter(
+        f"{p.get('target_type') or '?'}/{p.get('action') or '?'}" for p in proposals
+    )
+    summary = ", ".join(f"{kind}×{count}" for kind, count in breakdown.most_common())
+
+    lines = [
+        f"## Pending Self-Edit Proposals ({total})",
+        (
+            "You have self-edit proposals staged earlier and still awaiting the "
+            "user's decision. Raise them with the user NOW, briefly, and resolve "
+            "them this turn — do not let them keep accumulating. After the user "
+            "agrees, apply with ApplyProposal(slug); if they decline or the "
+            "proposal is stale/no longer relevant, clear it with "
+            "DiscardProposal(slug). Use GetProposal(slug) to show details."
+        ),
+        f"Breakdown: {summary}",
+    ]
+    for item in proposals[:_MAX_SURFACED_PROPOSALS]:
+        reason = (item.get("reason") or "").strip().replace("\n", " ")
+        if len(reason) > 90:
+            reason = reason[:90] + "…"
+        lines.append(
+            f"- slug={item.get('slug')} "
+            f"{item.get('target_type') or '?'}/{item.get('action') or '?'} "
+            f"target={item.get('target_id') or '?'}"
+            + (f" — {reason}" if reason else "")
+        )
+    if total > _MAX_SURFACED_PROPOSALS:
+        lines.append(
+            f"- …and {total - _MAX_SURFACED_PROPOSALS} more "
+            "(call ListProposals to see them all)."
+        )
+    return "\n".join(lines)
+
+
 def _read_proposal_sync(slug: str) -> dict[str, Any]:
     path = _proposal_path(slug)
     if not path.exists():
