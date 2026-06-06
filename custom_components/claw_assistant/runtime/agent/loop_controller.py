@@ -316,6 +316,15 @@ IDENTICAL_CALL_STOP_PROMPT = (
     "Do NOT call any more tools. Just reply to the user politely."
 )
 
+PARALLEL_REPEAT_STOP_PROMPT = (
+    "[PARALLEL TOOL LIMIT REACHED — STOP TOOLING]\n"
+    "ParallelToolCall has already been invoked {count} times (limit: {limit}).\n"
+    "Do NOT bypass this by splitting into one-by-one sequential tool calls.\n"
+    "At this point, stop tool execution and respond with kind=final: explain "
+    "what was attempted, why it still cannot be completed automatically, and "
+    "what the user can do next."
+)
+
 
 def _args_signature(tool_args: dict | None) -> str:
     """Create a hashable signature from tool args."""
@@ -408,6 +417,11 @@ def check_tool_repeat(
 
     if identical_count >= identical_warn:
         return IDENTICAL_CALL_WARN_PROMPT.format(tool_name=tool_name, count=identical_count), False
+
+    if tool_name == "ParallelToolCall" and same_name_count >= max_repeat:
+        return PARALLEL_REPEAT_STOP_PROMPT.format(
+            count=same_name_count, limit=max_repeat
+        ), True
 
     if same_name_count >= max_repeat:
         return TOOL_REPEAT_BAIL_PROMPT.format(

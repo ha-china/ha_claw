@@ -29,7 +29,13 @@ from ..runtime.storage.heartbeat_store import (
     async_record_heartbeat_result,
     async_upsert_heartbeat_task,
 )
-from ..runtime.agent.loop_controller import get_loop_status, record_thought
+from ..runtime.agent.loop_controller import (
+    check_tool_repeat,
+    get_execution_control_limits,
+    get_loop_status,
+    record_thought,
+    record_tool_usage,
+)
 from ..runtime.storage.memory_store import (
     _transient_reason,
     async_clear_memory_entries,
@@ -252,6 +258,35 @@ async def _execute_tool_spec(
             "error": "ParallelToolCall does not support recursive execution",
         }
 
+    limits = get_execution_control_limits(hass)
+    repeat_prompt, should_stop = check_tool_repeat(
+        hass,
+        tool_name=tool_name,
+        tool_args=tool_args if isinstance(tool_args, dict) else {},
+        max_repeat=limits["max_tool_repeat"],
+        identical_warn=limits["identical_call_warn"],
+        identical_stop=limits["identical_call_stop"],
+    )
+    should_block_tool = should_stop or (
+        bool(repeat_prompt) and repeat_prompt.startswith("[MANDATORY")
+    )
+    if should_block_tool:
+        record_tool_usage(
+            hass,
+            tool_name=tool_name,
+            tool_args=tool_args if isinstance(tool_args, dict) else {},
+            success=False,
+            blocked=True,
+            error=repeat_prompt,
+        )
+        return {
+            "tool": tool_name,
+            "args": tool_args,
+            "success": False,
+            "error": "tool_repeat_limit",
+            "message": repeat_prompt or "",
+        }
+
     tool_cls = build_tool_map().get(tool_name)
     if tool_cls is None:
         return {
@@ -269,6 +304,14 @@ async def _execute_tool_spec(
             llm_context,
         )
     except Exception as err:
+        record_tool_usage(
+            hass,
+            tool_name=tool_name,
+            tool_args=tool_args if isinstance(tool_args, dict) else {},
+            success=False,
+            blocked=False,
+            error=str(err),
+        )
         return {
             "tool": tool_name,
             "args": tool_args,
@@ -276,11 +319,23 @@ async def _execute_tool_spec(
             "error": str(err),
         }
 
+    if repeat_prompt and isinstance(result, dict):
+        result["TOOL_REPEAT_WARNING"] = repeat_prompt
+    success = _tool_call_success(result)
+    error = _tool_call_error(result)
+    record_tool_usage(
+        hass,
+        tool_name=tool_name,
+        tool_args=tool_args if isinstance(tool_args, dict) else {},
+        success=success,
+        blocked=False,
+        error=error if not success else None,
+    )
     return {
         "tool": tool_name,
         "args": tool_args,
-        "success": _tool_call_success(result),
-        "error": _tool_call_error(result),
+        "success": success,
+        "error": error,
         "result": _ensure_json_serializable(result),
     }
 
