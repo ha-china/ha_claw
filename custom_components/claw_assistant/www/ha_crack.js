@@ -2064,10 +2064,11 @@
                     } else {
                         mixed.appendChild(existingTail);
                     }
+                    let missingCards = false;
                     activities.forEach(act => {
                         const taId = act.id || (_normalizeToolName(act.tool_name) + '_' + (act.tool_call_id || ''));
                         const card = mixed.querySelector('.claw-ta-card[data-ta-id="' + taId + '"]');
-                        if (!card) return;
+                        if (!card) { missingCards = true; return; }
                         if (act._thinkText && act.tool_name === '_thinking') {
                             const summary = card.querySelector('.claw-ta-summary');
                             const body = card.querySelector('.claw-ta-args');
@@ -2080,7 +2081,7 @@
                         if ((act.result !== undefined || act.error) && !card.dataset.hasResult) _updateExistingCard(card, act);
                     });
                     el.__clawMixedSig = sig;
-                    return;
+                    if (!missingCards) return;
                 }
                 if (el.__clawMixedSig !== sig) {
                     el.__clawMixedSig = sig;
@@ -2565,6 +2566,11 @@
             if (!rawContent.includes('CLAW_TOOL') && rawContent.length < 60 && !rawContent.includes('\n') && !rawContent.includes('|') && !/[#*`|~\[\]>-]{2}/.test(rawContent)) return;
             const sig = rawContent.length + '_' + rawContent.slice(0, 120);
             if (el.__clawMdSig === sig) return;
+            const hasMixed = el.querySelector('.claw-md-mixed');
+            if (hasMixed && (window.__clawToolActivities?.length || _mdStreamActive)) {
+                el.__clawMdSig = sig;
+                return;
+            }
             el.__clawMdSig = sig;
             _injectMdStyles(msr);
             try {
