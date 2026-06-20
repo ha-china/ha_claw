@@ -28,6 +28,7 @@ _IM_PREFIXES = tuple(IM_CHANNEL_NAMES)
 PLATFORM_ANDROID_APP_V2 = "android_app_v2"
 PLATFORM_ANDROID_APP = "android_app"
 PLATFORM_IOS_APP = "ios_app"
+PLATFORM_AVA_SATELLITE = "ava_satellite"
 PLATFORM_IOS_WEB = "ios_web"
 PLATFORM_ANDROID_WEB = "android_web"
 PLATFORM_MACOS_WEB = "macos_web"
@@ -78,6 +79,7 @@ def get_platform_display_name(platform: str | None) -> str:
         PLATFORM_ANDROID_APP_V2: "Android Companion App",
         PLATFORM_ANDROID_APP: "Android Companion App",
         PLATFORM_IOS_APP: "iOS Companion App",
+        PLATFORM_AVA_SATELLITE: "Ava Voice Satellite",
         PLATFORM_IOS_WEB: "iOS Safari",
         PLATFORM_ANDROID_WEB: "Android Browser",
         PLATFORM_MACOS_WEB: "macOS Browser",

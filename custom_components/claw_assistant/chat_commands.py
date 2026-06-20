@@ -68,6 +68,7 @@ _WRAPPER_PREFIX_RE = re.compile(r"^\s*[\[\<【][^\]\>】]*[\]\>】]\s*")
 _HAS_IM_TAG_RE = re.compile(r"\[IM:[^\]]*\]")
 _COMMAND_TOKEN_RE = re.compile(r"(?<![\w/])/([a-zA-Z][\w\-]*)(?:\s+(.*))?$", re.DOTALL)
 _CURRENT_REQUEST_MARKER = "[Current request]"
+_CURRENT_REQUEST_MARKER = "[Current request]"
 
 
 def _strip_wrapper_prefix(text: str) -> str:

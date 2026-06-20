@@ -2498,9 +2498,10 @@
     };
 
     let _renderLock = false;
+    let _renderPending = false;
 
     const _renderFinal = async () => {
-        if (_renderLock) return;
+        if (_renderLock) { _renderPending = true; return; }
         const chat = deepQuery('ha-assist-chat');
         const sr = chat?.shadowRoot;
         if (!sr) return;
@@ -2604,6 +2605,10 @@
             _renderLock = false;
         }
         _renderToolActivities();
+        if (_renderPending) {
+            _renderPending = false;
+            _renderFinal();
+        }
     };
 
     const _markStreaming = () => {
@@ -3697,7 +3702,7 @@
                 const channelTag = c.channel ? '<span class="hist-channel-tag" data-channel="' + c.channel + '">' + c.channel + '</span>' : '';
                 const rawTitle = (c.summary || historyText('conversation')).replace(/</g, '&lt;');
                 const cleanTitle = rawTitle.replace(/^[\s\p{P}\p{S}]+/u, '').replace(/[\s\p{P}\p{S}]+$/u, '');
-                const truncTitle = cleanTitle.length > 10 ? cleanTitle.slice(0, 10).replace(/[\s\p{P}\p{S}]+$/u, '') + '…' : cleanTitle;
+                const truncTitle = cleanTitle.length > 20 ? cleanTitle.slice(0, 20).replace(/[\s\p{P}\p{S}]+$/u, '') + '…' : cleanTitle;
                 return '<div class="hist-item' + activeClass + pinnedClass + '" data-conv-id="' + c.conversation_id + '">'
                     + '<div class="hist-item-icon">' + chatIcon + '</div>'
                     + '<div class="hist-item-content">'
@@ -3821,19 +3826,26 @@
             });
         };
 
+        let _resumeToken = 0;
+
         const _resumeConversation = async (dock, convId) => {
             const h = getHass();
             if (!h?.connection) return;
+            const token = ++_resumeToken;
             _historySelectedConversationId = convId;
             _historySelectionHighlightConsumed = false;
+            window.__clawResumeInProgress = true;
 
             let turns = [];
             let historyTokens = 0;
             try {
                 const r = await h.connection.sendMessagePromise({ type: 'ha_crack/chat_history_get', conversation_id: convId, max_turns: 50, display_depth: 0 });
+                if (token !== _resumeToken) return;
                 turns = r?.turns || [];
                 historyTokens = r?.tokens_used || 0;
             } catch (_) {}
+
+            if (token !== _resumeToken) return;
 
             try {
                 await h.connection.sendMessagePromise({
@@ -3842,6 +3854,8 @@
                     window_id: getHistoryWindowId()
                 });
             } catch (_) {}
+
+            if (token !== _resumeToken) return;
 
             const conversation = [];
             const welcomeText = h.localize?.('ui.dialogs.voice_command.how_can_i_help') || '';
@@ -3863,6 +3877,7 @@
             }
 
             if (conversation.length <= 1) {
+                window.__clawResumeInProgress = false;
                 _toggleHistoryPanel(dock, _dockVoiceEl, true);
                 return;
             }
@@ -3884,12 +3899,17 @@
                 chat._conversation = conversation;
                 chat._conversationId = convId;
                 chat.requestUpdate?.('_conversation');
-                setTimeout(() => {
-                    if (state) state.resetting = false;
-                    window.dispatchEvent(new CustomEvent('claw-chat-updated'));
-                }, 100);
+                requestAnimationFrame(() => {
+                    requestAnimationFrame(() => {
+                        if (token !== _resumeToken) return;
+                        if (state) state.resetting = false;
+                        window.__clawResumeInProgress = false;
+                        window.dispatchEvent(new CustomEvent('claw-chat-updated'));
+                    });
+                });
             } else if (state) {
                 state.resetting = false;
+                window.__clawResumeInProgress = false;
             }
 
             _toggleHistoryPanel(dock, _dockVoiceEl, true);
@@ -5138,20 +5158,20 @@
                     render();
                     probeLiveEnd();
                     
-                    if (!window.__clawLiveStreamSubscribed && !window.__clawLiveStreamChecked) {
+                    if (!window.__clawLiveStreamSubscribed && !window.__clawLiveStreamChecked && !window.__clawResumeInProgress) {
                         window.__clawLiveStreamChecked = true;
                         try {
                             const snapshot = await hass.connection.sendMessagePromise({ type: 'ha_crack/live_turn_snapshot' });
                             
                             if (!clawIsLiveSnapshot(snapshot) && snapshot?.conversation_id && settings.continuous_conversation) {
                                 const state = window.__clawAssistChatState;
-                                if (state?.conversationId === snapshot.conversation_id) {
+                                if (state?.conversationId === snapshot.conversation_id && !window.__clawResumeInProgress) {
                                     try {
                                         const histResp = await hass.connection.sendMessagePromise({
                                             type: 'ha_crack/chat_history_get',
                                             conversation_id: snapshot.conversation_id,
                                             max_turns: 50,
-                                            display_depth: 20
+                                            display_depth: 0
                                         });
                                         if (histResp?.turns?.length > 0) {
                                             const newConv = [{ who: 'hass', text: chat.hass?.localize?.('ui.dialogs.voice_command.how_can_i_help') || '', thinking: '', tool_calls: {} }];

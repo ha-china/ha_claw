@@ -330,10 +330,13 @@ async def _finalize_completed_response(
         if verdict_suffix:
             completed.add(conv_key)
     if verdict_suffix:
+        base_text = final_text
         final_text = f"{final_text}\n\n{verdict_suffix}"
-        from ..history.native_chatlog_bridge import append_final_message, emit_live_content_delta
-        await emit_live_content_delta(agent_id=agent_id, text=f"\n\n{verdict_suffix}")
-        append_final_message(agent_id=agent_id, content=final_text)
+        from ..history.native_chatlog_bridge import append_final_message, discard_last_planner_message, emit_live_content_delta
+        emitted = await emit_live_content_delta(agent_id=agent_id, text=f"\n\n{verdict_suffix}")
+        if not emitted:
+            discard_last_planner_message(agent_id=agent_id, content=base_text)
+            append_final_message(agent_id=agent_id, content=final_text)
 
     plain["speech"] = final_text
     plain["original_speech"] = final_text

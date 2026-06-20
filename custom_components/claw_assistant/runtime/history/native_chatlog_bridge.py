@@ -211,18 +211,19 @@ async def emit_live_content_delta(*, agent_id: str, text: str) -> bool:
     chat_log = current_chat_log.get()
     if chat_log is None:
         return False
-    if chat_log.delta_listener:
-        chat_log.delta_listener(chat_log, {"role": "assistant"})
+    if not chat_log.delta_listener:
+        return False
+    chat_log.delta_listener(chat_log, {"role": "assistant"})
+    chunk = ""
+    for char in text:
+        chunk += char
+        if len(chunk) < 6 and char not in " \n，。！？,.!?;；:：":
+            continue
+        chat_log.delta_listener(chat_log, {"content": chunk})
         chunk = ""
-        for char in text:
-            chunk += char
-            if len(chunk) < 6 and char not in " \n，。！？,.!?;；:：":
-                continue
-            chat_log.delta_listener(chat_log, {"content": chunk})
-            chunk = ""
-            await asyncio.sleep(0.01)
-        if chunk:
-            chat_log.delta_listener(chat_log, {"content": chunk})
+        await asyncio.sleep(0.01)
+    if chunk:
+        chat_log.delta_listener(chat_log, {"content": chunk})
     return True
 
 

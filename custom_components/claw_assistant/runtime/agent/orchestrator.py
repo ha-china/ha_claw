@@ -75,6 +75,7 @@ _VOICE_STATUS_KEYS = (
     "_pipeline_device_id",
     "_pipeline_device_info",
     "detected_platform",
+    "_ava_identity",
 )
 
 
@@ -83,19 +84,27 @@ def _refresh_turn_channel_status(
     *,
     conversation_id,
     satellite_id,
+    device_id=None,
 ) -> None:
     status = get_conversation_status(hass)
     status["last_conversation_id"] = conversation_id
     if satellite_id:
         status["is_voice_pipeline"] = True
         status["_voice_detection_source"] = "satellite_id"
+        try:
+            from ...ava_detector import apply_ava_identity, detect_ava_identity
+
+            ava_identity = detect_ava_identity(hass, satellite_id=satellite_id, device_id=device_id)
+            if ava_identity:
+                apply_ava_identity(status, ava_identity)
+                status["_voice_detection_source"] = "satellite_id:ava"
+        except Exception:
+            pass
         return
 
-    # Assist pipeline hooks set fresh voice metadata before the conversation
-    # agent runs. Clear only stale voice state from previous non-pipeline turns.
-    source = str(status.get("_voice_detection_source") or "")
-    if source.startswith("pipeline:"):
+    if device_id:
         return
+
     for key in _VOICE_STATUS_KEYS:
         status.pop(key, None)
 
@@ -596,6 +605,7 @@ async def _execute_conversation_turn_inner(
         hass,
         conversation_id=conversation_id,
         satellite_id=satellite_id,
+        device_id=device_id,
     )
 
     effective_agent = agent_id or (fallback_agents[0] if fallback_agents else "")

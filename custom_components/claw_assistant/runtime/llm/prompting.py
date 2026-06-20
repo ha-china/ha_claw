@@ -194,6 +194,7 @@ def _build_channel_context_section(
     from ..core.state import (
         get_channel_type, is_im_channel, get_conversation_status,
         is_companion_app, is_mobile_platform, get_platform_display_name,
+        PLATFORM_AVA_SATELLITE,
     )
     from ..hooks.official_websocket_hook import get_frontend_platform
 
@@ -226,6 +227,11 @@ def _build_channel_context_section(
     )
 
     if is_voice:
+        ava_identity = conv_status.get("_ava_identity")
+        if detected_platform == PLATFORM_AVA_SATELLITE and isinstance(ava_identity, dict):
+            from ...ava_detector import build_ava_voice_system_prompt
+
+            return build_ava_voice_system_prompt(ava_identity) + lang_instruction
         return (
             "## Channel\n"
             "Transport: Home Assistant Assist voice pipeline.\n"

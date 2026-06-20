@@ -1310,8 +1310,21 @@ def _install_recognize_intent_hook(hass) -> None:
         is_voice_pipeline = is_voice_input or has_tts_output
 
         device_id = getattr(self, "_device_id", None)
+        satellite_id = getattr(self, "_satellite_id", None)
         device_info = None
         detected_platform = None
+        ava_identity = None
+        if device_id or satellite_id:
+            try:
+                from ...ava_detector import detect_ava_identity
+
+                ava_identity = detect_ava_identity(
+                    self.hass,
+                    satellite_id=satellite_id,
+                    device_id=device_id,
+                )
+            except Exception:
+                ava_identity = None
         if device_id:
             try:
                 from homeassistant.helpers import device_registry as dr
@@ -1333,7 +1346,7 @@ def _install_recognize_intent_hook(hass) -> None:
             except Exception:
                 pass
 
-        from ..core.state import get_conversation_status, PLATFORM_IOS_APP, PLATFORM_ANDROID_APP_V2
+        from ..core.state import get_conversation_status, PLATFORM_IOS_APP, PLATFORM_ANDROID_APP_V2, PLATFORM_AVA_SATELLITE
         conv_status = get_conversation_status(self.hass)
         conv_status["is_voice_pipeline"] = is_voice_pipeline
         conv_status["_voice_detection_source"] = f"pipeline:start={start_stage},end={end_stage}" if is_voice_pipeline else "pipeline:text"
@@ -1341,41 +1354,58 @@ def _install_recognize_intent_hook(hass) -> None:
         conv_status["_pipeline_end_stage"] = end_stage_str
         conv_status["_pipeline_device_id"] = device_id
         conv_status["_pipeline_device_info"] = device_info
-        if detected_platform:
+        if ava_identity:
+            from ...ava_detector import apply_ava_identity
+
+            apply_ava_identity(conv_status, ava_identity)
+            conv_status["_voice_detection_source"] = (
+                f"pipeline:ava:start={start_stage},end={end_stage}"
+                if is_voice_pipeline
+                else "pipeline:ava:text"
+            )
+        elif detected_platform:
             conv_status["detected_platform"] = PLATFORM_IOS_APP if detected_platform == "ios_app" else PLATFORM_ANDROID_APP_V2
         if is_voice_pipeline:
-            device_desc = ""
-            if detected_platform == "ios_app":
-                device_desc = "Device: iOS Companion App.\n"
-            elif detected_platform == "android_app":
-                device_desc = "Device: Android Companion App.\n"
-            elif device_info and device_info.get("name"):
-                device_desc = f"Device: {device_info['name']}.\n"
-            
-            voice_hint = (
-                "## Channel\n"
-                "Type: voice (speech-to-text to text-to-speech pipeline).\n"
-                f"{device_desc}"
-                "The user spoke into a microphone and their words were transcribed by STT. "
-                "Your entire reply will be synthesized by a TTS engine and played back as audio. "
-                "The user will hear your answer, not read it. "
-                "Write exactly as you would speak to someone in person. "
-                "Reply as one continuous spoken paragraph in plain text only. "
-                "Do not use line breaks. "
-                "Use short, natural, conversational sentences. "
-                "Never use markdown formatting such as bold, italic, headings, lists, tables, or code blocks. "
-                "TTS will read the raw symbols aloud and it sounds terrible. "
-                "Never use emoji or special symbols. "
-                "They are either skipped or read as Unicode names. "
-                "Avoid media tags, URLs, file paths, and long numbers. "
-                "Paraphrase instead. "
-                "If the answer is complex, give a brief spoken summary and suggest "
-                "the user check the Home Assistant dashboard for details."
-            )
-            if conversation_extra_system_prompt:
-                conversation_extra_system_prompt = conversation_extra_system_prompt + "\n\n" + voice_hint
+            if ava_identity:
+                from ...ava_detector import merge_voice_system_prompt
+
+                conversation_extra_system_prompt = merge_voice_system_prompt(
+                    conversation_extra_system_prompt,
+                    ava_identity,
+                )
             else:
-                conversation_extra_system_prompt = voice_hint
+                device_desc = ""
+                if detected_platform == "ios_app":
+                    device_desc = "Device: iOS Companion App.\n"
+                elif detected_platform == "android_app":
+                    device_desc = "Device: Android Companion App.\n"
+                elif device_info and device_info.get("name"):
+                    device_desc = f"Device: {device_info['name']}.\n"
+
+                voice_hint = (
+                    "## Channel\n"
+                    "Type: voice (speech-to-text to text-to-speech pipeline).\n"
+                    f"{device_desc}"
+                    "The user spoke into a microphone and their words were transcribed by STT. "
+                    "Your entire reply will be synthesized by a TTS engine and played back as audio. "
+                    "The user will hear your answer, not read it. "
+                    "Write exactly as you would speak to someone in person. "
+                    "Reply as one continuous spoken paragraph in plain text only. "
+                    "Do not use line breaks. "
+                    "Use short, natural, conversational sentences. "
+                    "Never use markdown formatting such as bold, italic, headings, lists, tables, or code blocks. "
+                    "TTS will read the raw symbols aloud and it sounds terrible. "
+                    "Never use emoji or special symbols. "
+                    "They are either skipped or read as Unicode names. "
+                    "Avoid media tags, URLs, file paths, and long numbers. "
+                    "Paraphrase instead. "
+                    "If the answer is complex, give a brief spoken summary and suggest "
+                    "the user check the Home Assistant dashboard for details."
+                )
+                if conversation_extra_system_prompt:
+                    conversation_extra_system_prompt = conversation_extra_system_prompt + "\n\n" + voice_hint
+                else:
+                    conversation_extra_system_prompt = voice_hint
 
         try:
             return await _original_recognize(

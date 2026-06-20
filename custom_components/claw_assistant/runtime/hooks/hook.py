@@ -189,6 +189,19 @@ def install_conversation_hook(hass: HomeAssistant, entry: ConfigEntry) -> None:
         if satellite_id:
             status["is_voice_pipeline"] = True
             status["_voice_detection_source"] = "satellite_id"
+            try:
+                from ...ava_detector import apply_ava_identity, detect_ava_identity
+
+                ava_identity = detect_ava_identity(
+                    hass,
+                    satellite_id=satellite_id,
+                    device_id=device_id,
+                )
+                if ava_identity:
+                    apply_ava_identity(status, ava_identity)
+                    status["_voice_detection_source"] = "satellite_id:ava"
+            except Exception:
+                pass
         if agent_id is not None and agent_id != entry.entry_id:
             result = await original_async_converse(
                 hass, text, conversation_id, context, language,
