@@ -894,6 +894,29 @@ def _stop_conversation_runtime(hass, conversation_id: str | None) -> bool:
     except Exception:
         pass
 
+    token = set_active_conversation(conversation_id)
+    try:
+        get_tool_calls_state(hass).clear()
+        get_tool_results_state(hass).clear()
+    finally:
+        reset_active_conversation(token)
+
+    try:
+        from .runtime.storage.live_turn_store import async_save_live_turn_snapshot
+        for cid in list(registry.keys()) + ([conversation_id] if conversation_id else []):
+            hass.async_create_task(
+                async_save_live_turn_snapshot(
+                    hass,
+                    conversation_id=str(cid),
+                    active=False,
+                    status="stopped",
+                    reason="Stopped by /stop command",
+                    phase="stopped",
+                )
+            )
+    except Exception:
+        pass
+
     all_conv_ids = set()
     if conversation_id:
         all_conv_ids.add(conversation_id)
@@ -983,11 +1006,13 @@ async def _dispatch_chat_command(
                 satellite_id=getattr(user_input, "satellite_id", None),
                 extra_system_prompt=getattr(user_input, "extra_system_prompt", None),
             )
-        if old_continuous_id:
-            _purge_native_chat_log(hass, old_continuous_id)
-            get_conversation_history().clear(old_continuous_id)
+        for _cid in (old_continuous_id, conversation_id):
+            if not _cid:
+                continue
+            _purge_native_chat_log(hass, _cid)
+            get_conversation_history().clear(_cid)
             try:
-                hass.data.get("_claw_cn_recent_messages", {}).pop(old_continuous_id, None)
+                hass.data.get("_claw_cn_recent_messages", {}).pop(_cid, None)
             except Exception:
                 pass
         _clear_conversation_runtime(hass, conversation_id)
@@ -1002,6 +1027,7 @@ async def _dispatch_chat_command(
 
     if command.name == "reset":
         _clear_conversation_runtime(hass, conversation_id)
+        get_conversation_history().clear(conversation_id)
         return ChatCommandOutcome(result=_build_result(user_input, t("cmd_reset_done", lang)))
 
     if command.name == "stop":

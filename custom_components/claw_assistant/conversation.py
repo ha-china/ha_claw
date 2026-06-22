@@ -148,11 +148,6 @@ class FallbackConversationAgent(
         command_outcome = await async_handle_chat_command(self.hass, user_input)
         if command_outcome is not None:
             if command_outcome.result is not None:
-                self._record_simple_history_turn(
-                    user_input,
-                    command_outcome.result,
-                    source="command",
-                )
                 return self._finalize_result(command_outcome.result)
             if command_outcome.rewritten_text is not None:
                 user_input = conversation.ConversationInput(
