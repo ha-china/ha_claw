@@ -5,7 +5,7 @@
         if (e.reason?.message?.includes('nextSibling')) e.preventDefault();
     });
     
-    const HACRACK_VERSION = '9.1.0';
+    const HACRACK_VERSION = '9.2.0';
     if (window.__hacrackVersion && window.__hacrackVersion !== HACRACK_VERSION) {
         const reloadKey = '__hacrackReloadCount';
         const reloads = parseInt(sessionStorage.getItem(reloadKey) || '0', 10);
