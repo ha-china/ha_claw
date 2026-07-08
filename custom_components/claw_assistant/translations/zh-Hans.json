@@ -7,6 +7,17 @@
         "add_name": "标注来源",
         "detailed": "多模型对比"
       }
+    },
+    "provider": {
+      "options": {
+        "feishu": "飞书",
+        "wechat": "微信",
+        "dingtalk": "钉钉",
+        "qq": "QQ",
+        "wecom": "企业微信",
+        "xiaoyi": "小艺",
+        "custom": "自定义"
+      }
     }
   },
   "entity": {
@@ -335,17 +346,6 @@
         "data": {
           "provider": "通道平台",
           "back": "返回"
-        },
-        "data_options": {
-          "provider": {
-            "feishu": "飞书",
-            "wechat": "微信",
-            "dingtalk": "钉钉",
-            "qq": "QQ",
-            "wecom": "企业微信",
-            "xiaoyi": "小艺",
-            "custom": "自定义"
-          }
         }
       },
       "um_pick_identity": {
@@ -359,11 +359,6 @@
         "data_description": {
           "ext_id": "从 cn_im_hub 与近期对话自动识别",
           "ext_id_manual": "选手动输入时填写，不含通道前缀"
-        },
-        "data_options": {
-          "ext_id": {
-            "__manual__": "手动输入…"
-          }
         }
       },
       "um_pick_member": {

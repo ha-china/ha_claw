@@ -7,6 +7,17 @@
         "add_name": "Show source",
         "detailed": "Multi-model"
       }
+    },
+    "provider": {
+      "options": {
+        "feishu": "Feishu",
+        "wechat": "WeChat",
+        "dingtalk": "DingTalk",
+        "qq": "QQ",
+        "wecom": "WeCom",
+        "xiaoyi": "XiaoYi",
+        "custom": "Custom"
+      }
     }
   },
   "entity": {
@@ -349,17 +360,6 @@
         "data": {
           "provider": "Channel",
           "back": "Back"
-        },
-        "data_options": {
-          "provider": {
-            "feishu": "Feishu",
-            "wechat": "WeChat",
-            "dingtalk": "DingTalk",
-            "qq": "QQ",
-            "wecom": "WeCom",
-            "xiaoyi": "XiaoYi",
-            "custom": "Custom"
-          }
         }
       },
       "um_pick_identity": {
@@ -373,11 +373,6 @@
         "data_description": {
           "ext_id": "Auto-detected from cn_im_hub and recent chats",
           "ext_id_manual": "When Manual input is selected; no channel prefix"
-        },
-        "data_options": {
-          "ext_id": {
-            "__manual__": "Manual input…"
-          }
         }
       },
       "um_pick_member": {
