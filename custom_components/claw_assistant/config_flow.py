@@ -54,7 +54,6 @@ from .const import (
     DEFAULT_PIPELINE_TIMEOUT,
     DEFAULT_PRIMARY_AGENT,
     DOMAIN,
-    IM_CHANNEL_NAMES,
 )
 
 LOGGER = logging.getLogger(__name__)
@@ -132,42 +131,129 @@ def _agent_selector(hass: HomeAssistant) -> SelectSelector:
     )
 
 
-def _provider_option_keys() -> list[str]:
-    return [prefix.rstrip(":") for prefix in IM_CHANNEL_NAMES]
+_REMOVE_NONE_KEY = "__none__"
 
 
-@callback
-def _get_known_im_identifiers(hass: HomeAssistant) -> dict[str, str]:
-    from .conversation_utils import get_conversation_history
-    from .runtime.storage.user_mapping import MappingStore
-
-    seen: dict[str, str] = {}
-
-    for m in MappingStore.load():
-        ext_id = m.get("ext_id", "")
-        if ext_id and ext_id not in seen:
-            seen[ext_id] = ext_id
-
-    history = get_conversation_history()
-    for conv_id in history.list_conversation_ids():
-        conv_id_lower = conv_id.lower()
-        for prefix in IM_CHANNEL_NAMES:
-            if conv_id_lower.startswith(prefix.lower()):
-                rest = conv_id[len(prefix):]
-                parts = rest.split(":")
-                ext_id = parts[-1]
-                if ext_id and ext_id not in seen:
-                    seen[ext_id] = ext_id
-                break
-
-    if not seen:
-        seen["__manual__"] = "__manual_input__"
-    return seen
+def _flatten_section_input(user_input: dict[str, Any]) -> dict[str, Any]:
+    flat: dict[str, Any] = {}
+    for key, value in user_input.items():
+        if isinstance(value, dict):
+            flat.update(value)
+        else:
+            flat[key] = value
+    return flat
 
 
-def _empty_mappings_label(hass: HomeAssistant) -> str:
+def _remove_none_label(hass: HomeAssistant) -> str:
     lang = hass.config.language or "en"
-    return "暂无" if lang.startswith("zh") else "(none)"
+    return "— 不删除 —" if lang.startswith("zh") else "— Don't remove —"
+
+
+def _username_from_credentials(user: Any) -> str:
+    for cred in getattr(user, "credentials", ()) or ():
+        if cred.auth_provider_type == "homeassistant":
+            username = cred.data.get("username") if isinstance(cred.data, dict) else None
+            if isinstance(username, str) and username.strip():
+                return username.strip()
+    return ""
+
+
+def _person_names_by_user_id(hass: HomeAssistant) -> dict[str, str]:
+    labels: dict[str, str] = {}
+    try:
+        from homeassistant.components.person import CONF_USER_ID, DOMAIN as PERSON_DOMAIN
+
+        pack = hass.data.get(PERSON_DOMAIN)
+        if not pack:
+            return labels
+        for collection in pack[:2]:
+            if collection is None:
+                continue
+            for person in collection.async_items():
+                user_id = person.get(CONF_USER_ID)
+                person_name = str(person.get("name") or "").strip()
+                if user_id and person_name:
+                    labels[str(user_id)] = person_name
+    except Exception:
+        pass
+    return labels
+
+
+def _inactive_user_suffix(hass: HomeAssistant) -> str:
+    lang = hass.config.language or "en"
+    return " (已停用)" if lang.startswith("zh") else " (inactive)"
+
+
+def _context_ha_user_id(flow: config_entries.OptionsFlow) -> str:
+    user_id = flow.context.get("user_id")
+    return str(user_id) if user_id else ""
+
+
+def _manual_ext_id_label(hass: HomeAssistant) -> str:
+    lang = hass.config.language or "en"
+    return "手动输入…" if lang.startswith("zh") else "Manual input…"
+
+
+def _cn_im_hub_status_placeholder(hass: HomeAssistant, configured: bool) -> str:
+    if configured:
+        return ""
+    zh = (hass.config.language or "").startswith("zh")
+    if zh:
+        return (
+            "**⚠️ 尚未检测到 cn_im_hub**\n"
+            "请前往 **设置 → 设备与服务 → 添加集成**，搜索 **cn_im_hub** 并完成安装，"
+            "至少接入一个 IM 通道后再使用下方功能。\n\n"
+        )
+    return (
+        "**⚠️ cn_im_hub not detected**\n"
+        "Go to **Settings → Devices & services → Add integration**, "
+        "search for **cn_im_hub**, install it, and configure at least one channel.\n\n"
+    )
+
+
+def _format_mapping_status(
+    hass: HomeAssistant,
+    mappings: list[dict[str, str]],
+    user_names: dict[str, str],
+) -> str:
+    lang = hass.config.language or "en"
+    zh = lang.startswith("zh")
+    if not mappings:
+        return (
+            "尚未关联任何通道身份。展开下方「**添加关联**」开始绑定。"
+            if zh
+            else "No channel identities linked yet. Expand **Add Link** below to get started."
+        )
+    header = f"**已关联 {len(mappings)} 条**" if zh else f"**{len(mappings)} linked**"
+    lines = [header]
+    for mapping in mappings:
+        provider = mapping.get("provider", "?")
+        ext_id = mapping.get("ext_id", "?")
+        ha_user_id = mapping.get("ha_user_id", "")
+        ha_name = user_names.get(ha_user_id, ha_user_id[:8] if ha_user_id else "?")
+        display_id = ext_id if len(ext_id) <= 28 else f"{ext_id[:25]}…"
+        lines.append(f"- {provider} · {display_id} → {ha_name}")
+    return "\n".join(lines)
+
+
+def _build_remove_options(
+    hass: HomeAssistant,
+    mappings: list[dict[str, str]],
+    user_names: dict[str, str],
+    *,
+    include_none: bool = True,
+) -> dict[str, str]:
+    options: dict[str, str] = {}
+    if include_none:
+        options[_REMOVE_NONE_KEY] = _remove_none_label(hass)
+    for mapping in mappings:
+        provider = mapping.get("provider", "?")
+        ext_id = mapping.get("ext_id", "?")
+        ha_user_id = mapping.get("ha_user_id", "")
+        ha_name = user_names.get(ha_user_id, ha_user_id[:8] if ha_user_id else "?")
+        key = f"{provider}:{ext_id}"
+        options[key] = f"{provider} | {ext_id[:40]} → {ha_name}"
+    return options
 
 
 class ClawAssistantConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
@@ -297,7 +383,6 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
             menu_options=[
                 "agent_settings",
                 "conversation_settings",
-                "user_mapping",
                 "workspace_editor",
                 "skill_editor",
                 "plugin_manager",
@@ -305,70 +390,421 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
             description_placeholders={"integration_title": "integration_title", "current_config": "current_config"},
         )
 
+    async def _ha_user_name_map(
+        self,
+        mappings: list[dict[str, str]] | None = None,
+    ) -> dict[str, str]:
+        person_names = _person_names_by_user_id(self.hass)
+        inactive_suffix = _inactive_user_suffix(self.hass)
+        names: dict[str, str] = {}
+        for user in await self.hass.auth.async_get_users():
+            if user.system_generated:
+                continue
+            label = (
+                person_names.get(user.id)
+                or (str(user.name).strip() if user.name else "")
+                or _username_from_credentials(user)
+                or user.id[:8]
+            )
+            if not user.is_active:
+                label = f"{label}{inactive_suffix}"
+            names[user.id] = label
+        for mapping in mappings or []:
+            ha_id = str(mapping.get("ha_user_id", "")).strip()
+            if not ha_id or ha_id in names:
+                continue
+            user = await self.hass.auth.async_get_user(ha_id)
+            if user and not user.system_generated:
+                label = person_names.get(ha_id) or user.name or _username_from_credentials(user) or ha_id[:8]
+                if not user.is_active:
+                    label = f"{label}{inactive_suffix}"
+                names[ha_id] = label
+            else:
+                names[ha_id] = person_names.get(ha_id) or ha_id[:8]
+        return names
+
+    def _ha_user_select_schema(self, user_options: dict[str, str], default_ha_user: str) -> SelectSelector:
+        options = [
+            {"value": user_id, "label": label}
+            for user_id, label in sorted(
+                user_options.items(),
+                key=lambda item: item[1].lower(),
+            )
+        ]
+        return SelectSelector(
+            SelectSelectorConfig(
+                options=options,
+                mode=SelectSelectorMode.DROPDOWN,
+            )
+        )
+
+    def _mapped_ha_user_id(
+        self,
+        mappings: list[dict[str, str]],
+        provider: str | None,
+        ext_id: str | None,
+    ) -> str:
+        if not provider or not ext_id:
+            return ""
+        for mapping in mappings:
+            if (
+                str(mapping.get("provider", "")).strip().lower() == provider
+                and str(mapping.get("ext_id", "")).strip() == ext_id
+            ):
+                return str(mapping.get("ha_user_id", "")).strip()
+        return ""
+
+    async def _resolve_default_ha_user(
+        self,
+        user_names: dict[str, str],
+        mappings: list[dict[str, str]],
+        *,
+        provider: str | None = None,
+        ext_id: str | None = None,
+    ) -> str:
+        if not user_names:
+            return ""
+        mapped_user = self._mapped_ha_user_id(mappings, provider, ext_id)
+        if mapped_user and mapped_user in user_names:
+            return mapped_user
+        context_user = _context_ha_user_id(self)
+        if context_user and context_user in user_names:
+            return context_user
+        if len(user_names) == 1:
+            return next(iter(user_names))
+        for user in await self.hass.auth.async_get_users():
+            if user.is_owner and not user.system_generated and user.is_active:
+                if user.id in user_names:
+                    return user.id
+        return sorted(user_names, key=lambda uid: user_names[uid].lower())[0]
+
+    def _format_ha_user_labels(
+        self,
+        user_names: dict[str, str],
+    ) -> dict[str, str]:
+        context_user = _context_ha_user_id(self)
+        verified_context = context_user if context_user in user_names else ""
+        single_user = len(user_names) == 1
+        zh = (self.hass.config.language or "").startswith("zh")
+        options: dict[str, str] = {}
+        for user_id in sorted(user_names, key=lambda uid: user_names[uid].lower()):
+            name = user_names[user_id]
+            if single_user:
+                label = name
+            elif user_id == verified_context:
+                label = f"{name} (当前用户)" if zh else f"{name} (current user)"
+            else:
+                label = name
+            options[user_id] = label
+        return options
+
+    async def _ha_user_options(
+        self,
+        mappings: list[dict[str, str]],
+        *,
+        provider: str | None = None,
+        ext_id: str | None = None,
+    ) -> tuple[dict[str, str], str]:
+        user_names = await self._ha_user_name_map(mappings)
+        if not user_names:
+            return {}, ""
+        default_user = await self._resolve_default_ha_user(
+            user_names,
+            mappings,
+            provider=provider,
+            ext_id=ext_id,
+        )
+        return self._format_ha_user_labels(user_names), default_user
+
+    async def _user_mapping_description_placeholders(
+        self,
+        mappings: list[dict[str, str]],
+    ) -> dict[str, str]:
+        user_names = await self._ha_user_name_map(mappings)
+        return {
+            "mapping_status": _format_mapping_status(self.hass, mappings, user_names),
+        }
+
+    def _clear_um_draft(self) -> None:
+        self._um_provider = ""
+        self._um_ext_id = ""
+
+    def _provider_label(self, provider: str) -> str:
+        labels_zh = {
+            "feishu": "飞书",
+            "wechat": "微信",
+            "dingtalk": "钉钉",
+            "qq": "QQ",
+            "wecom": "企业微信",
+            "xiaoyi": "小艺",
+            "custom": "自定义",
+        }
+        labels_en = {
+            "feishu": "Feishu",
+            "wechat": "WeChat",
+            "dingtalk": "DingTalk",
+            "qq": "QQ",
+            "wecom": "WeCom",
+            "xiaoyi": "XiaoYi",
+            "custom": "Custom",
+        }
+        key = provider.strip().lower()
+        if (self.hass.config.language or "").startswith("zh"):
+            return labels_zh.get(key, key)
+        return labels_en.get(key, key)
+
     async def async_step_user_mapping(self, user_input: dict[str, Any] | None = None) -> FlowResult:
+        from .runtime.storage.im_channel_helpers import (
+            ensure_claw_storage,
+            get_configured_provider_keys,
+        )
         from .runtime.storage.user_mapping import MappingStore
 
-        if user_input is not None:
-            action = user_input.get("action")
-            if action == "add":
-                provider = user_input.get("provider", "")
-                ext_id = user_input.get("ext_id", "")
-                ha_user = user_input.get("ha_user", "")
-                if ext_id == "__manual__":
-                    ext_id = user_input.get("ext_id_manual", "").strip()
-                if provider and ext_id and ha_user:
-                    MappingStore.set(provider, ext_id, ha_user)
-            elif action == "remove":
-                remove_key = user_input.get("remove_key", "")
-                if remove_key:
-                    parts = remove_key.split(":", 1)
-                    if len(parts) == 2:
-                        MappingStore.remove(parts[0], parts[1])
+        await ensure_claw_storage(self.hass)
+        self._clear_um_draft()
+        mappings = MappingStore.load()
+        placeholders = await self._user_mapping_description_placeholders(mappings)
+        provider_keys = await get_configured_provider_keys(self.hass)
+        placeholders["cn_im_hub_status"] = _cn_im_hub_status_placeholder(
+            self.hass, bool(provider_keys)
+        )
+
+        if not provider_keys:
+            if user_input is not None and user_input.get("back"):
+                return await self.async_step_conversation_settings()
+            return self.async_show_form(
+                step_id="user_mapping",
+                data_schema=vol.Schema({
+                    vol.Optional("back", default=False): bool,
+                }),
+                errors={"base": "cn_im_hub_not_configured"},
+                description_placeholders=placeholders,
+            )
+
+        if user_input is not None and user_input.get("back"):
+            return await self.async_step_conversation_settings()
+
+        menu_options = ["um_pick_channel"]
+        if mappings:
+            menu_options.append("um_remove")
+        return self.async_show_menu(
+            step_id="user_mapping",
+            menu_options=menu_options,
+            description_placeholders=placeholders,
+        )
+
+    async def async_step_um_pick_channel(self, user_input: dict[str, Any] | None = None) -> FlowResult:
+        from .runtime.storage.im_channel_helpers import (
+            ensure_claw_storage,
+            get_configured_provider_keys,
+        )
+
+        await ensure_claw_storage(self.hass)
+        provider_keys = await get_configured_provider_keys(self.hass)
+        if not provider_keys:
             return await self.async_step_user_mapping()
 
-        # #### @C3H3-AI ha_claw#14 — async_step_user_mapping form
-        mappings = MappingStore.load()
-        current_lines = []
-        remove_options: dict[str, str] = {}
-        if mappings:
-            for m in mappings:
-                provider = m.get("provider", "?")
-                ext_id = m.get("ext_id", "?")
-                ha_user_id = m.get("ha_user_id", "?")[:12]
-                label = f"{provider}: {ext_id[:30]} → {ha_user_id}..."
-                current_lines.append(label)
-                remove_options[f"{provider}:{ext_id}"] = label
-            current_text = "\n".join(current_lines)
-        else:
-            current_text = _empty_mappings_label(self.hass)
-            remove_options[""] = ""
+        if user_input is not None:
+            if user_input.get("back"):
+                return await self.async_step_user_mapping()
+            provider = str(user_input.get("provider", "")).strip().lower()
+            if provider in provider_keys:
+                self._um_provider = provider
+                return await self.async_step_um_pick_identity()
+            return self.async_show_form(
+                step_id="um_pick_channel",
+                data_schema=vol.Schema({
+                    vol.Required("provider"): vol.In(provider_keys),
+                    vol.Optional("back", default=False): bool,
+                }),
+                errors={"provider": "invalid_provider"},
+            )
 
-        users = await self.hass.auth.async_get_users()
-        user_options: dict[str, str] = {"": ""}
-        for user in users:
-            if not user.system_generated and user.is_active:
-                user_options[user.id] = f"{user.name}"
-
-        im_ids = _get_known_im_identifiers(self.hass)
-        ext_id_default = (
-            "__manual__" if "__manual__" in im_ids else next(iter(im_ids))
-        )
-        provider_keys = _provider_option_keys()
-        provider_default = "feishu" if "feishu" in provider_keys else provider_keys[0]
+        if len(provider_keys) == 1:
+            self._um_provider = provider_keys[0]
+            return await self.async_step_um_pick_identity()
 
         return self.async_show_form(
-            step_id="user_mapping",
+            step_id="um_pick_channel",
             data_schema=vol.Schema({
-                vol.Required("action", default="add"): vol.In({"add", "remove"}),
-                vol.Optional("provider", default=provider_default): vol.In(provider_keys),
-                vol.Optional("ext_id", default=ext_id_default): vol.In(im_ids),
-                vol.Optional("ext_id_manual", default=""): str,
-                vol.Optional("ha_user", default=""): vol.In(user_options),
-                vol.Optional("remove_key", default=""): vol.In(remove_options),
+                vol.Required("provider", default=provider_keys[0]): vol.In(provider_keys),
+                vol.Optional("back", default=False): bool,
             }),
-            description_placeholders={
-                "current_mappings": current_text,
-            },
+            description_placeholders={},
+        )
+
+    async def async_step_um_pick_identity(self, user_input: dict[str, Any] | None = None) -> FlowResult:
+        from .runtime.storage.im_channel_helpers import (
+            build_ext_id_options,
+            collect_provider_targets,
+            ensure_claw_storage,
+            get_configured_provider_keys,
+            manual_ext_id_key,
+        )
+
+        await ensure_claw_storage(self.hass)
+        provider = str(getattr(self, "_um_provider", "")).strip().lower()
+        provider_keys = await get_configured_provider_keys(self.hass)
+        if not provider or provider not in provider_keys:
+            return await self.async_step_um_pick_channel()
+
+        manual_label = _manual_ext_id_label(self.hass)
+        manual_key = manual_ext_id_key()
+        provider_targets = await collect_provider_targets(self.hass)
+        ext_id_options = build_ext_id_options(
+            self.hass,
+            provider,
+            provider_targets,
+            manual_label=manual_label,
+        )
+        placeholders = {"provider": self._provider_label(provider)}
+
+        if user_input is not None:
+            if user_input.get("back"):
+                return await self.async_step_um_pick_channel()
+            ext_id = str(user_input.get("ext_id", "")).strip()
+            if ext_id == manual_key:
+                ext_id = str(user_input.get("ext_id_manual", "")).strip()
+            if ext_id:
+                self._um_ext_id = ext_id
+                return await self.async_step_um_pick_member()
+            return self.async_show_form(
+                step_id="um_pick_identity",
+                data_schema=vol.Schema({
+                    vol.Required("ext_id", default=manual_key): vol.In(ext_id_options),
+                    vol.Optional("ext_id_manual", default=""): str,
+                    vol.Optional("back", default=False): bool,
+                }),
+                errors={"ext_id": "invalid_ext_id"},
+                description_placeholders=placeholders,
+            )
+
+        default_ext_id = next(
+            (key for key in ext_id_options if key != manual_key),
+            manual_key,
+        )
+        return self.async_show_form(
+            step_id="um_pick_identity",
+            data_schema=vol.Schema({
+                vol.Required("ext_id", default=default_ext_id): vol.In(ext_id_options),
+                vol.Optional("ext_id_manual", default=""): str,
+                vol.Optional("back", default=False): bool,
+            }),
+            description_placeholders=placeholders,
+        )
+
+    async def async_step_um_pick_member(self, user_input: dict[str, Any] | None = None) -> FlowResult:
+        from .runtime.storage.im_channel_helpers import (
+            ensure_claw_storage,
+            get_configured_provider_keys,
+        )
+        from .runtime.storage.user_mapping import MappingStore
+
+        await ensure_claw_storage(self.hass)
+        provider = str(getattr(self, "_um_provider", "")).strip().lower()
+        ext_id = str(getattr(self, "_um_ext_id", "")).strip()
+        provider_keys = await get_configured_provider_keys(self.hass)
+        if not provider or provider not in provider_keys or not ext_id:
+            return await self.async_step_um_pick_channel()
+
+        mappings = MappingStore.load()
+        user_options, default_ha_user = await self._ha_user_options(
+            mappings,
+            provider=provider,
+            ext_id=ext_id,
+        )
+        placeholders = {
+            "provider": self._provider_label(provider),
+            "ext_id": ext_id[:40],
+        }
+
+        if not user_options:
+            return self.async_show_form(
+                step_id="um_pick_member",
+                data_schema=vol.Schema({
+                    vol.Optional("back", default=False): bool,
+                }),
+                errors={"base": "missing_ha_user"},
+                description_placeholders=placeholders,
+            )
+
+        if user_input is not None:
+            if user_input.get("back"):
+                return await self.async_step_um_pick_identity()
+            ha_user = str(user_input.get("ha_user", "")).strip()
+            errors: dict[str, str] = {}
+            if not ha_user:
+                errors["ha_user"] = "missing_ha_user"
+            elif not MappingStore.set(provider, ext_id, ha_user):
+                errors["base"] = "mapping_save_failed"
+            if errors:
+                return self.async_show_form(
+                    step_id="um_pick_member",
+                    data_schema=vol.Schema({
+                        vol.Required("ha_user", default=ha_user or default_ha_user): self._ha_user_select_schema(
+                            user_options, ha_user or default_ha_user
+                        ),
+                        vol.Optional("back", default=False): bool,
+                    }),
+                    errors=errors,
+                    description_placeholders=placeholders,
+                )
+            self._clear_um_draft()
+            return await self.async_step_user_mapping()
+
+        return self.async_show_form(
+            step_id="um_pick_member",
+            data_schema=vol.Schema({
+                vol.Required("ha_user", default=default_ha_user): self._ha_user_select_schema(
+                    user_options, default_ha_user
+                ),
+                vol.Optional("back", default=False): bool,
+            }),
+            description_placeholders=placeholders,
+        )
+
+    async def async_step_um_remove(self, user_input: dict[str, Any] | None = None) -> FlowResult:
+        from .runtime.storage.im_channel_helpers import ensure_claw_storage
+        from .runtime.storage.user_mapping import MappingStore
+
+        await ensure_claw_storage(self.hass)
+        mappings = MappingStore.load()
+        if not mappings:
+            return await self.async_step_user_mapping()
+
+        user_names = await self._ha_user_name_map(mappings)
+        remove_options = _build_remove_options(
+            self.hass, mappings, user_names, include_none=False
+        )
+        default_remove = next(iter(remove_options), "")
+
+        if user_input is not None:
+            if user_input.get("back"):
+                return await self.async_step_user_mapping()
+            remove_key = str(user_input.get("remove_key", "")).strip()
+            errors: dict[str, str] = {}
+            if remove_key:
+                parts = remove_key.split(":", 1)
+                if len(parts) != 2 or not MappingStore.remove(parts[0], parts[1]):
+                    errors["remove_key"] = "mapping_not_found"
+            if errors:
+                return self.async_show_form(
+                    step_id="um_remove",
+                    data_schema=vol.Schema({
+                        vol.Required("remove_key", default=remove_key): vol.In(remove_options),
+                        vol.Optional("back", default=False): bool,
+                    }),
+                    errors=errors,
+                )
+            return await self.async_step_user_mapping()
+
+        return self.async_show_form(
+            step_id="um_remove",
+            data_schema=vol.Schema({
+                vol.Required("remove_key", default=default_remove): vol.In(remove_options),
+                vol.Optional("back", default=False): bool,
+            }),
+            description_placeholders=await self._user_mapping_description_placeholders(mappings),
         )
 
     async def async_step_workspace_editor(self, user_input: dict[str, Any] | None = None) -> FlowResult:
@@ -768,7 +1204,7 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
     async def async_step_conversation_settings(self, user_input: dict[str, Any] | None = None) -> FlowResult:
         return self.async_show_menu(
             step_id="conversation_settings",
-            menu_options=["conv_dialog", "conv_display", "conv_runtime"],
+            menu_options=["conv_dialog", "conv_display", "conv_runtime", "user_mapping"],
         )
 
     def _save_conversation_subform(self, user_input: dict[str, Any]) -> FlowResult:
@@ -784,6 +1220,7 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
         if user_input is not None:
             if user_input.get("back"):
                 return await self.async_step_conversation_settings()
+            user_input = _flatten_section_input(user_input)
             if not user_input.get(CONF_CONVERSATION_MODE):
                 errors[CONF_CONVERSATION_MODE] = "invalid_conversation_mode"
             if not errors:
@@ -793,18 +1230,23 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
         current_enable_web_search = self._config_entry.options.get(CONF_ENABLE_WEB_SEARCH, True)
 
         schema = vol.Schema({
-            vol.Required(CONF_CONVERSATION_MODE, description={"suggested_value": current_mode}): SelectSelector(
-                SelectSelectorConfig(
-                    options=[
-                        CONVERSATION_MODE_NO_NAME,
-                        CONVERSATION_MODE_ADD_NAME,
-                        CONVERSATION_MODE_DETAILED,
-                    ],
-                    translation_key="conversation_mode",
-                    mode=SelectSelectorMode.DROPDOWN,
-                )
+            vol.Required("reply_policy"): section(
+                vol.Schema({
+                    vol.Required(CONF_CONVERSATION_MODE, description={"suggested_value": current_mode}): SelectSelector(
+                        SelectSelectorConfig(
+                            options=[
+                                CONVERSATION_MODE_NO_NAME,
+                                CONVERSATION_MODE_ADD_NAME,
+                                CONVERSATION_MODE_DETAILED,
+                            ],
+                            translation_key="conversation_mode",
+                            mode=SelectSelectorMode.DROPDOWN,
+                        )
+                    ),
+                    vol.Optional(CONF_ENABLE_WEB_SEARCH, default=current_enable_web_search): BooleanSelector(),
+                }),
+                {"collapsed": False},
             ),
-            vol.Optional(CONF_ENABLE_WEB_SEARCH, default=current_enable_web_search): BooleanSelector(),
             vol.Optional("back", default=False): bool,
         })
 
@@ -875,6 +1317,7 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
         if user_input is not None:
             if user_input.get("back"):
                 return await self.async_step_conversation_settings()
+            user_input = _flatten_section_input(user_input)
             return self._save_conversation_subform(user_input)
 
         current_max_tool_repeat = self._config_entry.options.get(CONF_MAX_TOOL_REPEAT, DEFAULT_MAX_TOOL_REPEAT)
@@ -884,17 +1327,27 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
         display_timeout = current_pipeline_timeout // 60 if current_pipeline_timeout else 5
 
         schema = vol.Schema({
-            vol.Optional(CONF_MAX_TOOL_REPEAT, default=current_max_tool_repeat): NumberSelector(
-                NumberSelectorConfig(min=3, max=50, step=1, unit_of_measurement="loop", mode=NumberSelectorMode.SLIDER)
+            vol.Required("tool_loop"): section(
+                vol.Schema({
+                    vol.Optional(CONF_MAX_TOOL_REPEAT, default=current_max_tool_repeat): NumberSelector(
+                        NumberSelectorConfig(min=3, max=50, step=1, unit_of_measurement="loop", mode=NumberSelectorMode.SLIDER)
+                    ),
+                    vol.Optional(CONF_IDENTICAL_CALL_WARN, default=current_identical_warn): NumberSelector(
+                        NumberSelectorConfig(min=5, max=30, step=1, unit_of_measurement="times", mode=NumberSelectorMode.SLIDER)
+                    ),
+                    vol.Optional(CONF_IDENTICAL_CALL_STOP, default=current_identical_stop): NumberSelector(
+                        NumberSelectorConfig(min=5, max=30, step=1, unit_of_measurement="times", mode=NumberSelectorMode.SLIDER)
+                    ),
+                }),
+                {"collapsed": False},
             ),
-            vol.Optional(CONF_IDENTICAL_CALL_WARN, default=current_identical_warn): NumberSelector(
-                NumberSelectorConfig(min=5, max=30, step=1, unit_of_measurement="times", mode=NumberSelectorMode.SLIDER)
-            ),
-            vol.Optional(CONF_IDENTICAL_CALL_STOP, default=current_identical_stop): NumberSelector(
-                NumberSelectorConfig(min=5, max=30, step=1, unit_of_measurement="times", mode=NumberSelectorMode.SLIDER)
-            ),
-            vol.Optional(CONF_PIPELINE_TIMEOUT, default=display_timeout): NumberSelector(
-                NumberSelectorConfig(min=5, max=360, step=5, unit_of_measurement="min", mode=NumberSelectorMode.SLIDER)
+            vol.Required("pipeline"): section(
+                vol.Schema({
+                    vol.Optional(CONF_PIPELINE_TIMEOUT, default=display_timeout): NumberSelector(
+                        NumberSelectorConfig(min=5, max=360, step=5, unit_of_measurement="min", mode=NumberSelectorMode.SLIDER)
+                    ),
+                }),
+                {"collapsed": True},
             ),
             vol.Optional("back", default=False): bool,
         })

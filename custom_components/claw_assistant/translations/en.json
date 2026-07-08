@@ -41,7 +41,6 @@
         "menu_options": {
           "agent_settings": "Configure AI Agents | Primary, fallback, summarizer chain",
           "conversation_settings": "Tune Conversation Style | Display, streaming & dimensions",
-          "user_mapping": "IM User Mapping | Link external identities to HA users",
           "workspace_editor": "Edit Workspace Docs | Master prompt & skill library",
           "skill_editor": "Manage Installed Skills | Live view & edit",
           "plugin_manager": "Manage Plugins | Hermes compatible plugins"
@@ -61,11 +60,12 @@
       },
       "conversation_settings": {
         "title": "Conversation Settings",
-        "description": "Adjust AI conversation strategy, chat experience, and execution control.",
+        "description": "Adjust AI conversation strategy, chat experience, execution control, and user linking.",
         "menu_options": {
           "conv_dialog": "Conversation Strategy | How Replies Are Generated",
           "conv_display": "Chat Experience | How Chat Is Used",
-          "conv_runtime": "Execution Control | How Tasks Run"
+          "conv_runtime": "Execution Control | How Tasks Run",
+          "user_mapping": "User Linking | Channel Identity Mapping"
         }
       },
       "conv_dialog": {
@@ -81,6 +81,20 @@
         "data_description": {
           "conversation_mode": "• **Simple** — Show only the final reply, no AI attribution\n• **Show source** — Recommended. Prefixes each reply with the responding AI's name, e.g. (deepseek) Reply:\n• **Multi-model** — All configured AIs answer the same question simultaneously, each labeled and separated",
           "enable_web_search": "When enabled, the AI can automatically supplement replies with online search results"
+        },
+        "sections": {
+          "reply_policy": {
+            "name": "Reply Policy",
+            "description": "Control reply style and web search.",
+            "data": {
+              "conversation_mode": "Dialogue Mode",
+              "enable_web_search": "Web Search"
+            },
+            "data_description": {
+              "conversation_mode": "• **Simple** — Show only the final reply, no AI attribution\n• **Show source** — Recommended. Prefixes each reply with the responding AI's name, e.g. (deepseek) Reply:\n• **Multi-model** — All configured AIs answer the same question simultaneously, each labeled and separated",
+              "enable_web_search": "When enabled, the AI can automatically supplement replies with online search results"
+            }
+          }
         }
       },
       "conv_display": {
@@ -164,11 +178,41 @@
           "save_and_exit": "Save and complete",
           "next_step": "Next step",
           "max_tool_repeat": "Tool Repeat Limit",
+          "identical_call_warn": "Identical Call Warning Threshold",
+          "identical_call_stop": "Identical Call Stop Threshold",
           "pipeline_timeout": "Wait Time (min)"
         },
         "data_description": {
           "max_tool_repeat": "Max times AI can call the same tool repeatedly. Once exceeded, AI is forced to stop the current approach and try alternatives or admit it cannot solve the problem",
+          "identical_call_warn": "When AI calls the same tool with identical parameters this many times, the system warns it to try a different approach",
+          "identical_call_stop": "When AI calls the same tool with identical parameters this many times, the system stops it and asks it to explain to the user",
           "pipeline_timeout": "How long the chat window waits for AI to finish. Increase for long tasks or multi-AI chats so AI is not cut off mid-work."
+        },
+        "sections": {
+          "tool_loop": {
+            "name": "Tool Loop",
+            "description": "Limit how often AI repeats the same tool calls.",
+            "data": {
+              "max_tool_repeat": "Tool Repeat Limit",
+              "identical_call_warn": "Identical Call Warning Threshold",
+              "identical_call_stop": "Identical Call Stop Threshold"
+            },
+            "data_description": {
+              "max_tool_repeat": "Max times AI can call the same tool repeatedly. Once exceeded, AI is forced to stop the current approach and try alternatives or admit it cannot solve the problem",
+              "identical_call_warn": "When AI calls the same tool with identical parameters this many times, the system warns it to try a different approach",
+              "identical_call_stop": "When AI calls the same tool with identical parameters this many times, the system stops it and asks it to explain to the user"
+            }
+          },
+          "pipeline": {
+            "name": "Conversation Timeout",
+            "description": "Control how long a single conversation waits for AI to finish.",
+            "data": {
+              "pipeline_timeout": "Wait Time (min)"
+            },
+            "data_description": {
+              "pipeline_timeout": "How long the chat window waits for AI to finish. Increase for long tasks or multi-AI chats so AI is not cut off mid-work."
+            }
+          }
         }
       },
       "workspace_editor": {
@@ -289,38 +333,70 @@
         }
       },
       "user_mapping": {
-        "title": "IM User Mapping",
-        "description": "**Current mappings:**\n{current_mappings}\n\n**Instructions:**\nAdd: Select IM platform → pick or type external user ID → select HA user.\nRemove: Select mapping to delete → submit.\n\n▸ **External User ID** — Dropdown auto-fills known external identities (detected from conversation history). Choose \"manual input\" at the bottom to type a custom ID.\n▸ **Once mapped**, messages from this IM user will automatically link to the selected HA user, with independent persona and memory.",
+        "title": "User Linking",
+        "description": "**What this does**\nLink external IM identities (Feishu, WeChat, QQ, etc.) to HA household members. Each member gets their **own persona and conversation memory**.\n\n**Before you start**\nInstall and enable **cn_im_hub** under Settings → Devices & services, and add at least one IM channel.\n\n{cn_im_hub_status}{mapping_status}",
+        "menu_options": {
+          "um_pick_channel": "＋ Add link",
+          "um_remove": "－ Remove link"
+        },
         "data": {
-          "action": "Action",
-          "provider": "IM Platform",
-          "ext_id": "External User Identifier",
-          "ext_id_manual": "Manual Input: External ID",
-          "ha_user": "Link to HA User",
-          "remove_key": "Select mapping to remove"
+          "back": "Back to previous menu"
+        }
+      },
+      "um_pick_channel": {
+        "title": "Add Link | Select Channel",
+        "description": "**Step 1 of 3**\n\nPick an IM channel already configured in **cn_im_hub** (Feishu, WeChat, QQ, etc.).\n\nClick **Submit** to continue to external user selection.",
+        "data": {
+          "provider": "Channel",
+          "back": "Back"
         },
         "data_options": {
-          "action": {
-            "add": "Add mapping",
-            "remove": "Remove mapping"
-          },
           "provider": {
             "feishu": "Feishu",
             "wechat": "WeChat",
             "dingtalk": "DingTalk",
             "qq": "QQ",
             "wecom": "WeCom",
-            "xiaoyi": "XiaoYi"
-          },
-          "ext_id": {
-            "__manual__": "Manual input"
-          },
-          "ha_user": {
-            "": "Select user"
-          },
-          "remove_key": {
-            "": "No mappings to remove"
+            "xiaoyi": "XiaoYi",
+            "custom": "Custom"
           }
+        }
+      },
+      "um_pick_identity": {
+        "title": "Add Link | External User",
+        "description": "**Step 2 of 3**\n\nChannel: **{provider}**\n\nIdentities come from **cn_im_hub** known contacts and recent chats — **this channel only**. Choose **Manual input** if the ID is not listed.",
+        "data": {
+          "ext_id": "External User",
+          "ext_id_manual": "Manual ID",
+          "back": "Back"
+        },
+        "data_description": {
+          "ext_id": "Auto-detected from cn_im_hub and recent chats",
+          "ext_id_manual": "When Manual input is selected; no channel prefix"
+        },
+        "data_options": {
+          "ext_id": {
+            "__manual__": "Manual input…"
+          }
+        }
+      },
+      "um_pick_member": {
+        "title": "Add Link | Household Member",
+        "description": "**Step 3 of 3**\n\n- Channel: **{provider}**\n- External user: `{ext_id}`\n\nSelect an **HA household member** and click **Submit** to save the link.\n\nMembers must already have a login under Settings → Users.",
+        "data": {
+          "ha_user": "Link to",
+          "back": "Back"
+        },
+        "data_description": {
+          "ha_user": "Household member with an existing HA user account"
+        }
+      },
+      "um_remove": {
+        "title": "Remove Link",
+        "description": "**Remove a channel link**\n\nAfter removal, that external identity is no longer linked to the member. Persona files are kept.\n\n{mapping_status}\n\nSelect a link and click **Submit** to confirm.",
+        "data": {
+          "remove_key": "Link to remove",
+          "back": "Back"
         }
       }
     },
@@ -329,7 +405,13 @@
       "invalid_agent": "Please select a valid dialogue proxy entity",
       "no_agents_available": "No valid conversation proxy was found, make sure at least one conversation proxy is available",
       "no_installed_skills": "No installed skills yet. Install one via the InstallSkill AI tool.",
-      "no_installed_plugins": "No installed plugins yet. Copy Hermes-compatible plugins to the plugins directory."
+      "no_installed_plugins": "No installed plugins yet. Copy Hermes-compatible plugins to the plugins directory.",
+      "cn_im_hub_not_configured": "No loaded cn_im_hub channel found. Install cn_im_hub under Settings → Devices & services and add at least one IM channel, then return here.",
+      "invalid_provider": "Select a configured channel",
+      "invalid_ext_id": "Select or enter an external user ID",
+      "missing_ha_user": "No HA user available. Make sure you are signed in.",
+      "mapping_save_failed": "Failed to save the mapping. Check the logs.",
+      "mapping_not_found": "Mapping to remove was not found"
     },
     "abort": {
       "workspace_doc_saved": "Document saved and applied",

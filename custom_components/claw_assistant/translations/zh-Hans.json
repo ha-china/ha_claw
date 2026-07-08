@@ -41,7 +41,6 @@
         "menu_options": {
           "agent_settings": "配置智能代理 ｜ 首要、后备、总结链路",
           "conversation_settings": "调整对话风格 ｜ 显示、流式与维度",
-          "user_mapping": "IM 用户关联 ｜ 外部身份映射到 HA 用户",
           "workspace_editor": "编辑工作文档 ｜ 主提示词与技能资料",
           "skill_editor": "管理安装技能 ｜ 动态查看与编辑",
           "plugin_manager": "管理安装插件 ｜ Hermes 兼容插件"
@@ -61,11 +60,12 @@
       },
       "conversation_settings": {
         "title": "对话设置",
-        "description": "调整 AI 的对话策略、聊天体验和执行控制。",
+        "description": "调整 AI 的对话策略、聊天体验、执行控制与用户关联。",
         "menu_options": {
           "conv_dialog": "对话策略 ｜ 回复如何生成",
           "conv_display": "聊天体验 ｜ 窗口如何使用",
-          "conv_runtime": "执行控制 ｜ 任务如何运行"
+          "conv_runtime": "执行控制 ｜ 任务如何运行",
+          "user_mapping": "用户关联 ｜ 通道身份映射"
         }
       },
       "conv_dialog": {
@@ -81,6 +81,20 @@
         "data_description": {
           "conversation_mode": "• **精简模式** — 只显示最终回复内容，不标注 AI 来源\n• **标注来源** — 推荐，回复前标注是哪个 AI 在回答，如 (deepseek) 回复:\n• **多模型对比** — 所有配置的 AI 同时回答同一问题，各自标注名称并分隔显示",
           "enable_web_search": "启用后，AI 可在需要时自动补充联网搜索结果以提升回答质量"
+        },
+        "sections": {
+          "reply_policy": {
+            "name": "回复策略",
+            "description": "控制回复风格与是否启用联网搜索。",
+            "data": {
+              "conversation_mode": "对话模式",
+              "enable_web_search": "联网搜索"
+            },
+            "data_description": {
+              "conversation_mode": "• **精简模式** — 只显示最终回复内容，不标注 AI 来源\n• **标注来源** — 推荐，回复前标注是哪个 AI 在回答，如 (deepseek) 回复:\n• **多模型对比** — 所有配置的 AI 同时回答同一问题，各自标注名称并分隔显示",
+              "enable_web_search": "启用后，AI 可在需要时自动补充联网搜索结果以提升回答质量"
+            }
+          }
         }
       },
       "conv_display": {
@@ -173,6 +187,32 @@
           "identical_call_warn": "当 AI 使用完全相同的参数调用同一工具达到此次数时，系统会警告 AI 换一种思路",
           "identical_call_stop": "当 AI 使用完全相同的参数调用同一工具达到此次数时，系统会要求 AI 停止并向用户解释情况",
           "pipeline_timeout": "对话窗口等待 AI 完成的时长。处理复杂任务或多 AI 对话时，请调大以免 AI 被中途打断。"
+        },
+        "sections": {
+          "tool_loop": {
+            "name": "工具循环",
+            "description": "限制 AI 重复调用同一工具的次数与行为。",
+            "data": {
+              "max_tool_repeat": "工具重复上限",
+              "identical_call_warn": "相同调用警告阈值",
+              "identical_call_stop": "相同调用终止阈值"
+            },
+            "data_description": {
+              "max_tool_repeat": "AI 对同一工具的最大重复调用次数。超过此限制后，AI 将被强制终止当前方案，转而尝试其他方法或坦诚告知用户暂时无法解决",
+              "identical_call_warn": "当 AI 使用完全相同的参数调用同一工具达到此次数时，系统会警告 AI 换一种思路",
+              "identical_call_stop": "当 AI 使用完全相同的参数调用同一工具达到此次数时，系统会要求 AI 停止并向用户解释情况"
+            }
+          },
+          "pipeline": {
+            "name": "对话超时",
+            "description": "控制单次对话等待 AI 完成的最长时间。",
+            "data": {
+              "pipeline_timeout": "等待时长 (分钟)"
+            },
+            "data_description": {
+              "pipeline_timeout": "对话窗口等待 AI 完成的时长。处理复杂任务或多 AI 对话时，请调大以免 AI 被中途打断。"
+            }
+          }
         }
       },
       "workspace_editor": {
@@ -279,38 +319,70 @@
         }
       },
       "user_mapping": {
-        "title": "IM 用户关联设置",
-        "description": "**当前映射：**\n{current_mappings}\n\n**操作说明：**\n添加：选 IM 平台 → 选或填外部用户 ID → 选 HA 用户。\n删除：选要删的映射 → 提交。\n\n▸ **来自 IM 的用户标识** — 下拉列表自动填充已知的外部标识（从对话历史中检测），也可选择「手动输入」自行填写。\n▸ **映射生效后**，该 IM 用户发来的消息将自动关联到指定的 HA 用户，获得独立的 persona 和记忆。",
+        "title": "用户关联",
+        "description": "**功能说明**\n将飞书、微信、QQ 等 IM 通道里的外部身份，绑定到 HA 家庭成员。绑定后，每位成员拥有**独立的 persona 与对话记忆**，互不干扰。\n\n**使用前准备**\n需先在「设置 → 设备与服务」中安装并启用 **cn_im_hub**，并至少接入一个 IM 通道。\n\n{cn_im_hub_status}{mapping_status}",
+        "menu_options": {
+          "um_pick_channel": "＋ 添加关联",
+          "um_remove": "－ 删除关联"
+        },
         "data": {
-          "action": "操作类型",
-          "provider": "IM 平台",
-          "ext_id": "来自 IM 的用户标识",
-          "ext_id_manual": "手动输入用户标识",
-          "ha_user": "关联到 HA 用户",
-          "remove_key": "选择要删除的映射"
+          "back": "返回上级菜单"
+        }
+      },
+      "um_pick_channel": {
+        "title": "添加关联 ｜ 选择通道",
+        "description": "**第 1 步 / 共 3 步**\n\n请选择在 **cn_im_hub** 中已接入的 IM 通道（飞书、微信、QQ 等）。\n\n选定后点击**提交**，将自动进入「外部用户」选择页。",
+        "data": {
+          "provider": "通道平台",
+          "back": "返回"
         },
         "data_options": {
-          "action": {
-            "add": "添加映射",
-            "remove": "删除映射"
-          },
           "provider": {
             "feishu": "飞书",
             "wechat": "微信",
             "dingtalk": "钉钉",
             "qq": "QQ",
             "wecom": "企业微信",
-            "xiaoyi": "小艺"
-          },
-          "ext_id": {
-            "__manual__": "手动输入"
-          },
-          "ha_user": {
-            "": "选择用户"
-          },
-          "remove_key": {
-            "": "无映射可删"
+            "xiaoyi": "小艺",
+            "custom": "自定义"
           }
+        }
+      },
+      "um_pick_identity": {
+        "title": "添加关联 ｜ 外部用户",
+        "description": "**第 2 步 / 共 3 步**\n\n当前通道：**{provider}**\n\n以下身份来自 **cn_im_hub** 已知联系人与近期对话，**仅显示该通道**下的用户。若没有合适选项，请选择「手动输入」自行填写 ID。",
+        "data": {
+          "ext_id": "外部用户",
+          "ext_id_manual": "手动填写 ID",
+          "back": "返回"
+        },
+        "data_description": {
+          "ext_id": "从 cn_im_hub 与近期对话自动识别",
+          "ext_id_manual": "选手动输入时填写，不含通道前缀"
+        },
+        "data_options": {
+          "ext_id": {
+            "__manual__": "手动输入…"
+          }
+        }
+      },
+      "um_pick_member": {
+        "title": "添加关联 ｜ 家庭成员",
+        "description": "**第 3 步 / 共 3 步**\n\n- 通道：**{provider}**\n- 外部用户：`{ext_id}`\n\n选择要绑定的 **HA 家庭成员**，点击**提交**即可保存关联。\n\n成员须已在「设置 → 用户」中创建登录账号。",
+        "data": {
+          "ha_user": "关联到",
+          "back": "返回"
+        },
+        "data_description": {
+          "ha_user": "选择家庭成员；仅显示已创建的 HA 用户账号"
+        }
+      },
+      "um_remove": {
+        "title": "删除关联",
+        "description": "**删除通道绑定**\n\n解除映射后，该外部身份将不再关联到对应家庭成员，其 persona 文件仍保留。\n\n{mapping_status}\n\n选中要删除的映射并**提交**确认。",
+        "data": {
+          "remove_key": "要删除的映射",
+          "back": "返回"
         }
       }
     },
@@ -319,7 +391,13 @@
       "invalid_agent": "请选择有效的对话代理实体",
       "no_agents_available": "未找到有效的对话代理，请确保至少有一个对话代理可用",
       "no_installed_skills": "当前没有已安装的技能，可通过 AI 工具 InstallSkill 添加",
-      "no_installed_plugins": "当前没有已安装的插件，可将 Hermes 兼容插件复制到插件目录"
+      "no_installed_plugins": "当前没有已安装的插件，可将 Hermes 兼容插件复制到插件目录",
+      "cn_im_hub_not_configured": "未检测到已加载的 cn_im_hub 通道。请先在「设置 → 设备与服务」中安装 cn_im_hub 并接入至少一个 IM 通道，然后返回本页。",
+      "invalid_provider": "请选择已配置的通道",
+      "invalid_ext_id": "请填写或选择外部用户 ID",
+      "missing_ha_user": "未找到可用的 HA 用户，请确认已登录",
+      "mapping_save_failed": "保存映射失败，请查看日志",
+      "mapping_not_found": "未找到要删除的映射"
     },
     "abort": {
       "workspace_doc_saved": "文档已保存并生效",

@@ -9,7 +9,6 @@ from __future__ import annotations
 import logging
 from pathlib import Path
 
-from ...const import IM_CHANNEL_NAMES
 from ..utils.data_path import get_data_dir
 
 LOGGER = logging.getLogger(__name__)
@@ -19,14 +18,6 @@ _MAPPING_FILE = "workspace/user_mapping.yaml"
 
 def _mapping_path() -> Path:
     return get_data_dir() / _MAPPING_FILE
-
-
-def _im_prefix_provider_pairs() -> list[tuple[str, str]]:
-    pairs: list[tuple[str, str]] = []
-    for prefix in IM_CHANNEL_NAMES:
-        provider = prefix.rstrip(":").lower()
-        pairs.append((prefix.lower(), provider))
-    return pairs
 
 
 class MappingStore:
@@ -50,15 +41,13 @@ class MappingStore:
 
     @staticmethod
     def _resolve_by_prefix(conv_id: str) -> str | None:
-        # #### @C3H3-AI ha_claw#14 — MappingStore._resolve_by_prefix()
-        lowered_conv_id = conv_id.lower()
-        for prefix, provider in _im_prefix_provider_pairs():
-            if lowered_conv_id.startswith(prefix):
-                rest = conv_id[len(prefix):]
-                parts = rest.split(":", 1)
-                ext_id = parts[1] if len(parts) >= 2 else parts[0]
-                return MappingStore.resolve(provider, ext_id)
-        return None
+        from .im_channel_helpers import parse_im_conversation_id
+
+        parsed = parse_im_conversation_id(conv_id)
+        if not parsed:
+            return None
+        provider, ext_id = parsed
+        return MappingStore.resolve(provider, ext_id)
 
     @staticmethod
     def load() -> list[dict[str, str]]:
@@ -82,7 +71,7 @@ class MappingStore:
         return []
 
     @staticmethod
-    def save(mappings: list[dict[str, str]]) -> None:
+    def save(mappings: list[dict[str, str]]) -> bool:
         path = _mapping_path()
         try:
             import yaml
@@ -90,11 +79,13 @@ class MappingStore:
             path.parent.mkdir(parents=True, exist_ok=True)
             with open(path, "w", encoding="utf-8") as f:
                 yaml.dump(mappings, f, default_flow_style=False, allow_unicode=True)
+            return True
         except Exception as exc:
             LOGGER.error("Failed to save user mapping: %s", exc)
+            return False
 
     @staticmethod
-    def set(provider: str, ext_id: str, ha_user_id: str) -> None:
+    def set(provider: str, ext_id: str, ha_user_id: str) -> bool:
         mappings = MappingStore.load()
         mappings = [
             e
@@ -108,14 +99,17 @@ class MappingStore:
                 "ha_user_id": ha_user_id,
             }
         )
-        MappingStore.save(mappings)
+        return MappingStore.save(mappings)
 
     @staticmethod
-    def remove(provider: str, ext_id: str) -> None:
+    def remove(provider: str, ext_id: str) -> bool:
         mappings = MappingStore.load()
+        before = len(mappings)
         mappings = [
             e
             for e in mappings
             if not (e.get("provider") == provider and e.get("ext_id") == ext_id)
         ]
-        MappingStore.save(mappings)
+        if len(mappings) == before:
+            return False
+        return MappingStore.save(mappings)
