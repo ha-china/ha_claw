@@ -130,6 +130,47 @@ def _agent_selector(hass: HomeAssistant) -> SelectSelector:
         SelectSelectorConfig(options=_get_agent_options(hass), mode=SelectSelectorMode.DROPDOWN)
     )
 
+_IM_PREFIXES = ("feishu:", "wechat:", "dingtalk:", "qq:", "wecom:", "xiaoyi:")
+
+
+@callback
+def _get_known_im_identifiers(hass: HomeAssistant) -> dict[str, str]:
+    """Collect known external IM user identifiers.
+
+    Sources: existing mappings + active conversation history.
+    Returns dict {ext_id: display_label} for vol.In().
+    Labels are language-neutral (just the raw identifiers) because the
+    provider is already selected in a separate dropdown above.
+    """
+    from .runtime.storage.user_mapping import MappingStore
+    from .conversation_utils import get_conversation_history
+
+    seen: dict[str, str] = {}
+
+    # 1) Already-mapped identifiers — key by ext_id directly
+    for m in MappingStore._load():
+        e = m.get("ext_id", "")
+        if e and e not in seen:
+            seen[e] = e
+
+    # 2) Active conversation IDs with IM prefix
+    history = get_conversation_history()
+    for conv_id in list(history._histories.keys()):
+        conv_id_lower = conv_id.lower()
+        for prefix in _IM_PREFIXES:
+            if conv_id_lower.startswith(prefix):
+                rest = conv_id[len(prefix):]
+                parts = rest.split(":", 1)
+                ext_id = parts[-1]  # last segment is the user identifier
+                if ext_id and ext_id not in seen:
+                    seen[ext_id] = ext_id
+                break
+
+    if not seen:
+        seen["__manual__"] = "__manual_input__"
+    return seen
+
+
 class ClawAssistantConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     VERSION = 1
 
@@ -257,11 +298,91 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
             menu_options=[
                 "agent_settings",
                 "conversation_settings",
+                "user_mapping",
                 "workspace_editor",
                 "skill_editor",
                 "plugin_manager",
             ],
             description_placeholders={"integration_title": "integration_title", "current_config": "current_config"},
+        )
+
+    async def async_step_user_mapping(self, user_input: dict[str, Any] | None = None) -> FlowResult:
+        """Manage external IM → HA user identity mapping."""
+        from .runtime.storage.user_mapping import MappingStore
+
+        if user_input is not None:
+            action = user_input.get("action")
+            if action == "add":
+                provider = user_input.get("provider", "")
+                ext_id = user_input.get("ext_id", "")
+                ha_user = user_input.get("ha_user", "")
+                # Handle manual input: strip prefix if user typed full id
+                if ext_id == "__manual__":
+                    ext_id = user_input.get("ext_id_manual", "").strip()
+                if provider and ext_id and ha_user:
+                    # ha_user format: "name (id...)"
+                    ha_user_id = ha_user.split("(")[-1].rstrip(")") if "(" in ha_user else ha_user
+                    MappingStore.set(provider, ext_id, ha_user_id)
+            elif action == "remove":
+                remove_key = user_input.get("remove_key", "")
+                if remove_key:
+                    parts = remove_key.split(":", 1)
+                    if len(parts) == 2:
+                        MappingStore.remove(parts[0], parts[1])
+            return await self.async_step_user_mapping()
+
+        # Build current mappings display
+        mappings = MappingStore._load()
+        current_lines = []
+        remove_options = {}
+        if mappings:
+            for m in mappings:
+                p = m.get("provider", "?")
+                e = m.get("ext_id", "?")
+                h = m.get("ha_user_id", "?")[:12]
+                label = f"{p}: {e[:30]} → {h}..."
+                current_lines.append(label)
+                remove_options[f"{p}:{e}"] = label
+            current_text = "\n".join(current_lines) if current_lines else "暂无"
+        else:
+            current_text = "暂无"
+            remove_options[""] = "-- 无映射可删 --"
+
+        # Load HA users for dropdown
+        users = await self.hass.auth.async_get_users()
+        user_options = {"": "-- 选择用户 --"}
+        for u in users:
+            if not u.system_generated and u.is_active:
+                user_options[u.id] = f"{u.name}"
+
+        # Load known IM identifiers for dropdown
+        im_ids = _get_known_im_identifiers(self.hass)
+
+        return self.async_show_form(
+            step_id="user_mapping",
+            data_schema=vol.Schema({
+                vol.Required("action", default="add"): vol.In({
+                    "add": "➕ 添加映射",
+                    "remove": "🗑️ 删除映射",
+                }),
+                # Add fields
+                vol.Optional("provider", default="feishu"): vol.In({
+                    "feishu": "飞书 Feishu",
+                    "wechat": "微信 WeChat",
+                    "dingtalk": "钉钉 DingTalk",
+                    "qq": "QQ",
+                    "wecom": "企业微信 WeCom",
+                    "xiaoyi": "小艺 XiaoYi",
+                }),
+                vol.Optional("ext_id", default=""): vol.In(im_ids),
+                vol.Optional("ext_id_manual", default=""): str,
+                vol.Optional("ha_user", default=""): vol.In(user_options),
+                # Remove fields
+                vol.Optional("remove_key", default=""): vol.In(remove_options),
+            }),
+            description_placeholders={
+                "current_mappings": current_text,
+            },
         )
 
     async def async_step_workspace_editor(self, user_input: dict[str, Any] | None = None) -> FlowResult:

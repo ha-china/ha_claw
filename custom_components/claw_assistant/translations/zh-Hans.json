@@ -41,6 +41,7 @@
         "menu_options": {
           "agent_settings": "配置智能代理 ｜ 首要、后备、总结链路",
           "conversation_settings": "调整对话风格 ｜ 显示、流式与维度",
+          "user_mapping": "IM 用户关联 ｜ 外部身份映射到 HA 用户",
           "workspace_editor": "编辑工作文档 ｜ 主提示词与技能资料",
           "skill_editor": "管理安装技能 ｜ 动态查看与编辑",
           "plugin_manager": "管理安装插件 ｜ Hermes 兼容插件"
@@ -275,6 +276,18 @@
         "data": {
           "confirm_delete": "是的，删除该插件",
           "back": "返回插件列表"
+        }
+      },
+      "user_mapping": {
+        "title": "IM 用户关联设置",
+        "description": "**当前映射：**\n{current_mappings}\n\n**操作说明：**\n添加：选 IM 平台 → 选或填外部用户 ID → 选 HA 用户。\n删除：选要删的映射 → 提交。\n\n▸ **来自 IM 的用户标识** — 下拉列表自动填充已知的外部标识（从对话历史中检测），也可选择「手动输入」自行填写。\n▸ **映射生效后**，该 IM 用户发来的消息将自动关联到指定的 HA 用户，获得独立的 persona 和记忆。",
+        "data": {
+          "action": "操作类型",
+          "provider": "IM 平台",
+          "ext_id": "来自 IM 的用户标识",
+          "ext_id_manual": "手动输入用户标识",
+          "ha_user": "关联到 HA 用户",
+          "remove_key": "选择要删除的映射"
         }
       }
     },

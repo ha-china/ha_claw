@@ -24,6 +24,8 @@ from .runtime import (
     get_runtime_store,
 )
 from .runtime.agent.orchestrator import execute_conversation_turn
+from .runtime.storage.persona_store import PersonaStore
+from .runtime.storage.user_mapping import MappingStore
 from .runtime.utils.i18n import t
 from .runtime.llm.response_format import sanitize_response_text
 
@@ -111,6 +113,45 @@ class FallbackConversationAgent(
     ) -> None:
         self._attr_supported_features = conversation.ConversationEntityFeature.CONTROL
 
+    @staticmethod
+    def _resolve_user_key(user_input: conversation.ConversationInput) -> str | None:
+        """Resolve user_key from ConversationInput.
+
+        Priority:
+        1. context.user_id (HA App, deterministric)
+        2. conversation_id → parse → MappingStore → HA user_id
+        3. conversation_id → parse → shadow:{provider}:{ext_id}
+        4. None (global fallback)
+        """
+        # Path 1: HA App deterministric identity
+        ctx = getattr(user_input, "context", None)
+        if ctx and getattr(ctx, "user_id", None):
+            user_id = ctx.user_id
+            if user_id:
+                return user_id
+
+        # Path 2 & 3: external IM via conversation_id
+        conv_id = getattr(user_input, "conversation_id", None)
+        if conv_id:
+            # Path 2: check MappingStore first
+            mapped = MappingStore.resolve_by_conversation_id(conv_id)
+            if mapped:
+                return mapped
+            # Path 3: shadow identity — parse provider + ext_id
+            from .const import IM_CHANNEL_NAMES
+            for prefix in IM_CHANNEL_NAMES:
+                if conv_id.lower().startswith(prefix.lower()):
+                    provider = IM_CHANNEL_NAMES[prefix]
+                    rest = conv_id[len(prefix):]
+                    parts = rest.split(":", 1)
+                    ext_id = parts[1] if len(parts) >= 2 else parts[0]
+                    shadow_key = f"shadow:{provider.lower()}:{ext_id}"
+                    PersonaStore.touch_shadow(shadow_key)
+                    return shadow_key
+
+        # Path 4: fallback to global
+        return None
+
     async def async_process(
         self, user_input: conversation.ConversationInput
     ) -> conversation.ConversationResult:
@@ -132,6 +173,14 @@ class FallbackConversationAgent(
 
 
 
+
+        # Resolve user identity for personalization (BEFORE ULID assignment,
+        # so that external IM conversation_id is available for parsing)
+        user_key = self._resolve_user_key(user_input)
+        # Auto-create default persona if none exists (first conversation)
+        if user_key is not None:
+            PersonaStore.ensure(user_key, self.hass)
+        _user_persona_prompt = PersonaStore.build_system_prompt(user_key)
 
         if user_input.conversation_id is None:
             user_input = conversation.ConversationInput(
@@ -193,6 +242,14 @@ class FallbackConversationAgent(
 
             extra_system_prompt = getattr(user_input, "extra_system_prompt", None)
 
+            # Inject persona prompt into system prompt (turn 1+ dual injection)
+            caller_prompt = extra_system_prompt
+            if _user_persona_prompt:
+                if caller_prompt:
+                    extra_system_prompt = f"{_user_persona_prompt}\n\n{caller_prompt}"
+                else:
+                    extra_system_prompt = _user_persona_prompt
+
             delegated_agent_id = getattr(user_input, "agent_id", None)
             if delegated_agent_id == self.entry.entry_id:
                 delegated_agent_id = None
@@ -209,6 +266,7 @@ class FallbackConversationAgent(
                 device_id=getattr(user_input, "device_id", None),
                 satellite_id=getattr(user_input, "satellite_id", None),
                 extra_system_prompt=extra_system_prompt,
+                user_key=user_key,
             )
             return self._finalize_result(result)
         except asyncio.CancelledError:

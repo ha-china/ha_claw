@@ -365,6 +365,7 @@ async def execute_conversation_turn(
     device_id=None,
     satellite_id=None,
     extra_system_prompt=None,
+    user_key=None,
 ):
 
     conv_token = set_active_conversation(conversation_id)
@@ -418,6 +419,7 @@ async def execute_conversation_turn(
             device_id=device_id,
             satellite_id=satellite_id,
             extra_system_prompt=extra_system_prompt,
+            user_key=user_key,
         )
         return turn_result
     finally:
@@ -468,6 +470,7 @@ async def _execute_conversation_turn_inner(
     device_id=None,
     satellite_id=None,
     extra_system_prompt=None,
+    user_key=None,
 ):
 
     task_loop = get_task_loop_state(hass)
@@ -556,7 +559,7 @@ async def _execute_conversation_turn_inner(
         reset_tool_guide_seen()
 
     if int(task_loop.get("turn_count", 0) or 0) > 1:
-        user_prefix = get_user_context_prefix()
+        user_prefix = get_user_context_prefix(user_key=user_key)
         if user_prefix:
             text = f"{user_prefix}\n\n{text}"
     else:
@@ -588,7 +591,7 @@ async def _execute_conversation_turn_inner(
         break
     if _act_enabled:
         from ..storage.user_activity import build_activity_prompt_section, build_system_events_prompt_section
-        _act_section = build_activity_prompt_section(hass)
+        _act_section = build_activity_prompt_section(hass, user_key=user_key)
         if _act_section:
             text = f"<activity-context>\n{_act_section}\n</activity-context>\n\n{text}"
         _events_section = build_system_events_prompt_section(hass)

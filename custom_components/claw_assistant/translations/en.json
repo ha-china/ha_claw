@@ -41,6 +41,7 @@
         "menu_options": {
           "agent_settings": "Configure AI Agents | Primary, fallback, summarizer chain",
           "conversation_settings": "Tune Conversation Style | Display, streaming & dimensions",
+          "user_mapping": "IM User Mapping | Link external identities to HA users",
           "workspace_editor": "Edit Workspace Docs | Master prompt & skill library",
           "skill_editor": "Manage Installed Skills | Live view & edit",
           "plugin_manager": "Manage Plugins | Hermes compatible plugins"
@@ -285,6 +286,18 @@
         "data": {
           "confirm_delete": "Yes, delete this plugin",
           "back": "Back to plugin list"
+        }
+      },
+      "user_mapping": {
+        "title": "IM User Mapping",
+        "description": "**Current mappings:**\n{current_mappings}\n\n**Instructions:**\nAdd: Select IM platform → pick or type external user ID → select HA user.\nRemove: Select mapping to delete → submit.\n\n▸ **External User ID** — Dropdown auto-fills known external identities (detected from conversation history). Choose \"manual input\" at the bottom to type a custom ID.\n▸ **Once mapped**, messages from this IM user will automatically link to the selected HA user, with independent persona and memory.",
+        "data": {
+          "action": "Action",
+          "provider": "IM Platform",
+          "ext_id": "External User Identifier",
+          "ext_id_manual": "Manual Input: External ID",
+          "ha_user": "Link to HA User",
+          "remove_key": "Select mapping to remove"
         }
       }
     },

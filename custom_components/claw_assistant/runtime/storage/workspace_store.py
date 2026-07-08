@@ -520,7 +520,19 @@ def _build_user_prompt_block(content: str) -> str:
     return "\n".join(selected)
 
 
-def get_user_context_prefix() -> str:
+def get_user_context_prefix(user_key: str | None = None) -> str:
+    """Build identity prefix for user text injection.
+
+    When user_key is provided and a persona file exists, returns the per-user
+    identity prefix. When user_key is None or persona file is absent, falls
+    back to the global workspace snapshot identity (backward compatible).
+    """
+    if user_key is not None:
+        from .persona_store import PersonaStore
+        prefix = PersonaStore.build_user_context_prefix(user_key)
+        if prefix:
+            return prefix
+
     snapshot = _WORKSPACE_STORE.get("snapshot") or WorkspaceSnapshot()
     user_block = _build_user_prompt_block(snapshot.user)
     identity_block = _build_user_prompt_block(snapshot.identity)
