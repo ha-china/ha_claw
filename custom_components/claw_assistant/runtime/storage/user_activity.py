@@ -14,6 +14,7 @@ _MAX_ACTIONS = 10
 _ACTIVITY_USER_BUCKETS_KEY = "claw_user_activity_buckets"
 _ACTIVITY_BUCKET_ORDER_KEY = "claw_user_activity_bucket_order"
 _MAX_USER_BUCKETS = 20
+_ACTIVE_USER_KEY = "claw_active_user_key"
 
 _EVENTS_KEY = "claw_system_events_ring"
 _MAX_EVENTS = 2 
@@ -23,21 +24,31 @@ _EVENT_UNSUB_KEY = "claw_event_listener_unsub"
 _EVENT_SEEN_KEY = "claw_event_seen_keys"
 
 
+def set_active_user_key(hass: HomeAssistant, user_key: str | None) -> None:
+    domain = hass.data.setdefault("claw_assistant", {})
+    if user_key is None:
+        domain.pop(_ACTIVE_USER_KEY, None)
+    else:
+        domain[_ACTIVE_USER_KEY] = user_key
+
+
+def get_active_user_key(hass: HomeAssistant) -> str | None:
+    return hass.data.get("claw_assistant", {}).get(_ACTIVE_USER_KEY)
+
+
 def _ring(hass: HomeAssistant, user_key: str | None = None) -> deque:
     domain = hass.data.setdefault("claw_assistant", {})
 
     if user_key is None:
-        # Global bucket (backward compatible)
         if _ACTIVITY_KEY not in domain:
             domain[_ACTIVITY_KEY] = deque(maxlen=_MAX_ACTIONS)
         return domain[_ACTIVITY_KEY]
 
-    # Per-user bucket
+    # #### @C3H3-AI ha_claw#14 — per-user activity bucket
     buckets: dict[str, deque] = domain.setdefault(_ACTIVITY_USER_BUCKETS_KEY, {})
     bucket_order: list[str] = domain.setdefault(_ACTIVITY_BUCKET_ORDER_KEY, [])
 
     if user_key not in buckets:
-        # Enforce max user bucket limit: evict LRU
         while len(buckets) >= _MAX_USER_BUCKETS and bucket_order:
             oldest = bucket_order.pop(0)
             if oldest in buckets:

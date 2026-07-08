@@ -9,6 +9,7 @@ from __future__ import annotations
 import logging
 from pathlib import Path
 
+from ...const import IM_CHANNEL_NAMES
 from ..utils.data_path import get_data_dir
 
 LOGGER = logging.getLogger(__name__)
@@ -20,19 +21,22 @@ def _mapping_path() -> Path:
     return get_data_dir() / _MAPPING_FILE
 
 
+def _im_prefix_provider_pairs() -> list[tuple[str, str]]:
+    pairs: list[tuple[str, str]] = []
+    for prefix in IM_CHANNEL_NAMES:
+        provider = prefix.rstrip(":").lower()
+        pairs.append((prefix.lower(), provider))
+    return pairs
+
+
 class MappingStore:
     """Persistent mapping from external IM identity to HA user_id."""
 
     @staticmethod
     def resolve(provider: str | None, ext_id: str | None) -> str | None:
-        """Look up ha_user_id by IM provider + external user ID.
-
-        Returns:
-            ha_user_id if mapping found, None otherwise.
-        """
         if not provider or not ext_id:
             return None
-        mappings = MappingStore._load()
+        mappings = MappingStore.load()
         for entry in mappings:
             if entry.get("provider") == provider and entry.get("ext_id") == ext_id:
                 return entry.get("ha_user_id")
@@ -40,31 +44,16 @@ class MappingStore:
 
     @staticmethod
     def resolve_by_conversation_id(conversation_id: str | None) -> str | None:
-        """Parse conversation_id and look up mapping.
-
-        Expected format: '{provider}:{account}:{user_id}'
-        Example: 'feishu:oc_xxx:user_123'
-        """
         if not conversation_id:
             return None
         return MappingStore._resolve_by_prefix(conversation_id)
 
     @staticmethod
     def _resolve_by_prefix(conv_id: str) -> str | None:
-        """Try each known IM prefix to extract provider and ext_id."""
-        # Known IM prefixes from const.IM_CHANNEL_NAMES
-        prefixes = [
-            ("wechat:", "wechat"),
-            ("feishu:", "feishu"),
-            ("dingtalk:", "dingtalk"),
-            ("qq:", "qq"),
-            ("wecom:", "wecom"),
-            ("xiaoyi:", "xiaoyi"),
-        ]
-        for prefix, provider in prefixes:
-            if conv_id.lower().startswith(prefix):
-                # Format: {provider}:{identifier}
-                # identifier could be 'account:user_id' or just 'open_id'
+        # #### @C3H3-AI ha_claw#14 — MappingStore._resolve_by_prefix()
+        lowered_conv_id = conv_id.lower()
+        for prefix, provider in _im_prefix_provider_pairs():
+            if lowered_conv_id.startswith(prefix):
                 rest = conv_id[len(prefix):]
                 parts = rest.split(":", 1)
                 ext_id = parts[1] if len(parts) >= 2 else parts[0]
@@ -72,19 +61,18 @@ class MappingStore:
         return None
 
     @staticmethod
-    def _load() -> list[dict[str, str]]:
-        """Load mappings from YAML file."""
+    def load() -> list[dict[str, str]]:
         path = _mapping_path()
         if not path.exists():
             return []
 
         try:
             import yaml
+
             text = path.read_text(encoding="utf-8")
             data = yaml.safe_load(text)
             if isinstance(data, list):
                 return data
-            # Also handle 'mappings:' key format
             if isinstance(data, dict):
                 entries = data.get("mappings")
                 if isinstance(entries, list):
@@ -95,10 +83,10 @@ class MappingStore:
 
     @staticmethod
     def save(mappings: list[dict[str, str]]) -> None:
-        """Save mappings to YAML file."""
         path = _mapping_path()
         try:
             import yaml
+
             path.parent.mkdir(parents=True, exist_ok=True)
             with open(path, "w", encoding="utf-8") as f:
                 yaml.dump(mappings, f, default_flow_style=False, allow_unicode=True)
@@ -107,26 +95,27 @@ class MappingStore:
 
     @staticmethod
     def set(provider: str, ext_id: str, ha_user_id: str) -> None:
-        """Add or update a single mapping entry."""
-        mappings = MappingStore._load()
-        # Remove existing entry for same provider+ext_id
+        mappings = MappingStore.load()
         mappings = [
-            e for e in mappings
+            e
+            for e in mappings
             if not (e.get("provider") == provider and e.get("ext_id") == ext_id)
         ]
-        mappings.append({
-            "provider": provider,
-            "ext_id": ext_id,
-            "ha_user_id": ha_user_id,
-        })
+        mappings.append(
+            {
+                "provider": provider,
+                "ext_id": ext_id,
+                "ha_user_id": ha_user_id,
+            }
+        )
         MappingStore.save(mappings)
 
     @staticmethod
     def remove(provider: str, ext_id: str) -> None:
-        """Remove a mapping entry."""
-        mappings = MappingStore._load()
+        mappings = MappingStore.load()
         mappings = [
-            e for e in mappings
+            e
+            for e in mappings
             if not (e.get("provider") == provider and e.get("ext_id") == ext_id)
         ]
         MappingStore.save(mappings)

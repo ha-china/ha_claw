@@ -1538,10 +1538,12 @@ async def websocket_dialog_snapshot(hass, connection, msg):
 )
 @websocket_api.async_response
 async def websocket_user_activity(hass, connection, msg):
-    from ..storage.user_activity import record_activity
+    from ..storage.user_activity import get_active_user_key, record_activity
+
+    user_key = get_active_user_key(hass)
     for action in msg["actions"][:10]:
         if isinstance(action, dict):
-            record_activity(hass, action)
+            record_activity(hass, action, user_key=user_key)
     connection.send_result(msg["id"])
 
 

@@ -25,6 +25,7 @@ from .runtime import (
 )
 from .runtime.agent.orchestrator import execute_conversation_turn
 from .runtime.storage.persona_store import PersonaStore
+from .runtime.storage.user_activity import set_active_user_key
 from .runtime.storage.user_mapping import MappingStore
 from .runtime.utils.i18n import t
 from .runtime.llm.response_format import sanitize_response_text
@@ -115,41 +116,30 @@ class FallbackConversationAgent(
 
     @staticmethod
     def _resolve_user_key(user_input: conversation.ConversationInput) -> str | None:
-        """Resolve user_key from ConversationInput.
-
-        Priority:
-        1. context.user_id (HA App, deterministric)
-        2. conversation_id → parse → MappingStore → HA user_id
-        3. conversation_id → parse → shadow:{provider}:{ext_id}
-        4. None (global fallback)
-        """
-        # Path 1: HA App deterministric identity
+        # #### @C3H3-AI ha_claw#14 — _resolve_user_key()
         ctx = getattr(user_input, "context", None)
         if ctx and getattr(ctx, "user_id", None):
             user_id = ctx.user_id
             if user_id:
                 return user_id
 
-        # Path 2 & 3: external IM via conversation_id
         conv_id = getattr(user_input, "conversation_id", None)
         if conv_id:
-            # Path 2: check MappingStore first
             mapped = MappingStore.resolve_by_conversation_id(conv_id)
             if mapped:
                 return mapped
-            # Path 3: shadow identity — parse provider + ext_id
             from .const import IM_CHANNEL_NAMES
+
             for prefix in IM_CHANNEL_NAMES:
                 if conv_id.lower().startswith(prefix.lower()):
-                    provider = IM_CHANNEL_NAMES[prefix]
+                    provider = prefix.rstrip(":").lower()
                     rest = conv_id[len(prefix):]
                     parts = rest.split(":", 1)
                     ext_id = parts[1] if len(parts) >= 2 else parts[0]
-                    shadow_key = f"shadow:{provider.lower()}:{ext_id}"
+                    shadow_key = f"shadow:{provider}:{ext_id}"
                     PersonaStore.touch_shadow(shadow_key)
                     return shadow_key
 
-        # Path 4: fallback to global
         return None
 
     async def async_process(
@@ -174,10 +164,9 @@ class FallbackConversationAgent(
 
 
 
-        # Resolve user identity for personalization (BEFORE ULID assignment,
-        # so that external IM conversation_id is available for parsing)
         user_key = self._resolve_user_key(user_input)
-        # Auto-create default persona if none exists (first conversation)
+        set_active_user_key(self.hass, user_key)
+        # #### @C3H3-AI ha_claw#14 — persona resolve + inject
         if user_key is not None:
             PersonaStore.ensure(user_key, self.hass)
         _user_persona_prompt = PersonaStore.build_system_prompt(user_key)
@@ -242,8 +231,8 @@ class FallbackConversationAgent(
 
             extra_system_prompt = getattr(user_input, "extra_system_prompt", None)
 
-            # Inject persona prompt into system prompt (turn 1+ dual injection)
             caller_prompt = extra_system_prompt
+            # #### @C3H3-AI ha_claw#14 — merge persona into extra_system_prompt
             if _user_persona_prompt:
                 if caller_prompt:
                     extra_system_prompt = f"{_user_persona_prompt}\n\n{caller_prompt}"

@@ -54,6 +54,7 @@ from .const import (
     DEFAULT_PIPELINE_TIMEOUT,
     DEFAULT_PRIMARY_AGENT,
     DOMAIN,
+    IM_CHANNEL_NAMES,
 )
 
 LOGGER = logging.getLogger(__name__)
@@ -130,38 +131,31 @@ def _agent_selector(hass: HomeAssistant) -> SelectSelector:
         SelectSelectorConfig(options=_get_agent_options(hass), mode=SelectSelectorMode.DROPDOWN)
     )
 
-_IM_PREFIXES = ("feishu:", "wechat:", "dingtalk:", "qq:", "wecom:", "xiaoyi:")
+
+def _provider_option_keys() -> list[str]:
+    return [prefix.rstrip(":") for prefix in IM_CHANNEL_NAMES]
 
 
 @callback
 def _get_known_im_identifiers(hass: HomeAssistant) -> dict[str, str]:
-    """Collect known external IM user identifiers.
-
-    Sources: existing mappings + active conversation history.
-    Returns dict {ext_id: display_label} for vol.In().
-    Labels are language-neutral (just the raw identifiers) because the
-    provider is already selected in a separate dropdown above.
-    """
-    from .runtime.storage.user_mapping import MappingStore
     from .conversation_utils import get_conversation_history
+    from .runtime.storage.user_mapping import MappingStore
 
     seen: dict[str, str] = {}
 
-    # 1) Already-mapped identifiers — key by ext_id directly
-    for m in MappingStore._load():
-        e = m.get("ext_id", "")
-        if e and e not in seen:
-            seen[e] = e
+    for m in MappingStore.load():
+        ext_id = m.get("ext_id", "")
+        if ext_id and ext_id not in seen:
+            seen[ext_id] = ext_id
 
-    # 2) Active conversation IDs with IM prefix
     history = get_conversation_history()
-    for conv_id in list(history._histories.keys()):
+    for conv_id in history.list_conversation_ids():
         conv_id_lower = conv_id.lower()
-        for prefix in _IM_PREFIXES:
-            if conv_id_lower.startswith(prefix):
+        for prefix in IM_CHANNEL_NAMES:
+            if conv_id_lower.startswith(prefix.lower()):
                 rest = conv_id[len(prefix):]
-                parts = rest.split(":", 1)
-                ext_id = parts[-1]  # last segment is the user identifier
+                parts = rest.split(":")
+                ext_id = parts[-1]
                 if ext_id and ext_id not in seen:
                     seen[ext_id] = ext_id
                 break
@@ -169,6 +163,11 @@ def _get_known_im_identifiers(hass: HomeAssistant) -> dict[str, str]:
     if not seen:
         seen["__manual__"] = "__manual_input__"
     return seen
+
+
+def _empty_mappings_label(hass: HomeAssistant) -> str:
+    lang = hass.config.language or "en"
+    return "暂无" if lang.startswith("zh") else "(none)"
 
 
 class ClawAssistantConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
@@ -307,7 +306,6 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
         )
 
     async def async_step_user_mapping(self, user_input: dict[str, Any] | None = None) -> FlowResult:
-        """Manage external IM → HA user identity mapping."""
         from .runtime.storage.user_mapping import MappingStore
 
         if user_input is not None:
@@ -316,13 +314,10 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
                 provider = user_input.get("provider", "")
                 ext_id = user_input.get("ext_id", "")
                 ha_user = user_input.get("ha_user", "")
-                # Handle manual input: strip prefix if user typed full id
                 if ext_id == "__manual__":
                     ext_id = user_input.get("ext_id_manual", "").strip()
                 if provider and ext_id and ha_user:
-                    # ha_user format: "name (id...)"
-                    ha_user_id = ha_user.split("(")[-1].rstrip(")") if "(" in ha_user else ha_user
-                    MappingStore.set(provider, ext_id, ha_user_id)
+                    MappingStore.set(provider, ext_id, ha_user)
             elif action == "remove":
                 remove_key = user_input.get("remove_key", "")
                 if remove_key:
@@ -331,53 +326,44 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
                         MappingStore.remove(parts[0], parts[1])
             return await self.async_step_user_mapping()
 
-        # Build current mappings display
-        mappings = MappingStore._load()
+        # #### @C3H3-AI ha_claw#14 — async_step_user_mapping form
+        mappings = MappingStore.load()
         current_lines = []
-        remove_options = {}
+        remove_options: dict[str, str] = {}
         if mappings:
             for m in mappings:
-                p = m.get("provider", "?")
-                e = m.get("ext_id", "?")
-                h = m.get("ha_user_id", "?")[:12]
-                label = f"{p}: {e[:30]} → {h}..."
+                provider = m.get("provider", "?")
+                ext_id = m.get("ext_id", "?")
+                ha_user_id = m.get("ha_user_id", "?")[:12]
+                label = f"{provider}: {ext_id[:30]} → {ha_user_id}..."
                 current_lines.append(label)
-                remove_options[f"{p}:{e}"] = label
-            current_text = "\n".join(current_lines) if current_lines else "暂无"
+                remove_options[f"{provider}:{ext_id}"] = label
+            current_text = "\n".join(current_lines)
         else:
-            current_text = "暂无"
-            remove_options[""] = "-- 无映射可删 --"
+            current_text = _empty_mappings_label(self.hass)
+            remove_options[""] = ""
 
-        # Load HA users for dropdown
         users = await self.hass.auth.async_get_users()
-        user_options = {"": "-- 选择用户 --"}
-        for u in users:
-            if not u.system_generated and u.is_active:
-                user_options[u.id] = f"{u.name}"
+        user_options: dict[str, str] = {"": ""}
+        for user in users:
+            if not user.system_generated and user.is_active:
+                user_options[user.id] = f"{user.name}"
 
-        # Load known IM identifiers for dropdown
         im_ids = _get_known_im_identifiers(self.hass)
+        ext_id_default = (
+            "__manual__" if "__manual__" in im_ids else next(iter(im_ids))
+        )
+        provider_keys = _provider_option_keys()
+        provider_default = "feishu" if "feishu" in provider_keys else provider_keys[0]
 
         return self.async_show_form(
             step_id="user_mapping",
             data_schema=vol.Schema({
-                vol.Required("action", default="add"): vol.In({
-                    "add": "➕ 添加映射",
-                    "remove": "🗑️ 删除映射",
-                }),
-                # Add fields
-                vol.Optional("provider", default="feishu"): vol.In({
-                    "feishu": "飞书 Feishu",
-                    "wechat": "微信 WeChat",
-                    "dingtalk": "钉钉 DingTalk",
-                    "qq": "QQ",
-                    "wecom": "企业微信 WeCom",
-                    "xiaoyi": "小艺 XiaoYi",
-                }),
-                vol.Optional("ext_id", default=""): vol.In(im_ids),
+                vol.Required("action", default="add"): vol.In({"add", "remove"}),
+                vol.Optional("provider", default=provider_default): vol.In(provider_keys),
+                vol.Optional("ext_id", default=ext_id_default): vol.In(im_ids),
                 vol.Optional("ext_id_manual", default=""): str,
                 vol.Optional("ha_user", default=""): vol.In(user_options),
-                # Remove fields
                 vol.Optional("remove_key", default=""): vol.In(remove_options),
             }),
             description_placeholders={

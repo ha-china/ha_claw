@@ -1,5 +1,5 @@
 DOMAIN = "claw_assistant"
-VERSION = "9.2.0.1"
+VERSION = "9.2.0"
 
 IM_CHANNEL_NAMES: dict[str, str] = {
     "wechat:": "WeChat",

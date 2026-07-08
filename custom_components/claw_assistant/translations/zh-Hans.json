@@ -288,6 +288,29 @@
           "ext_id_manual": "手动输入用户标识",
           "ha_user": "关联到 HA 用户",
           "remove_key": "选择要删除的映射"
+        },
+        "data_options": {
+          "action": {
+            "add": "添加映射",
+            "remove": "删除映射"
+          },
+          "provider": {
+            "feishu": "飞书",
+            "wechat": "微信",
+            "dingtalk": "钉钉",
+            "qq": "QQ",
+            "wecom": "企业微信",
+            "xiaoyi": "小艺"
+          },
+          "ext_id": {
+            "__manual__": "手动输入"
+          },
+          "ha_user": {
+            "": "选择用户"
+          },
+          "remove_key": {
+            "": "无映射可删"
+          }
         }
       }
     },

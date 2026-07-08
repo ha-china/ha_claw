@@ -298,6 +298,29 @@
           "ext_id_manual": "Manual Input: External ID",
           "ha_user": "Link to HA User",
           "remove_key": "Select mapping to remove"
+        },
+        "data_options": {
+          "action": {
+            "add": "Add mapping",
+            "remove": "Remove mapping"
+          },
+          "provider": {
+            "feishu": "Feishu",
+            "wechat": "WeChat",
+            "dingtalk": "DingTalk",
+            "qq": "QQ",
+            "wecom": "WeCom",
+            "xiaoyi": "XiaoYi"
+          },
+          "ext_id": {
+            "__manual__": "Manual input"
+          },
+          "ha_user": {
+            "": "Select user"
+          },
+          "remove_key": {
+            "": "No mappings to remove"
+          }
         }
       }
     },

@@ -183,6 +183,9 @@ class ConversationHistory:
         self._cleanup_old_turns(conversation_id)
         return self._histories.get(conversation_id, [])
 
+    def list_conversation_ids(self) -> list[str]:
+        return list(self._histories.keys())
+
     def get_recent_context(
         self,
         conversation_id: str,

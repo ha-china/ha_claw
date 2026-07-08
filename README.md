@@ -2,17 +2,6 @@
 
 ---
 
-> **🚀 C3H3-AI Fork — v9.2.0.1**
->
-> This is a community fork maintained by [@C3H3-AI](https://github.com/C3H3-AI), based on upstream [ha-china/ha_claw](https://github.com/ha-china/ha_claw) v9.2.0.
->
-> **与上游的区别：**
-> - **👤 家庭成员个性化** — 支持为每个家庭成员（HA 用户 + 外部 IM 用户）分配独立的 persona 和记忆，对话自动识别身份
-> - **🔗 IM 用户映射配置** — 在配置中心提供可视化界面，将飞书/微信/钉钉等外部 IM 身份映射到 HA 用户
-> - **📋 配置中心修复** — 主菜单新增"IM 用户关联"入口，ext_id 改为下拉选择已知 IM 标识
-
----
-
 ## Why Did I Build This?
 
 Honestly, I never set out to "hack" Home Assistant.
