@@ -1626,12 +1626,18 @@ class MemoryGraphTool(llm.Tool):
             async_remember,
             get_graph_store,
         )
+        from ..conversation import resolve_user_key
 
         args = tool_input.tool_args
         action = str(args.get("action", "")).strip().lower()
         store = get_graph_store(hass)
         if store is None:
             return {"success": False, "error": "graph store not initialised"}
+
+        user_key = resolve_user_key(
+            getattr(llm_context, "user_id", None),
+            getattr(llm_context, "conversation_id", None),
+        )
 
         if action == "recall":
             query = str(args.get("query", "")).strip()
@@ -1643,7 +1649,8 @@ class MemoryGraphTool(llm.Tool):
             limit = int(args.get("limit", 8))
             expand = bool(args.get("expand", True))
             hits = await async_recall(
-                hass, query, kinds=kinds, limit=limit, expand=expand
+                hass, query, kinds=kinds, limit=limit, expand=expand,
+                user=user_key,
             )
             return {
                 "success": True,
@@ -1686,6 +1693,7 @@ class MemoryGraphTool(llm.Tool):
                 source_doc=(str(args["source_doc"]) if args.get("source_doc") else None),
                 confidence=float(args.get("confidence", 1.0)),
                 pinned=bool(args.get("pinned", False)),
+                user=user_key,
             )
             if result is None:
                 return {"success": False, "error": "graph store unavailable"}
@@ -1693,7 +1701,8 @@ class MemoryGraphTool(llm.Tool):
             if was_new:
                 try:
                     hits = await async_recall(
-                        hass, f"{title} {body[:100]}", limit=3, expand=False
+                        hass, f"{title} {body[:100]}", limit=3, expand=False,
+                        user=user_key,
                     )
                     for h in hits:
                         if h.node.id != node_id:

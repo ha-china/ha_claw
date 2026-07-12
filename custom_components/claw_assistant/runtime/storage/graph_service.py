@@ -75,7 +75,8 @@ async def async_unload_graph_store(hass: HomeAssistant) -> None:
 
 
 def recall_memory_lines_sync(
-    user_text: str, *, limit: int = 12, kinds: tuple[str, ...] | None = None
+    user_text: str, *, limit: int = 12, kinds: tuple[str, ...] | None = None,
+    user: str | None = None,
 ) -> list[str]:
 
 
@@ -84,7 +85,8 @@ def recall_memory_lines_sync(
         return []
     try:
         hits = store.recall(
-            user_text, kinds=list(kinds) if kinds else None, limit=limit
+            user_text, kinds=list(kinds) if kinds else None, limit=limit,
+            user=user,
         )
     except Exception:
         LOGGER.exception("Sync graph recall failed")
@@ -157,6 +159,7 @@ async def async_recall(
     kinds: Iterable[str] | None = None,
     limit: int = 8,
     expand: bool = True,
+    user: str | None = None,
 ) -> list[RecallHit]:
 
     store = get_graph_store(hass)
@@ -166,7 +169,8 @@ async def async_recall(
 
     def _do() -> list[RecallHit]:
         return store.recall(
-            query, kinds=kinds_list, limit=limit, expand=expand
+            query, kinds=kinds_list, limit=limit, expand=expand,
+            user=user,
         )
 
     try:
@@ -185,6 +189,7 @@ async def async_remember(
     source_doc: str | None = None,
     confidence: float = 1.0,
     pinned: bool = False,
+    user: str | None = None,
 ) -> tuple[int, bool] | None:
     store = get_graph_store(hass)
     if store is None:
@@ -198,6 +203,7 @@ async def async_remember(
             source_doc=source_doc,
             confidence=confidence,
             pinned=pinned,
+            user=user,
         )
 
     try:

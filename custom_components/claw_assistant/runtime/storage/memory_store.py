@@ -301,6 +301,7 @@ async def async_save_memory_entry_result(
     value: str,
     *,
     target: str = "memory",
+    user_key: str | None = None,
 ) -> dict[str, Any]:
 
     target = _normalize_target(target)
@@ -349,6 +350,7 @@ async def async_save_memory_entry_result(
                 title=outcome.key,
                 body=outcome.value,
                 source_doc=f"ConversationMemory/{target}",
+                user=user_key,
             )
             if result is not None:
                 new_id, was_new = result
@@ -356,6 +358,7 @@ async def async_save_memory_entry_result(
                     hits = await async_recall(
                         hass, f"{outcome.key} {outcome.value}",
                         limit=3, expand=False,
+                        user=user_key,
                     )
                     for h in hits:
                         if h.node.id != new_id:
