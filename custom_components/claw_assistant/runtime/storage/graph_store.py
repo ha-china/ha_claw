@@ -25,6 +25,7 @@ CREATE TABLE IF NOT EXISTS nodes (
     body TEXT NOT NULL,
     checksum TEXT NOT NULL UNIQUE,
     source_doc TEXT,
+    user TEXT,
     created_at REAL NOT NULL,
     last_accessed_at REAL NOT NULL,
     access_count INTEGER NOT NULL DEFAULT 1,
@@ -61,9 +62,10 @@ def _normalize(text: str) -> str:
     return _WS_RE.sub(" ", text or "").strip().lower()
 
 
-def compute_checksum(kind: str, title: str, body: str) -> str:
+def compute_checksum(kind: str, title: str, body: str, user: str | None = None) -> str:
     payload = (
         f"{_normalize(kind)}\x00{_normalize(title)}\x00{_normalize(body)}"
+        f"\x00{user or ''}"
     )
     return hashlib.sha256(payload.encode("utf-8")).hexdigest()
 
@@ -75,6 +77,7 @@ class Node:
     title: str
     body: str
     source_doc: str | None
+    user: str | None
     created_at: float
     last_accessed_at: float
     access_count: int
@@ -97,6 +100,7 @@ def _row_to_node(row: sqlite3.Row) -> Node:
         title=str(row["title"]),
         body=str(row["body"]),
         source_doc=(str(row["source_doc"]) if row["source_doc"] is not None else None),
+        user=(str(row["user"]) if row["user"] is not None else None),
         created_at=float(row["created_at"]),
         last_accessed_at=float(row["last_accessed_at"]),
         access_count=int(row["access_count"]),
@@ -149,6 +153,13 @@ class GraphStore:
         except sqlite3.DatabaseError:
             pass
         self._conn.executescript(_SCHEMA)
+        self._migrate_schema()
+
+    def _migrate_schema(self) -> None:
+        cursor = self._conn.execute("PRAGMA table_info(nodes)")
+        cols = {row[1] for row in cursor.fetchall()}
+        if "user" not in cols:
+            self._conn.execute("ALTER TABLE nodes ADD COLUMN user TEXT")
 
     def close(self) -> None:
         with self._lock:
@@ -170,12 +181,13 @@ class GraphStore:
         source_doc: str | None = None,
         confidence: float = 1.0,
         pinned: bool = False,
+        user: str | None = None,
     ) -> tuple[int, bool]:
         title = title.strip()
         body = body.strip()
         if not title and not body:
             raise ValueError("node requires title or body")
-        checksum = compute_checksum(kind, title, body)
+        checksum = compute_checksum(kind, title, body, user)
         now = time.time()
         with self._lock:
             row = self._conn.execute(
@@ -194,15 +206,16 @@ class GraphStore:
 
             cur = self._conn.execute(
                 "INSERT INTO nodes("
-                "kind, title, body, checksum, source_doc, "
+                "kind, title, body, checksum, source_doc, user, "
                 "created_at, last_accessed_at, access_count, confidence, pinned"
-                ") VALUES (?,?,?,?,?,?,?,?,?,?)",
+                ") VALUES (?,?,?,?,?,?,?,?,?,?,?)",
                 (
                     kind,
                     title,
                     body,
                     checksum,
                     source_doc,
+                    user,
                     now,
                     now,
                     1,
@@ -363,7 +376,7 @@ class GraphStore:
         for row in remaining:
             nid = int(row["id"])
             query_text = f"{row['title']} {str(row['body'])[:100]}"
-            hits = self.recall(query_text, limit=3, expand=False, touch=False)
+            hits = self.recall(query_text, limit=3, expand=False, touch=False, include_all=True)
             for h in hits:
                 if h.node.id != nid:
                     with self._lock:
@@ -394,6 +407,8 @@ class GraphStore:
         expand: bool = True,
         half_life_days: float = 30.0,
         touch: bool = True,
+        user: str | None = None,
+        include_all: bool = False,
     ) -> list[RecallHit]:
         fts_query = _build_fts_query(query)
         if not fts_query:
@@ -409,6 +424,12 @@ class GraphStore:
             kinds_list = list(kinds)
             sql += f"AND n.kind IN ({','.join('?' * len(kinds_list))}) "
             params.extend(kinds_list)
+        if not include_all:
+            if user is not None:
+                sql += "AND (n.user = ? OR n.user IS NULL) "
+                params.append(user)
+            else:
+                sql += "AND n.user IS NULL "
         sql += "ORDER BY rank LIMIT ?"
         params.append(max(limit * 3, limit))
 

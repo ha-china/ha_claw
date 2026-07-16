@@ -188,7 +188,7 @@ def _import_legacy_skill_dir(source_dir: Path, target_root: Path, *, label: str)
         )
 
 
-_SYSTEM_UPDATE_VERSION = "8.6.0"
+_SYSTEM_UPDATE_VERSION = "9.2.1"
 
 _FORCE_OVERWRITE_FILES = [
     "prompts/runtime_context.md",
