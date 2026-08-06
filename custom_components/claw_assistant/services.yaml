@@ -127,6 +127,228 @@ delete_rule:
       selector:
         text:
 
+get_members:
+  name: Get members
+  description: "List all members with role, allowed areas and label"
+  fields: {}
+
+add_member:
+  name: Add member
+  description: "Bind an IM identity to an HA user with a role (owner/member)"
+  fields:
+    provider:
+      name: Provider
+      description: "IM channel provider (feishu/wechat/dingtalk/qq/wecom)"
+      required: true
+      selector:
+        text:
+    ext_id:
+      name: External ID
+      description: "External user id on the channel"
+      required: true
+      selector:
+        text:
+    ha_user_id:
+      name: HA user ID
+      description: "Home Assistant user id to bind"
+      required: true
+      selector:
+        text:
+    role:
+      name: Role
+      description: "owner or member"
+      required: false
+      default: "member"
+      selector:
+        select:
+          options:
+            - "owner"
+            - "member"
+    allowed_areas:
+      name: Allowed areas
+      description: "Area tokens the member may control (empty = unrestricted)"
+      required: false
+      selector:
+        text:
+    label:
+      name: Label
+      description: "Human-readable member label"
+      required: false
+      selector:
+        text:
+
+update_member:
+  name: Update member
+  description: "Update a member's role, allowed areas or label"
+  fields:
+    provider:
+      name: Provider
+      description: "IM channel provider (locator)"
+      required: false
+      selector:
+        text:
+    ext_id:
+      name: External ID
+      description: "External user id (locator)"
+      required: false
+      selector:
+        text:
+    ha_user_id:
+      name: HA user ID
+      description: "Home Assistant user id (locator)"
+      required: false
+      selector:
+        text:
+    role:
+      name: Role
+      description: "owner or member"
+      required: false
+      selector:
+        select:
+          options:
+            - "owner"
+            - "member"
+    allowed_areas:
+      name: Allowed areas
+      description: "Area tokens the member may control"
+      required: false
+      selector:
+        text:
+    label:
+      name: Label
+      description: "Human-readable member label"
+      required: false
+      selector:
+        text:
+
+remove_member:
+  name: Remove member
+  description: "Remove a member binding by provider+ext_id or ha_user_id"
+  fields:
+    provider:
+      name: Provider
+      description: "IM channel provider (locator)"
+      required: false
+      selector:
+        text:
+    ext_id:
+      name: External ID
+      description: "External user id (locator)"
+      required: false
+      selector:
+        text:
+    ha_user_id:
+      name: HA user ID
+      description: "Home Assistant user id (locator)"
+      required: false
+      selector:
+        text:
+
+get_approvals:
+  name: Get approvals
+  description: "List pending and recent approval queue entries"
+  fields: {}
+
+resolve_approval:
+  name: Resolve approval
+  description: "Approve or reject a pending approval"
+  fields:
+    approval_id:
+      name: Approval ID
+      description: "Pending approval identifier"
+      required: true
+      selector:
+        text:
+    approved:
+      name: Approved
+      description: "true to approve, false to reject"
+      required: true
+      selector:
+        boolean:
+    approver:
+      name: Approver
+      description: "Who resolved the approval (for audit)"
+      required: false
+      selector:
+        text:
+
+list_audit:
+  name: List audit
+  description: "List recent audit log entries"
+  fields:
+    limit:
+      name: Limit
+      description: "Max entries to return"
+      required: false
+      default: 100
+      selector:
+        number:
+          min: 1
+          max: 500
+
+list_whitelist:
+  name: List whitelist
+  description: "List trust-whitelist entries (user+action bypass confirmation)"
+  fields: {}
+
+add_whitelist:
+  name: Add whitelist entry
+  description: "Add a trust-whitelist entry so a user+action always ALLOWs"
+  fields:
+    user_key:
+      name: User key
+      description: "HA user id or provider:ext_id"
+      required: true
+      selector:
+        text:
+    action:
+      name: Action
+      description: "Tool name, e.g. HAControl"
+      required: true
+      selector:
+        text:
+    entity_id:
+      name: Entity ID
+      description: "Optional entity the entry applies to"
+      required: false
+      selector:
+        text:
+    area:
+      name: Area
+      description: "Optional area the entry applies to"
+      required: false
+      selector:
+        text:
+
+remove_whitelist:
+  name: Remove whitelist entry
+  description: "Remove a trust-whitelist entry"
+  fields:
+    user_key:
+      name: User key
+      description: "HA user id or provider:ext_id"
+      required: true
+      selector:
+        text:
+    action:
+      name: Action
+      description: "Tool name, e.g. HAControl"
+      required: true
+      selector:
+        text:
+    entity_id:
+      name: Entity ID
+      description: "Optional entity the entry applies to"
+      required: false
+      selector:
+        text:
+    area:
+      name: Area
+      description: "Optional area the entry applies to"
+      required: false
+      selector:
+        text:
+
 refresh_sensor:
   name: Refresh config sensor
   description: "Force refresh the Claw Config sensor state"

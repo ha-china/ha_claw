@@ -300,7 +300,7 @@ var _path = ['agent_settings'];
 
 function $(id) { return document.getElementById(id); }
 function b(v) { return v===true || v==='true' || v===1 || v==='1'; }
-function eh(s) { return String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
+function eh(s) { return String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;'); }
 function fmtSize(v) { if(!v)return'0B';if(v<1024)return v+'B';if(v<1048576)return(v/1024).toFixed(1)+'KB';return(v/1048576).toFixed(1)+'MB'; }
 
 function agName(eid) {
@@ -357,6 +357,7 @@ var ICONS = {
   ws_soul:'mdi:emoticon-happy', ws_tools:'mdi:tools', ws_user:'mdi:account',
   skill_editor:'mdi:lightning-bolt', plugin_manager:'mdi:puzzle',
   rules_editor:'mdi:shield-alert-outline',
+  members:'mdi:account-group',
   conversation_manager:'mdi:chat-outline'
 };
 function nodeIcon(k){ return ICONS[k] || 'mdi:tune'; }
@@ -561,13 +562,14 @@ function renderLeaf(node, o, preHtml) {
   var h = preHtml || '';
   // 这些特殊页渲染卡片列表，撑满网格更好看
   if (key === 'skill_editor' || key === 'plugin_manager' || key === 'conversation_manager' || key.indexOf('ws_') === 0 ||
-      key === 'rules_editor' || key === 'um_pick_channel' || key === 'um_remove' || (node.fields||[]).indexOf('content') >= 0) {
+      key === 'rules_editor' || key === 'members' || key === 'um_pick_channel' || key === 'um_remove' || (node.fields||[]).indexOf('content') >= 0) {
     gd.classList.remove('narrow'); gd.classList.remove('group');
   }
   if (key === 'skill_editor') { renderSkillsList(); return; }
   if (key === 'plugin_manager') { renderPluginsList(); return; }
   if (key === 'conversation_manager') { renderConversationList(); return; }
   if (key === 'rules_editor') { renderRulesList(); return; }
+  if (key === 'members') { renderMembersPage(); return; }
   if (key.indexOf('ws_') === 0) { renderDocEditor(node, o); return; }
   if (key === 'um_pick_channel') { showAddMappingWizard(); return; }
   if (key === 'um_remove') { renderRemoveList(); return; }
@@ -1090,8 +1092,8 @@ function renderRulesList() {
 }
 function toggleRule(ruleId, enabled) {
   api({action:'toggle_rule', rule_id:ruleId, enabled:enabled}).then(function(r){
-    if (r.ok === false) toast('切换失败: '+(r.error||''));
-    else toast(enabled ? '规则已启用' : '规则已停用');
+    if (!r || r.ok === false) { toast('切换失败: '+(r && r.error || '')); }
+    else { toast(enabled ? '规则已启用' : '规则已停用'); }
     renderRulesList();
   });
 }
@@ -1122,6 +1124,215 @@ function deleteRule(ruleId) {
   api({action:'delete_rule', rule_id:ruleId}).then(function(r){
     if (r.ok) { toast('规则已删除'); renderRulesList(); refreshNow(); }
     else toast('删除失败: '+(r.error||''));
+  });
+}
+
+// ── 成员与权限（G5）──
+var MEMBER_ROLES = [['owner','owner ｜ 全部放行'],['member','member ｜ 分级确认']];
+function memberRoleMeta(role) {
+  for (var i=0;i<MEMBER_ROLES.length;i++) if (MEMBER_ROLES[i][0]===role) return MEMBER_ROLES[i];
+  return [role||'member', role||'member'];
+}
+function renderMembersPage() {
+  var gd = $('cardGrid');
+  var node = nodeAtPath(_path);
+  var h = stepIntroHtml(node);
+  h += '<div style="display:flex;justify-content:flex-end;margin-bottom:14px;gap:8px;flex-wrap:wrap">'
+     + '<button class="btn" onclick="renderAuditSection()"><ha-icon icon="mdi:clipboard-text-clock"></ha-icon> 查看审计</button>'
+     + '<button class="btn" onclick="renderWhitelistSection()"><ha-icon icon="mdi:shield-check"></ha-icon> 白名单</button>'
+     + '<button class="btn pri" onclick="openMemberModal()"><ha-icon icon="mdi:account-plus"></ha-icon> 添加成员</button></div>';
+  h += '<div id="memApprovals"></div>';
+  h += '<div id="memList"><div class="action-card" style="cursor:default;grid-column:1/-1"><div class="ac-ic"><ha-icon icon="mdi:loading"></ha-icon></div><div class="ac-tx"><div class="ac-t">加载中...</div></div></div></div>';
+  gd.innerHTML = h;
+  renderApprovalsBlock();
+  renderMemberList();
+}
+function renderMemberList() {
+  var box = $('memList'); if (!box) return;
+  box.innerHTML = '<div class="action-card" style="cursor:default;grid-column:1/-1"><div class="ac-ic"><ha-icon icon="mdi:loading"></ha-icon></div><div class="ac-tx"><div class="ac-t">加载中...</div></div></div>';
+  api({action:'get_members'}).then(function(d){
+    var ms = d.members || [];
+    if (!ms.length) { box.innerHTML = '<div class="action-card" style="cursor:default;grid-column:1/-1"><div class="ac-ic"><ha-icon icon="mdi:account-group"></ha-icon></div><div class="ac-tx"><div class="ac-t">暂无成员</div><div class="ac-d">点击右上角「添加成员」绑定 IM 身份到 HA 用户并设置角色。</div></div></div>'; return; }
+    var h = '<div class="group-grid">';
+    ms.forEach(function(m){
+      var roleMeta = memberRoleMeta(m.role);
+      var areas = (m.allowed_areas||[]).join('、') || '全部区域';
+      var label = m.label ? '<div style="font-size:.78rem;color:var(--sec)">'+eh(m.label)+'</div>' : '';
+      h += '<div class="group-card open"><div class="gc-head">'
+        + '<div class="gc-ic"><ha-icon icon="mdi:account-circle"></ha-icon></div>'
+        + '<div class="gc-tx"><div class="gc-t">'+eh(m.ext_id||'?')+' <span style="color:var(--sec);font-weight:400;font-size:.76rem">'+(m.provider||'')+'</span>'
+        + ' <span class="pbadge '+(m.role==='owner'?'RUNNING':'STOPPED')+'" style="margin-left:4px">'+roleMeta[1]+'</span></div>'
+        + '<div class="gc-d">HA 用户: '+eh(m.ha_user_id||'')+'<br>允许区域: '+eh(areas)+'</div>'
+        + label + '</div>'
+        + '<div style="display:flex;gap:4px;flex-shrink:0"><button class="btn" style="padding:4px 10px" onclick="openMemberModal(\''+eh(m.provider||'')+'\',\''+eh(m.ext_id||'')+'\',\''+eh(m.ha_user_id||'')+'\',\''+eh(m.role||'member')+'\',\''+eh((m.allowed_areas||[]).join(','))+'\',\''+eh(m.label||'')+'\')"><ha-icon icon="mdi:pencil"></ha-icon></button>'
+        + '<button class="btn danger-ghost" style="padding:4px 10px" onclick="removeMember(\''+eh(m.provider||'')+'\',\''+eh(m.ext_id||'')+'\',\''+eh(m.ha_user_id||'')+'\')"><ha-icon icon="mdi:delete"></ha-icon></button></div>'
+        + '</div></div>';
+    });
+    h += '</div>';
+    box.innerHTML = h;
+  });
+}
+function renderApprovalsBlock() {
+  var box = $('memApprovals'); if (!box) return;
+  box.innerHTML = '<div class="group-card open"><div class="gc-head" onclick="this.parentElement.classList.toggle(\'open\')"><div class="gc-ic"><ha-icon icon="mdi:shield-clock"></ha-icon></div><div class="gc-tx"><div class="gc-t">待确认操作</div><div class="gc-d">R2 系统变更需人工确认后才能执行</div></div><ha-icon icon="mdi:chevron-down" class="gc-chev"></ha-icon></div><div class="gc-body" id="approvalBody"><div style="padding:10px;color:var(--sec)">加载中...</div></div></div>';
+  api({action:'get_approvals'}).then(function(d){
+    var body = $('approvalBody'); if (!body) return;
+    var pending = d.pending || [];
+    if (!pending.length) { body.innerHTML = '<div style="padding:10px;color:var(--sec)">当前没有待确认的操作。</div>'; return; }
+    var h = '';
+    pending.forEach(function(p){
+      var t = p.tool || '';
+      var riskLabel = 'R'+ (p.risk==null?1:p.risk);
+      var params = '';
+      try { params = JSON.stringify(p.params||{}).slice(0,160); } catch(e){ params=''; }
+      h += '<div style="display:flex;align-items:center;gap:10px;padding:10px 0;border-bottom:1px solid var(--div)">'
+        + '<div style="flex:1;min-width:0"><div style="font-size:.86rem;font-weight:600">'+eh(t)+' <span class="pbadge STOPPED" style="margin-left:4px">'+riskLabel+'</span></div>'
+        + '<div style="font-size:.72rem;color:var(--sec);word-break:break-all">'+eh(p.approval_id)+'</div>'
+        + (params?'<div style="font-size:.74rem;color:var(--sec);word-break:break-all">'+eh(params)+'</div>':'')
+        + '</div>'
+        + '<button class="btn pri" style="padding:5px 12px" onclick="resolveApproval(\''+eh(p.approval_id)+'\',true)">批准</button>'
+        + '<button class="btn danger-ghost" style="padding:5px 12px" onclick="resolveApproval(\''+eh(p.approval_id)+'\',false)">拒绝</button>'
+        + '</div>';
+    });
+    body.innerHTML = h;
+  });
+}
+function resolveApproval(approvalId, approved) {
+  if (!approved && !confirm('确定拒绝该操作？')) return;
+  api({action:'resolve_approval', approval_id:approvalId, approved:approved, approver:'panel'}).then(function(r){
+    if (r.ok) { toast(approved ? '已批准，操作将执行' : '已拒绝'); renderApprovalsBlock(); }
+    else toast('操作失败: '+(r.error||''));
+  });
+}
+function openMemberModal(provider, extId, haUserId, role, areas, label) {
+  api({action:'get_mapping_options'}).then(function(d){
+    var isEdit = !!extId;
+    var provOpts = '';
+    if (d.provider_keys && d.provider_keys.length) {
+      d.provider_keys.forEach(function(pk){
+        var pl = (selOpts('provider') && selOpts('provider')[pk]) ? selOpts('provider')[pk] : pk;
+        provOpts += '<option value="'+eh(pk)+'"'+(pk===provider?' selected':'')+'>'+eh(pl)+'</option>';
+      });
+    } else {
+      ['feishu','wechat','dingtalk','qq','wecom','xiaoyi','custom'].forEach(function(pk){
+        provOpts += '<option value="'+pk+'"'+(pk===provider?' selected':'')+'>'+pk+'</option>';
+      });
+    }
+    var userOpts = '<option value="">选择 HA 用户...</option>';
+    (d.users||[]).forEach(function(u){ if (u.is_active) userOpts += '<option value="'+eh(u.id)+'"'+(u.id===haUserId?' selected':'')+'>'+eh(u.name)+'</option>'; });
+    var roleOpts = '';
+    MEMBER_ROLES.forEach(function(rr){ roleOpts += '<option value="'+rr[0]+'"'+(rr[0]===(role||'member')?' selected':'')+'>'+rr[1]+'</option>'; });
+    var body = '<div class="fields" style="border:none;box-shadow:none;padding:0">'
+      + '<div class="field"><div class="field-label">通道平台</div><select class="sel" id="mmProvider">'+provOpts+'</select></div>'
+      + '<div class="field"><div class="field-label">外部用户 ID</div><input class="inp" id="mmExtId" value="'+eh(extId||'')+'" placeholder="微信 openid / 飞书 open_id / 钉钉 userId">'
+      + '<div class="field-help">绑定后，该 IM 身份将按所选角色执行 AI 操作。</div></div>'
+      + '<div class="field"><div class="field-label">关联 HA 用户</div><select class="sel" id="mmUser">'+userOpts+'</select></div>'
+      + '<div class="field"><div class="field-label">角色</div><select class="sel" id="mmRole">'+roleOpts+'</select>'
+      + '<div class="field-help">owner 无感放行全部操作；member 的 R2 需人工确认、R3 默认拒绝。</div></div>'
+      + '<div class="field"><div class="field-label">允许区域</div><input class="inp" id="mmAreas" value="'+eh(areas||'')+'" placeholder="逗号分隔，例如 living,bedroom；留空=全部">'
+      + '<div class="field-help">仅对 R0/R1 可逆控制生效；R2/R3 始终需要确认/拒绝。</div></div>'
+      + '<div class="field"><div class="field-label">备注</div><input class="inp" id="mmLabel" value="'+eh(label||'')+'" placeholder="成员备注（可选）"></div>'
+      + '</div>';
+    openModal(isEdit ? '编辑成员' : '添加成员', body,
+      '<button class="btn" onclick="closeModal()">取消</button>'
+      + '<button class="btn pri" onclick="saveMember('+(isEdit?'true':'false')+')">'+(isEdit?'保存':'添加')+'</button>', true);
+  }).catch(function(){ toast('读取选项失败'); });
+}
+function saveMember(isEdit) {
+  var provider = $('mmProvider').value;
+  var extId = $('mmExtId').value.trim();
+  var user = $('mmUser').value;
+  var role = $('mmRole').value;
+  var areas = $('mmAreas').value.split(',').map(function(s){return s.trim();}).filter(function(s){return s;});
+  var label = $('mmLabel').value.trim();
+  if (!provider || !extId) { toast('请填写通道与外部用户 ID'); return; }
+  if (!isEdit && !user) { toast('请选择 HA 用户'); return; }
+  var payload = {provider:provider, ext_id:extId, role:role, allowed_areas:areas, label:label};
+  if (user) payload.ha_user_id = user;
+  if (isEdit) {
+    api({action:'update_member', provider:provider, ext_id:extId, role:role, allowed_areas:areas, label:label}).then(function(r){
+      closeModal();
+      if (r.ok) { toast('成员已更新'); renderMemberList(); refreshNow(); } else toast('更新失败: '+(r.error||''));
+    });
+  } else {
+    api({action:'add_member', provider:provider, ext_id:extId, ha_user_id:user, role:role, allowed_areas:areas, label:label}).then(function(r){
+      closeModal();
+      if (r.ok) { toast('成员已添加'); renderMemberList(); refreshNow(); } else toast('添加失败: '+(r.error||''));
+    });
+  }
+}
+function removeMember(provider, extId, haUserId) {
+  if (!confirm('确定删除该成员？删除后该 IM 身份按 shadow 成员（member）处理。')) return;
+  api({action:'remove_member', provider:provider, ext_id:extId, ha_user_id:haUserId}).then(function(r){
+    if (r.ok) { toast('成员已删除'); renderMemberList(); refreshNow(); }
+    else toast('删除失败: '+(r.error||''));
+  });
+}
+function renderAuditSection() {
+  var gd = $('cardGrid');
+  gd.innerHTML = '<div class="crumb"><a class="cr-link" onclick="renderMembersPage()">成员与权限</a> <ha-icon icon="mdi:chevron-right" class="cr-sep"></ha-icon> <span class="cr-cur">审计日志</span></div>'
+    + '<div class="group-grid" id="auditBox"><div class="action-card" style="cursor:default;grid-column:1/-1"><div class="ac-ic"><ha-icon icon="mdi:loading"></ha-icon></div><div class="ac-tx"><div class="ac-t">加载中...</div></div></div></div>';
+  api({action:'list_audit', limit:100}).then(function(d){
+    var box = $('auditBox'); if (!box) return;
+    var entries = d.entries || [];
+    if (!entries.length) { box.innerHTML = '<div class="action-card" style="cursor:default;grid-column:1/-1"><div class="ac-tx"><div class="ac-t">暂无审计记录</div></div></div>'; return; }
+    var h = '<div class="group-card open"><div class="gc-head" onclick="this.parentElement.classList.toggle(\'open\')"><div class="gc-ic"><ha-icon icon="mdi:clipboard-text-clock"></ha-icon></div><div class="gc-tx"><div class="gc-t">最近 '+entries.length+' 条审计</div><div class="gc-d">append-only JSONL，含全部策略决策</div></div><ha-icon icon="mdi:chevron-down" class="gc-chev"></ha-icon></div><div class="gc-body">';
+    entries.forEach(function(e){
+      var ts = e.ts ? new Date(e.ts*1000).toLocaleString('zh-CN',{hour12:false}) : '';
+      var decision = e.decision || '';
+      var badge = decision==='ALLOW' ? 'RUNNING' : (decision==='DENY' ? 'FAILED' : 'STOPPED');
+      h += '<div style="display:flex;align-items:flex-start;gap:10px;padding:8px 0;border-bottom:1px solid var(--div)">'
+        + '<div style="flex:1;min-width:0"><div style="font-size:.82rem"><span class="pbadge '+badge+'">'+eh(decision)+'</span> <b>'+eh(e.tool||'')+'</b> <span style="color:var(--sec)">R'+(e.risk==null?1:e.risk)+'</span></div>'
+        + '<div style="font-size:.72rem;color:var(--sec);word-break:break-all">'+eh(ts)+' · '+eh(e.user_key||'-')+(e.entity_id?' · '+eh(e.entity_id):'')+(e.approver?' · '+eh(e.approver):'')+'</div></div>'
+        + '<span style="font-size:.72rem;color:var(--sec);flex-shrink:0">'+eh(e.result||'')+'</span></div>';
+    });
+    h += '</div></div>';
+    box.innerHTML = h;
+  });
+}
+function renderWhitelistSection() {
+  var gd = $('cardGrid');
+  gd.innerHTML = '<div class="crumb"><a class="cr-link" onclick="renderMembersPage()">成员与权限</a> <ha-icon icon="mdi:chevron-right" class="cr-sep"></ha-icon> <span class="cr-cur">信任白名单</span></div>'
+    + '<div style="display:flex;justify-content:flex-end;margin-bottom:14px"><button class="btn pri" onclick="openWhitelistModal()"><ha-icon icon="mdi:plus"></ha-icon> 添加白名单</button></div>'
+    + '<div class="group-grid" id="wlBox"><div class="action-card" style="cursor:default;grid-column:1/-1"><div class="ac-ic"><ha-icon icon="mdi:loading"></ha-icon></div><div class="ac-tx"><div class="ac-t">加载中...</div></div></div></div>';
+  api({action:'list_whitelist'}).then(function(d){
+    var box = $('wlBox'); if (!box) return;
+    var entries = d.entries || [];
+    if (!entries.length) { box.innerHTML = '<div class="action-card" style="cursor:default;grid-column:1/-1"><div class="ac-ic"><ha-icon icon="mdi:shield-check"></ha-icon></div><div class="ac-tx"><div class="ac-t">暂无白名单</div><div class="ac-d">白名单命中的 user+action 将直接 ALLOW，跳过 R2 确认。</div></div></div>'; return; }
+    var h = '<div class="group-card open"><div class="gc-head" onclick="this.parentElement.classList.toggle(\'open\')"><div class="gc-ic"><ha-icon icon="mdi:shield-check"></ha-icon></div><div class="gc-tx"><div class="gc-t">白名单（'+entries.length+' 条）</div><div class="gc-d">user + action 命中即放行</div></div><ha-icon icon="mdi:chevron-down" class="gc-chev"></ha-icon></div><div class="gc-body">';
+    entries.forEach(function(e){
+      var target = e.entity_id ? ('entity='+e.entity_id) : (e.area ? ('area='+e.area) : '*');
+      h += '<div style="display:flex;align-items:center;gap:10px;padding:8px 0;border-bottom:1px solid var(--div)">'
+        + '<div style="flex:1;min-width:0"><div style="font-size:.82rem"><b>'+eh(e.user_key||'')+'</b> → <b>'+eh(e.action||'')+'</b> <span style="color:var(--sec)">'+eh(target)+'</span></div></div>'
+        + '<button class="btn danger-ghost" style="padding:4px 10px" onclick="removeWhitelistEntry(\''+eh(e.user_key||'')+'\',\''+eh(e.action||'')+'\',\''+eh(e.entity_id||'')+'\',\''+eh(e.area||'')+'\')"><ha-icon icon="mdi:delete"></ha-icon></button></div>';
+    });
+    h += '</div></div>';
+    box.innerHTML = h;
+  });
+}
+function openWhitelistModal() {
+  var body = '<div class="fields" style="border:none;box-shadow:none;padding:0">'
+    + '<div class="field"><div class="field-label">用户 key</div><input class="inp" id="wlUser" placeholder="HA user_id 或 provider:ext_id"></div>'
+    + '<div class="field"><div class="field-label">工具名</div><input class="inp" id="wlAction" placeholder="例如 HAControl / Automation"></div>'
+    + '<div class="field"><div class="field-label">实体（可选）</div><input class="inp" id="wlEntity" placeholder="light.living_room"></div>'
+    + '<div class="field"><div class="field-label">区域（可选）</div><input class="inp" id="wlArea" placeholder="living"></div>'
+    + '</div>';
+  openModal('添加白名单', body,
+    '<button class="btn" onclick="closeModal()">取消</button><button class="btn pri" onclick="saveWhitelistEntry()">添加</button>', true);
+}
+function saveWhitelistEntry() {
+  var user = $('wlUser').value.trim();
+  var action = $('wlAction').value.trim();
+  if (!user || !action) { toast('请填写用户 key 与工具名'); return; }
+  api({action:'add_whitelist', user_key:user, action:action, entity_id:$('wlEntity').value.trim(), area:$('wlArea').value.trim()}).then(function(r){
+    closeModal();
+    if (r.ok) { toast('白名单已添加'); renderWhitelistSection(); } else toast('添加失败: '+(r.error||''));
+  });
+}
+function removeWhitelistEntry(user, action, entityId, area) {
+  if (!confirm('确定删除该白名单条目？')) return;
+  api({action:'remove_whitelist', user_key:user, action:action, entity_id:entityId, area:area}).then(function(r){
+    if (r.ok) { toast('白名单已删除'); renderWhitelistSection(); } else toast('删除失败: '+(r.error||''));
   });
 }
 

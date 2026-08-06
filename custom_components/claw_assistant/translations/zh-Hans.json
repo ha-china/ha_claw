@@ -71,8 +71,14 @@
           "skill_editor": "管理安装技能 ｜ 动态查看与编辑",
           "conversation_manager": "对话管理 ｜ 历史记录与统计",
           "plugin_manager": "管理安装插件 ｜ Hermes 兼容插件",
-          "rules_editor": "硬边界规则 ｜ 强制约束与安全红线"
+          "rules_editor": "硬边界规则 ｜ 强制约束与安全红线",
+          "members": "成员与权限 ｜ 角色分级与操作确认"
         }
+      },
+      "members": {
+        "title": "成员与权限",
+        "description": "**成员与权限**\nowner 无感放行全部操作；member/shadow 的 R0/R1 只读与可逆控制在允许区域内放行，R2 系统变更需人工确认，R3 破坏性操作默认拒绝。所有决策写入审计日志。",
+        "data": {}
       },
       "rules_editor": {
         "title": "硬边界规则",

@@ -70,8 +70,14 @@
           "workspace_editor": "Edit Workspace Docs | Master prompt & skill library",
           "skill_editor": "Manage Installed Skills | Live view & edit",
           "plugin_manager": "Manage Plugins | Hermes compatible plugins",
-          "rules_editor": "Hard Boundary Rules | Constraints & safety red lines"
+          "rules_editor": "Hard Boundary Rules | Constraints & safety red lines",
+          "members": "Members & Permissions | Roles and operation confirmation"
         }
+      },
+      "members": {
+        "title": "Members & Permissions",
+        "description": "**Members & Permissions**\nOwner passes all operations without interruption; member/shadow users are allowed R0/R1 read & reversible control inside allowed areas, R2 system changes require human confirmation, and R3 destructive operations are denied by default. Every decision is written to the audit log.",
+        "data": {}
       },
       "rules_editor": {
         "title": "Hard Boundary Rules",

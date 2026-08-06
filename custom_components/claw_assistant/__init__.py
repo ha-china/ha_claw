@@ -212,6 +212,17 @@ _SERVICE_GET_RULES = "get_rules"
 _SERVICE_TOGGLE_RULE = "toggle_rule"
 _SERVICE_ADD_RULE = "add_rule"
 _SERVICE_DELETE_RULE = "delete_rule"
+# ── G5 member permission / approval / audit services ──
+_SERVICE_GET_MEMBERS = "get_members"
+_SERVICE_ADD_MEMBER = "add_member"
+_SERVICE_UPDATE_MEMBER = "update_member"
+_SERVICE_REMOVE_MEMBER = "remove_member"
+_SERVICE_GET_APPROVALS = "get_approvals"
+_SERVICE_RESOLVE_APPROVAL = "resolve_approval"
+_SERVICE_LIST_AUDIT = "list_audit"
+_SERVICE_LIST_WHITELIST = "list_whitelist"
+_SERVICE_ADD_WHITELIST = "add_whitelist"
+_SERVICE_REMOVE_WHITELIST = "remove_whitelist"
 
 _SET_OPTION_SCHEMA = vol.Schema({
     vol.Required("key"): cv.string,
@@ -245,6 +256,58 @@ _ADD_RULE_SCHEMA = vol.Schema({
 
 _DELETE_RULE_SCHEMA = vol.Schema({
     vol.Required("rule_id"): cv.string,
+})
+
+_MEMBER_ROLES = ("owner", "member")
+
+_ADD_MEMBER_SCHEMA = vol.Schema({
+    vol.Required("provider"): cv.string,
+    vol.Required("ext_id"): cv.string,
+    vol.Required("ha_user_id"): cv.string,
+    vol.Optional("role", default="member"): vol.In(_MEMBER_ROLES),
+    vol.Optional("allowed_areas", default=[]): vol.Any(list, None),
+    vol.Optional("label", default=""): cv.string,
+})
+
+_UPDATE_MEMBER_SCHEMA = vol.Schema({
+    vol.Optional("provider"): cv.string,
+    vol.Optional("ext_id"): cv.string,
+    vol.Optional("ha_user_id"): cv.string,
+    vol.Optional("role"): vol.In(_MEMBER_ROLES),
+    vol.Optional("allowed_areas"): vol.Any(list, None),
+    vol.Optional("label"): cv.string,
+})
+
+_REMOVE_MEMBER_SCHEMA = vol.Schema({
+    vol.Optional("provider"): cv.string,
+    vol.Optional("ext_id"): cv.string,
+    vol.Optional("ha_user_id"): cv.string,
+})
+
+_GET_APPROVALS_SCHEMA = vol.Schema({})
+
+_RESOLVE_APPROVAL_SCHEMA = vol.Schema({
+    vol.Required("approval_id"): cv.string,
+    vol.Required("approved"): bool,
+    vol.Optional("approver", default=""): cv.string,
+})
+
+_LIST_AUDIT_SCHEMA = vol.Schema({
+    vol.Optional("limit", default=100): vol.Coerce(int),
+})
+
+_ADD_WHITELIST_SCHEMA = vol.Schema({
+    vol.Required("user_key"): cv.string,
+    vol.Required("action"): cv.string,
+    vol.Optional("entity_id", default=""): cv.string,
+    vol.Optional("area", default=""): cv.string,
+})
+
+_REMOVE_WHITELIST_SCHEMA = vol.Schema({
+    vol.Required("user_key"): cv.string,
+    vol.Required("action"): cv.string,
+    vol.Optional("entity_id", default=""): cv.string,
+    vol.Optional("area", default=""): cv.string,
 })
 
 
@@ -485,6 +548,147 @@ async def _async_setup_dashboard_entry(hass: HomeAssistant, entry: ConfigEntry) 
     hass.services.async_register(DOMAIN, _SERVICE_DELETE_RULE, handle_delete_rule,
                                   schema=_DELETE_RULE_SCHEMA, supports_response=True)
 
+    # ── Service: get_members ──
+    async def handle_get_members(call: ServiceCall) -> ServiceResponse:
+        from .runtime.storage.user_mapping import MappingStore
+        members = await hass.async_add_executor_job(MappingStore.load)
+        return {"members": members}
+
+    hass.services.async_register(DOMAIN, _SERVICE_GET_MEMBERS, handle_get_members,
+                                  supports_response=True)
+
+    # ── Service: add_member ──
+    async def handle_add_member(call: ServiceCall) -> ServiceResponse:
+        provider = call.data["provider"]
+        ext_id = call.data["ext_id"]
+        ha_user_id = call.data["ha_user_id"]
+        role = call.data.get("role", "member")
+        allowed_areas = call.data.get("allowed_areas") or []
+        label = call.data.get("label", "")
+        from .runtime.storage.user_mapping import MappingStore
+        ok = await hass.async_add_executor_job(
+            MappingStore.set, provider, ext_id, ha_user_id,
+            role=role, allowed_areas=allowed_areas, label=label,
+        )
+        members = await hass.async_add_executor_job(MappingStore.load)
+        return {"ok": bool(ok), "members": members}
+
+    hass.services.async_register(DOMAIN, _SERVICE_ADD_MEMBER, handle_add_member,
+                                  schema=_ADD_MEMBER_SCHEMA, supports_response=True)
+
+    # ── Service: update_member ──
+    async def handle_update_member(call: ServiceCall) -> ServiceResponse:
+        from .runtime.storage.user_mapping import MappingStore
+        kwargs = {
+            "provider": call.data.get("provider"),
+            "ext_id": call.data.get("ext_id"),
+            "ha_user_id": call.data.get("ha_user_id"),
+        }
+        if "role" in call.data:
+            kwargs["role"] = call.data["role"]
+        if "allowed_areas" in call.data:
+            kwargs["allowed_areas"] = call.data["allowed_areas"] or []
+        if "label" in call.data:
+            kwargs["label"] = call.data["label"]
+        ok = await hass.async_add_executor_job(MappingStore.update_member, **kwargs)
+        members = await hass.async_add_executor_job(MappingStore.load)
+        return {"ok": bool(ok), "members": members}
+
+    hass.services.async_register(DOMAIN, _SERVICE_UPDATE_MEMBER, handle_update_member,
+                                  schema=_UPDATE_MEMBER_SCHEMA, supports_response=True)
+
+    # ── Service: remove_member ──
+    async def handle_remove_member(call: ServiceCall) -> ServiceResponse:
+        from .runtime.storage.user_mapping import MappingStore
+        provider = call.data.get("provider")
+        ext_id = call.data.get("ext_id")
+        ha_user_id = call.data.get("ha_user_id")
+        if provider and ext_id:
+            ok = await hass.async_add_executor_job(MappingStore.remove, provider, ext_id)
+        elif ha_user_id:
+            ok = await hass.async_add_executor_job(MappingStore.remove_by_user_key, ha_user_id)
+        else:
+            return {"ok": False, "error": "需要 provider+ext_id 或 ha_user_id"}
+        members = await hass.async_add_executor_job(MappingStore.load)
+        return {"ok": bool(ok), "members": members}
+
+    hass.services.async_register(DOMAIN, _SERVICE_REMOVE_MEMBER, handle_remove_member,
+                                  schema=_REMOVE_MEMBER_SCHEMA, supports_response=True)
+
+    # ── Service: get_approvals ──
+    async def handle_get_approvals(call: ServiceCall) -> ServiceResponse:
+        from .runtime.storage import approval_store
+        pending = await hass.async_add_executor_job(approval_store.list_pending, hass)
+        history = await hass.async_add_executor_job(approval_store.history, hass, 20)
+        return {"pending": pending, "history": history}
+
+    hass.services.async_register(DOMAIN, _SERVICE_GET_APPROVALS, handle_get_approvals,
+                                  schema=_GET_APPROVALS_SCHEMA, supports_response=True)
+
+    # ── Service: resolve_approval ──
+    async def handle_resolve_approval(call: ServiceCall) -> ServiceResponse:
+        from .runtime.storage import approval_store
+        approval_id = call.data["approval_id"]
+        approved = call.data["approved"]
+        approver = call.data.get("approver", "")
+        ok = await hass.async_add_executor_job(
+            approval_store.resolve, hass, approval_id, approved, approver or None
+        )
+        pending = await hass.async_add_executor_job(approval_store.list_pending, hass)
+        return {"ok": bool(ok), "pending": pending}
+
+    hass.services.async_register(DOMAIN, _SERVICE_RESOLVE_APPROVAL, handle_resolve_approval,
+                                  schema=_RESOLVE_APPROVAL_SCHEMA, supports_response=True)
+
+    # ── Service: list_audit ──
+    async def handle_list_audit(call: ServiceCall) -> ServiceResponse:
+        from .runtime.storage.audit_store import list_recent
+        limit = call.data.get("limit", 100)
+        entries = await hass.async_add_executor_job(list_recent, hass, limit)
+        return {"entries": entries}
+
+    hass.services.async_register(DOMAIN, _SERVICE_LIST_AUDIT, handle_list_audit,
+                                  schema=_LIST_AUDIT_SCHEMA, supports_response=True)
+
+    # ── Service: list_whitelist ──
+    async def handle_list_whitelist(call: ServiceCall) -> ServiceResponse:
+        from .runtime.storage.authorization import PolicyGate
+        entries = await hass.async_add_executor_job(PolicyGate.list_whitelist)
+        return {"entries": entries}
+
+    hass.services.async_register(DOMAIN, _SERVICE_LIST_WHITELIST, handle_list_whitelist,
+                                  supports_response=True)
+
+    # ── Service: add_whitelist ──
+    async def handle_add_whitelist(call: ServiceCall) -> ServiceResponse:
+        from .runtime.storage.authorization import PolicyGate
+        ok = await hass.async_add_executor_job(
+            PolicyGate.add_whitelist_entry,
+            call.data["user_key"], call.data["action"],
+            call.data.get("entity_id") or None,
+            call.data.get("area") or None,
+        )
+        entries = await hass.async_add_executor_job(PolicyGate.list_whitelist)
+        return {"ok": bool(ok), "entries": entries}
+
+    hass.services.async_register(DOMAIN, _SERVICE_ADD_WHITELIST, handle_add_whitelist,
+                                  schema=_ADD_WHITELIST_SCHEMA, supports_response=True)
+
+    # ── Service: remove_whitelist ──
+    async def handle_remove_whitelist(call: ServiceCall) -> ServiceResponse:
+        from .runtime.storage.authorization import PolicyGate
+        ok = await hass.async_add_executor_job(
+            PolicyGate.remove_whitelist_entry,
+            call.data["user_key"], call.data["action"],
+            call.data.get("entity_id") or None,
+            call.data.get("area") or None,
+        )
+        entries = await hass.async_add_executor_job(PolicyGate.list_whitelist)
+        return {"ok": bool(ok), "entries": entries}
+
+    hass.services.async_register(DOMAIN, _SERVICE_REMOVE_WHITELIST, handle_remove_whitelist,
+                                  schema=_REMOVE_WHITELIST_SCHEMA, supports_response=True)
+
     entry.async_on_unload(entry.add_update_listener(_async_dashboard_update_listener))
 
     # ── Register dashboard panel ──
@@ -680,7 +884,7 @@ class ClawDashboardView(HomeAssistantView):
 
         if action == "toggle_rule":
             rule_id = body.get("rule_id", "")
-            enabled = bool(body.get("enabled", False))
+            enabled = str(body.get("enabled", False)).lower() not in ("false", "0", "")
             try:
                 result = await hass.services.async_call(
                     DOMAIN, _SERVICE_TOGGLE_RULE,
@@ -712,6 +916,150 @@ class ClawDashboardView(HomeAssistantView):
                     blocking=True, return_response=True,
                 )
                 return web.json_response(result or {"ok": False, "rules": []})
+            except Exception as e:
+                return web.json_response({"error": str(e)})
+
+        # ── G5 members / approvals / audit / whitelist proxy ──
+        if action == "get_members":
+            try:
+                result = await hass.services.async_call(
+                    DOMAIN, _SERVICE_GET_MEMBERS, {},
+                    blocking=True, return_response=True,
+                )
+                return web.json_response(result or {"members": []})
+            except Exception as e:
+                return web.json_response({"error": str(e)})
+
+        if action == "add_member":
+            try:
+                result = await hass.services.async_call(
+                    DOMAIN, _SERVICE_ADD_MEMBER,
+                    {
+                        "provider": body.get("provider", ""),
+                        "ext_id": body.get("ext_id", ""),
+                        "ha_user_id": body.get("ha_user_id", ""),
+                        "role": body.get("role", "member"),
+                        "allowed_areas": body.get("allowed_areas") or [],
+                        "label": body.get("label", ""),
+                    },
+                    blocking=True, return_response=True,
+                )
+                return web.json_response(result or {"ok": False, "members": []})
+            except Exception as e:
+                return web.json_response({"error": str(e)})
+
+        if action == "update_member":
+            try:
+                payload = {
+                    "provider": body.get("provider"),
+                    "ext_id": body.get("ext_id"),
+                    "ha_user_id": body.get("ha_user_id"),
+                }
+                if "role" in body:
+                    payload["role"] = body.get("role")
+                if "allowed_areas" in body:
+                    payload["allowed_areas"] = body.get("allowed_areas") or []
+                if "label" in body:
+                    payload["label"] = body.get("label")
+                result = await hass.services.async_call(
+                    DOMAIN, _SERVICE_UPDATE_MEMBER, payload,
+                    blocking=True, return_response=True,
+                )
+                return web.json_response(result or {"ok": False, "members": []})
+            except Exception as e:
+                return web.json_response({"error": str(e)})
+
+        if action == "remove_member":
+            try:
+                result = await hass.services.async_call(
+                    DOMAIN, _SERVICE_REMOVE_MEMBER,
+                    {
+                        "provider": body.get("provider"),
+                        "ext_id": body.get("ext_id"),
+                        "ha_user_id": body.get("ha_user_id"),
+                    },
+                    blocking=True, return_response=True,
+                )
+                return web.json_response(result or {"ok": False, "members": []})
+            except Exception as e:
+                return web.json_response({"error": str(e)})
+
+        if action == "get_approvals":
+            try:
+                result = await hass.services.async_call(
+                    DOMAIN, _SERVICE_GET_APPROVALS, {},
+                    blocking=True, return_response=True,
+                )
+                return web.json_response(result or {"pending": [], "history": []})
+            except Exception as e:
+                return web.json_response({"error": str(e)})
+
+        if action == "resolve_approval":
+            try:
+                result = await hass.services.async_call(
+                    DOMAIN, _SERVICE_RESOLVE_APPROVAL,
+                    {
+                        "approval_id": body.get("approval_id", ""),
+                        "approved": str(body.get("approved", False)).lower()
+                        not in ("false", "0", ""),
+                        "approver": body.get("approver", ""),
+                    },
+                    blocking=True, return_response=True,
+                )
+                return web.json_response(result or {"ok": False, "pending": []})
+            except Exception as e:
+                return web.json_response({"error": str(e)})
+
+        if action == "list_audit":
+            try:
+                result = await hass.services.async_call(
+                    DOMAIN, _SERVICE_LIST_AUDIT,
+                    {"limit": int(body.get("limit", 100))},
+                    blocking=True, return_response=True,
+                )
+                return web.json_response(result or {"entries": []})
+            except Exception as e:
+                return web.json_response({"error": str(e)})
+
+        if action == "list_whitelist":
+            try:
+                result = await hass.services.async_call(
+                    DOMAIN, _SERVICE_LIST_WHITELIST, {},
+                    blocking=True, return_response=True,
+                )
+                return web.json_response(result or {"entries": []})
+            except Exception as e:
+                return web.json_response({"error": str(e)})
+
+        if action == "add_whitelist":
+            try:
+                result = await hass.services.async_call(
+                    DOMAIN, _SERVICE_ADD_WHITELIST,
+                    {
+                        "user_key": body.get("user_key", ""),
+                        "action": body.get("action", ""),
+                        "entity_id": body.get("entity_id", ""),
+                        "area": body.get("area", ""),
+                    },
+                    blocking=True, return_response=True,
+                )
+                return web.json_response(result or {"ok": False, "entries": []})
+            except Exception as e:
+                return web.json_response({"error": str(e)})
+
+        if action == "remove_whitelist":
+            try:
+                result = await hass.services.async_call(
+                    DOMAIN, _SERVICE_REMOVE_WHITELIST,
+                    {
+                        "user_key": body.get("user_key", ""),
+                        "action": body.get("action", ""),
+                        "entity_id": body.get("entity_id", ""),
+                        "area": body.get("area", ""),
+                    },
+                    blocking=True, return_response=True,
+                )
+                return web.json_response(result or {"ok": False, "entries": []})
             except Exception as e:
                 return web.json_response({"error": str(e)})
 
@@ -833,6 +1181,7 @@ class ClawDashboardView(HomeAssistantView):
                         "skill_editor": "管理安装技能 ｜ 动态查看与编辑",
                         "plugin_manager": "管理安装插件 ｜ Hermes 兼容插件",
                         "rules_editor": "硬边界规则 ｜ 强制约束与安全红线",
+                        "members": "成员与权限 ｜ 角色分级与操作确认",
                     },
                 },
                 "agent_settings": {
@@ -909,6 +1258,7 @@ class ClawDashboardView(HomeAssistantView):
                 "skill_editor": {"title": "管理安装技能", "data": {}},
                 "plugin_manager": {"title": "管理安装插件", "data": {}},
                 "rules_editor": {"title": "硬边界规则", "data": {}},
+                "members": {"title": "成员与权限", "description": "成员角色分级、操作确认队列、审计与白名单", "data": {}},
                 "user_mapping": {"title": "用户关联", "description": "把外部 IM 用户映射到 HA 成员", "menu_options": {
                     "um_pick_channel": "选择通道",
                     "um_pick_identity": "选择外部用户",
@@ -958,6 +1308,7 @@ class ClawDashboardView(HomeAssistantView):
                 "skill_editor": "选择一个技能查看其 Markdown 全文，或直接在下一步进行编辑/删除。",
                 "plugin_manager": "感谢 Hermes Agent 项目，本功能特别支持 **Hermes 兼容的扩展模块**。",
                 "rules_editor": "**硬边界规则**\n规则会注入 AI 的 system prompt，启用后 AI 必须无条件遵守。\n「始终遵循」是正向要求；「绝对禁止」是安全红线；「回复要求」约束回复格式。",
+                "members": "**成员与权限**\nowner 无感放行全部操作；member/shadow 的 R0/R1 只读与可逆控制在允许区域内放行，R2 系统变更需人工确认，R3 破坏性操作默认拒绝。所有决策写入审计日志。",
                 "user_mapping": "将飞书、微信、QQ 等 IM 通道里的外部身份，绑定到 HA 家庭成员。",
                 "conv_dialog": "设置 AI 生成回复时使用的策略。",
                 "conv_display": "设置聊天界面的交互和显示方式。",
