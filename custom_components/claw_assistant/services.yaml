@@ -349,6 +349,118 @@ remove_whitelist:
       selector:
         text:
 
+get_tasks:
+  name: Get scheduled tasks
+  description: "List all heartbeat scheduled tasks with their status and last execution"
+  fields: {}
+
+set_task_enabled:
+  name: Set task enabled
+  description: "Enable or disable a scheduled task by slug"
+  fields:
+    slug:
+      name: Slug
+      description: "Task identifier (slug)"
+      required: true
+      selector:
+        text:
+    enabled:
+      name: Enabled
+      description: "Whether the task is enabled"
+      required: true
+      selector:
+        boolean:
+
+run_task_now:
+  name: Run task now
+  description: "Trigger a scheduled task immediately (does not wait for the next tick)"
+  fields:
+    slug:
+      name: Slug
+      description: "Task identifier (slug)"
+      required: true
+      selector:
+        text:
+
+delete_task:
+  name: Delete scheduled task
+  description: "Delete a scheduled task by slug"
+  fields:
+    slug:
+      name: Slug
+      description: "Task identifier (slug)"
+      required: true
+      selector:
+        text:
+
+create_task:
+  name: Create scheduled task
+  description: "Create a simplified scheduled task with title and schedule"
+  fields:
+    title:
+      name: Title
+      description: "Task title / objective"
+      required: true
+      selector:
+        text:
+    schedule:
+      name: Schedule
+      description: "Cron expression or interval (e.g. every 2h, 30 */2 * * *)"
+      required: false
+      default: ""
+      selector:
+        text:
+
+get_pending_insights:
+  name: Get pending insights
+  description: "List pending passive-learning routine candidates and learned entries"
+  fields: {}
+
+confirm_insight:
+  name: Confirm insight
+  description: "Confirm a pending insight: write to memory (+ trust whitelist when entity/action present)"
+  fields:
+    insight_id:
+      name: Insight ID
+      description: "Pending insight identifier"
+      required: true
+      selector:
+        text:
+    user_key:
+      name: User key
+      description: "Optional user key used for the trust-whitelist entry"
+      required: false
+      default: ""
+      selector:
+        text:
+
+dismiss_insight:
+  name: Dismiss insight
+  description: "Dismiss a pending insight without learning it"
+  fields:
+    insight_id:
+      name: Insight ID
+      description: "Pending insight identifier"
+      required: true
+      selector:
+        text:
+
+block_insight:
+  name: Block insight
+  description: "Permanently stop proposing this insight pattern"
+  fields:
+    insight_id:
+      name: Insight ID
+      description: "Pending insight identifier"
+      required: true
+      selector:
+        text:
+
+list_learned:
+  name: List learned insights
+  description: "List confirmed (learned) insights"
+  fields: {}
+
 refresh_sensor:
   name: Refresh config sensor
   description: "Force refresh the Claw Config sensor state"

@@ -358,6 +358,8 @@ var ICONS = {
   skill_editor:'mdi:lightning-bolt', plugin_manager:'mdi:puzzle',
   rules_editor:'mdi:shield-alert-outline',
   members:'mdi:account-group',
+  scheduled_tasks:'mdi:calendar-clock',
+  learning:'mdi:lightbulb-on-outline',
   conversation_manager:'mdi:chat-outline'
 };
 function nodeIcon(k){ return ICONS[k] || 'mdi:tune'; }
@@ -570,6 +572,8 @@ function renderLeaf(node, o, preHtml) {
   if (key === 'conversation_manager') { renderConversationList(); return; }
   if (key === 'rules_editor') { renderRulesList(); return; }
   if (key === 'members') { renderMembersPage(); return; }
+  if (key === 'scheduled_tasks') { renderScheduledTasksPage(); return; }
+  if (key === 'learning') { renderLearningPage(); return; }
   if (key.indexOf('ws_') === 0) { renderDocEditor(node, o); return; }
   if (key === 'um_pick_channel') { showAddMappingWizard(); return; }
   if (key === 'um_remove') { renderRemoveList(); return; }
@@ -1174,7 +1178,7 @@ function renderMemberList() {
 }
 function renderApprovalsBlock() {
   var box = $('memApprovals'); if (!box) return;
-  box.innerHTML = '<div class="group-card open"><div class="gc-head" onclick="this.parentElement.classList.toggle(\'open\')"><div class="gc-ic"><ha-icon icon="mdi:shield-clock"></ha-icon></div><div class="gc-tx"><div class="gc-t">待确认操作</div><div class="gc-d">R2 系统变更需人工确认后才能执行</div></div><ha-icon icon="mdi:chevron-down" class="gc-chev"></ha-icon></div><div class="gc-body" id="approvalBody"><div style="padding:10px;color:var(--sec)">加载中...</div></div></div>';
+  box.innerHTML = '<div class="group-card open"><div class="gc-head" onclick="this.parentElement.classList.toggle(\'open\')"><div class="gc-ic"><ha-icon icon="mdi:lock-outline"></ha-icon></div><div class="gc-tx"><div class="gc-t">待确认操作</div><div class="gc-d">R2 系统变更需人工确认后才能执行</div></div><ha-icon icon="mdi:chevron-down" class="gc-chev"></ha-icon></div><div class="gc-body" id="approvalBody"><div style="padding:10px;color:var(--sec)">加载中...</div></div></div>';
   api({action:'get_approvals'}).then(function(d){
     var body = $('approvalBody'); if (!body) return;
     var pending = d.pending || [];
@@ -1333,6 +1337,154 @@ function removeWhitelistEntry(user, action, entityId, area) {
   if (!confirm('确定删除该白名单条目？')) return;
   api({action:'remove_whitelist', user_key:user, action:action, entity_id:entityId, area:area}).then(function(r){
     if (r.ok) { toast('白名单已删除'); renderWhitelistSection(); } else toast('删除失败: '+(r.error||''));
+  });
+}
+
+// ── 定时任务（G2）──
+function renderScheduledTasksPage() {
+  var gd = $('cardGrid');
+  var node = nodeAtPath(_path);
+  var h = stepIntroHtml(node);
+  h += '<div style="display:flex;justify-content:flex-end;margin-bottom:14px;gap:8px;flex-wrap:wrap">'
+     + '<button class="btn pri" onclick="openNewTaskModal()"><ha-icon icon="mdi:plus"></ha-icon> 新建任务</button></div>';
+  h += '<div id="taskList"><div class="action-card" style="cursor:default;grid-column:1/-1"><div class="ac-ic"><ha-icon icon="mdi:loading"></ha-icon></div><div class="ac-tx"><div class="ac-t">加载中...</div></div></div></div>';
+  gd.innerHTML = h;
+  renderTaskList();
+}
+function renderTaskList() {
+  var box = $('taskList'); if (!box) return;
+  box.innerHTML = '<div class="action-card" style="cursor:default;grid-column:1/-1"><div class="ac-ic"><ha-icon icon="mdi:loading"></ha-icon></div><div class="ac-tx"><div class="ac-t">加载中...</div></div></div>';
+  api({action:'get_tasks'}).then(function(d){
+    var tasks = d.tasks || [];
+    if (!tasks.length) { box.innerHTML = '<div class="action-card" style="cursor:default;grid-column:1/-1"><div class="ac-ic"><ha-icon icon="mdi:calendar-clock"></ha-icon></div><div class="ac-tx"><div class="ac-t">暂无定时任务</div><div class="ac-d">点击右上角「新建任务」创建第一条自动跟进任务。任务会由心跳 Ticker 按周期自动执行。</div></div></div>'; return; }
+    var h = '<div class="group-grid">';
+    tasks.forEach(function(t){
+      var statusBadge = t.enabled ? '<span class="pbadge RUNNING">运行中</span>' : '<span class="pbadge STOPPED">已暂停</span>';
+      var lastAt = t.last_checked_at ? new Date(t.last_checked_at).toLocaleString('zh-CN',{hour12:false}) : '从未';
+      var lastStatus = t.last_status || '-';
+      h += '<div class="group-card open"><div class="gc-head">'
+        + '<div class="gc-ic"><ha-icon icon="mdi:calendar-clock"></ha-icon></div>'
+        + '<div class="gc-tx"><div class="gc-t">'+eh(t.title||t.slug)+' '+statusBadge+'</div>'
+        + '<div class="gc-d">'+eh(t.schedule||'未设置周期')+' · 运行 '+eh(t.run_count||0)+' 次<br>上次执行: '+eh(lastAt)+' · '+eh(lastStatus)+'</div></div>'
+        + '<div style="display:flex;gap:4px;flex-shrink:0">'
+        + '<button class="btn" style="padding:4px 10px" title="立即运行" onclick="runTaskNow(\''+eh(t.slug)+'\')"><ha-icon icon="mdi:play"></ha-icon></button>'
+        + '<button class="btn" style="padding:4px 10px" title="'+(t.enabled?'暂停':'恢复')+'" onclick="toggleTaskEnabled(\''+eh(t.slug)+'\','+(t.enabled?'false':'true')+')"><ha-icon icon="'+(t.enabled?'mdi:pause':'mdi:play-circle-outline')+'"></ha-icon></button>'
+        + '<button class="btn danger-ghost" style="padding:4px 10px" title="删除任务" onclick="deleteTask(\''+eh(t.slug)+'\')"><ha-icon icon="mdi:delete"></ha-icon></button>'
+        + '</div></div></div>';
+    });
+    h += '</div>';
+    box.innerHTML = h;
+  });
+}
+function toggleTaskEnabled(slug, enabled) {
+  api({action:'set_task_enabled', slug:slug, enabled:enabled}).then(function(r){
+    if (r.ok) { toast(enabled ? '任务已恢复' : '任务已暂停'); renderTaskList(); }
+    else toast('操作失败: '+(r.error||''));
+  });
+}
+function runTaskNow(slug) {
+  if (!confirm('立即运行该任务？')) return;
+  api({action:'run_task_now', slug:slug}).then(function(r){
+    if (r.ok) { toast('已触发立即运行'); renderTaskList(); }
+    else toast('触发失败: '+(r.error||''));
+  });
+}
+function deleteTask(slug) {
+  if (!confirm('确定删除任务「'+slug+'」？此操作不可恢复。')) return;
+  api({action:'delete_task', slug:slug}).then(function(r){
+    if (r.ok) { toast('任务已删除'); renderTaskList(); }
+    else toast('删除失败: '+(r.error||''));
+  });
+}
+function openNewTaskModal() {
+  openModal('新建定时任务',
+    '<div class="fields" style="border:none;box-shadow:none;padding:0">'
+    + '<div class="field"><div class="field-label">任务标题</div><input class="inp" id="ntTitle" placeholder="例如：每晚提醒我关客厅灯">'
+    + '<div class="field-help">描述要自动跟进的事情。</div></div>'
+    + '<div class="field"><div class="field-label">周期</div><input class="inp" id="ntSchedule" placeholder="例如：每天 22:00 / every 2h / 30 */2 * * *">'
+    + '<div class="field-help">支持「每天 HH:MM」「every 30m」或 5 段 cron 表达式，留空表示尽快执行一次。</div></div>'
+    + '</div>',
+    '<button class="btn" onclick="tryCloseEditor()">取消</button><button class="btn pri" onclick="createTask()">创建</button>');
+}
+function createTask() {
+  var title = $('ntTitle') ? $('ntTitle').value.trim() : '';
+  var schedule = $('ntSchedule') ? $('ntSchedule').value.trim() : '';
+  if (!title) { toast('请填写任务标题'); return; }
+  api({action:'create_task', title:title, schedule:schedule}).then(function(r){
+    closeModal();
+    if (r.ok) { toast('任务已创建'); renderTaskList(); refreshNow(); }
+    else toast('创建失败: '+(r.error||''));
+  });
+}
+
+// ── 被动学习（G3）💡 与成员确认队列（锁 🔒）区分 ──
+function renderLearningPage() {
+  var gd = $('cardGrid');
+  var node = nodeAtPath(_path);
+  var h = stepIntroHtml(node);
+  h += '<div id="learnPending"><div class="group-card open"><div class="gc-head" onclick="this.parentElement.classList.toggle(\'open\')"><div class="gc-ic"><ha-icon icon="mdi:lightbulb-on-outline"></ha-icon></div><div class="gc-tx"><div class="gc-t">待确认规律</div><div class="gc-d">AI 观察到的重复行为候选，确认后写入长期记忆</div></div><ha-icon icon="mdi:chevron-down" class="gc-chev"></ha-icon></div><div class="gc-body" id="learnPendingBody"><div style="padding:10px;color:var(--sec)">加载中...</div></div></div></div>';
+  h += '<div id="learnLearned"><div class="group-card open"><div class="gc-head" onclick="this.parentElement.classList.toggle(\'open\')"><div class="gc-ic"><ha-icon icon="mdi:book-check-outline"></ha-icon></div><div class="gc-tx"><div class="gc-t">已学习</div><div class="gc-d">已确认写入长期记忆的规律</div></div><ha-icon icon="mdi:chevron-down" class="gc-chev"></ha-icon></div><div class="gc-body" id="learnLearnedBody"><div style="padding:10px;color:var(--sec)">加载中...</div></div></div></div>';
+  gd.innerHTML = h;
+  renderLearningPending();
+  renderLearningLearned();
+}
+function renderLearningPending() {
+  var body = $('learnPendingBody'); if (!body) return;
+  body.innerHTML = '<div style="padding:10px;color:var(--sec)">加载中...</div>';
+  api({action:'get_pending_insights'}).then(function(d){
+    var pending = d.pending || [];
+    if (!pending.length) { body.innerHTML = '<div style="padding:10px;color:var(--sec)">当前没有待确认的规律候选。日常对话中的重复提醒会自动生成候选。</div>'; return; }
+    var h = '';
+    pending.forEach(function(p){
+      var cat = p.category || 'routine';
+      var catLabel = cat==='routine'?'规律':(cat==='preference'?'偏好':'日程');
+      var conf = Math.round((p.confidence||0)*100)+'%';
+      h += '<div style="display:flex;align-items:center;gap:10px;padding:10px 0;border-bottom:1px solid var(--div)">'
+        + '<div style="flex:1;min-width:0"><div style="font-size:.86rem;font-weight:600">💡 '+eh(p.pattern)+' <span class="pbadge RUNNING" style="margin-left:4px">'+catLabel+'</span></div>'
+        + '<div style="font-size:.72rem;color:var(--sec)">置信度 '+eh(conf)+' · 来源 '+eh(p.source||'-')+' · '+eh(p.id)+'</div></div>'
+        + '<button class="btn pri" style="padding:5px 12px" onclick="confirmInsight(\''+eh(p.id)+'\')">确认</button>'
+        + '<button class="btn" style="padding:5px 12px" onclick="dismissInsight(\''+eh(p.id)+'\')">忽略</button>'
+        + '<button class="btn danger-ghost" style="padding:5px 12px" onclick="blockInsight(\''+eh(p.id)+'\')">不再提示</button>'
+        + '</div>';
+    });
+    body.innerHTML = h;
+  });
+}
+function renderLearningLearned() {
+  var body = $('learnLearnedBody'); if (!body) return;
+  body.innerHTML = '<div style="padding:10px;color:var(--sec)">加载中...</div>';
+  api({action:'list_learned'}).then(function(d){
+    var learned = d.learned || [];
+    if (!learned.length) { body.innerHTML = '<div style="padding:10px;color:var(--sec)">还没有确认过的规律。</div>'; return; }
+    var h = '';
+    learned.forEach(function(p){
+      var cat = p.category || 'routine';
+      var catLabel = cat==='routine'?'规律':(cat==='preference'?'偏好':'日程');
+      h += '<div style="display:flex;align-items:center;gap:10px;padding:8px 0;border-bottom:1px solid var(--div)">'
+        + '<div style="flex:1;min-width:0"><div style="font-size:.82rem">📚 '+eh(p.pattern)+' <span class="pbadge RUNNING" style="margin-left:4px">'+catLabel+'</span></div>'
+        + '<div style="font-size:.72rem;color:var(--sec)">'+eh(p.id)+'</div></div></div>';
+    });
+    body.innerHTML = h;
+  });
+}
+function confirmInsight(insightId) {
+  if (!confirm('确认学习该规律？将写入长期记忆。')) return;
+  api({action:'confirm_insight', insight_id:insightId, user_key:'panel'}).then(function(r){
+    if (r.ok) { toast('已确认，写入记忆'); renderLearningPending(); renderLearningLearned(); }
+    else toast('确认失败: '+(r.error||''));
+  });
+}
+function dismissInsight(insightId) {
+  api({action:'dismiss_insight', insight_id:insightId}).then(function(r){
+    if (r.ok) { toast('已忽略'); renderLearningPending(); }
+    else toast('忽略失败: '+(r.error||''));
+  });
+}
+function blockInsight(insightId) {
+  if (!confirm('永久停用这类规律，不再提示？')) return;
+  api({action:'block_insight', insight_id:insightId}).then(function(r){
+    if (r.ok) { toast('已停用此类规律'); renderLearningPending(); }
+    else toast('停用失败: '+(r.error||''));
   });
 }
 

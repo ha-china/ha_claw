@@ -71,7 +71,9 @@
           "skill_editor": "Manage Installed Skills | Live view & edit",
           "plugin_manager": "Manage Plugins | Hermes compatible plugins",
           "rules_editor": "Hard Boundary Rules | Constraints & safety red lines",
-          "members": "Members & Permissions | Roles and operation confirmation"
+          "members": "Members & Permissions | Roles and operation confirmation",
+          "scheduled_tasks": "Scheduled Tasks | Manage follow-up tasks",
+          "learning": "Learning | Passive insights & confirmation"
         }
       },
       "members": {
@@ -420,6 +422,16 @@
           "remove_key": "Link to remove",
           "back": "Back"
         }
+      },
+      "scheduled_tasks": {
+        "title": "Scheduled Tasks",
+        "description": "**Scheduled Tasks**\nView and manage automatic follow-up tasks: pause/resume, run now, delete or create. Tasks run on the heartbeat ticker cycle and can be triggered immediately from the panel.",
+        "data": {}
+      },
+      "learning": {
+        "title": "Learning",
+        "description": "**Passive Learning**\nReview routine candidates discovered from daily conversations (e.g. turning off lights at night). Confirming writes them to long-term memory; suggestions with entity/action also join the no-confirmation whitelist.",
+        "data": {}
       }
     },
     "error": {

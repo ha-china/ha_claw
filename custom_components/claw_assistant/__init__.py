@@ -223,6 +223,18 @@ _SERVICE_LIST_AUDIT = "list_audit"
 _SERVICE_LIST_WHITELIST = "list_whitelist"
 _SERVICE_ADD_WHITELIST = "add_whitelist"
 _SERVICE_REMOVE_WHITELIST = "remove_whitelist"
+# ── G2 scheduled task panel services ──
+_SERVICE_GET_TASKS = "get_tasks"
+_SERVICE_SET_TASK_ENABLED = "set_task_enabled"
+_SERVICE_RUN_TASK_NOW = "run_task_now"
+_SERVICE_DELETE_TASK = "delete_task"
+_SERVICE_CREATE_TASK = "create_task"
+# ── G3 passive learning confirmation services ──
+_SERVICE_GET_PENDING_INSIGHTS = "get_pending_insights"
+_SERVICE_CONFIRM_INSIGHT = "confirm_insight"
+_SERVICE_DISMISS_INSIGHT = "dismiss_insight"
+_SERVICE_BLOCK_INSIGHT = "block_insight"
+_SERVICE_LIST_LEARNED = "list_learned"
 
 _SET_OPTION_SCHEMA = vol.Schema({
     vol.Required("key"): cv.string,
@@ -309,6 +321,43 @@ _REMOVE_WHITELIST_SCHEMA = vol.Schema({
     vol.Optional("entity_id", default=""): cv.string,
     vol.Optional("area", default=""): cv.string,
 })
+
+_GET_TASKS_SCHEMA = vol.Schema({})
+
+_SET_TASK_ENABLED_SCHEMA = vol.Schema({
+    vol.Required("slug"): cv.string,
+    vol.Required("enabled"): bool,
+})
+
+_RUN_TASK_NOW_SCHEMA = vol.Schema({
+    vol.Required("slug"): cv.string,
+})
+
+_DELETE_TASK_SCHEMA = vol.Schema({
+    vol.Required("slug"): cv.string,
+})
+
+_CREATE_TASK_SCHEMA = vol.Schema({
+    vol.Required("title"): cv.string,
+    vol.Optional("schedule", default=""): cv.string,
+})
+
+_GET_PENDING_INSIGHTS_SCHEMA = vol.Schema({})
+
+_CONFIRM_INSIGHT_SCHEMA = vol.Schema({
+    vol.Required("insight_id"): cv.string,
+    vol.Optional("user_key", default=""): cv.string,
+})
+
+_DISMISS_INSIGHT_SCHEMA = vol.Schema({
+    vol.Required("insight_id"): cv.string,
+})
+
+_BLOCK_INSIGHT_SCHEMA = vol.Schema({
+    vol.Required("insight_id"): cv.string,
+})
+
+_LIST_LEARNED_SCHEMA = vol.Schema({})
 
 
 def _get_claw_base(hass: HomeAssistant) -> str | None:
@@ -689,6 +738,137 @@ async def _async_setup_dashboard_entry(hass: HomeAssistant, entry: ConfigEntry) 
     hass.services.async_register(DOMAIN, _SERVICE_REMOVE_WHITELIST, handle_remove_whitelist,
                                   schema=_REMOVE_WHITELIST_SCHEMA, supports_response=True)
 
+    # ── Service: get_tasks (G2) ──
+    async def handle_get_tasks(call: ServiceCall) -> ServiceResponse:
+        from .runtime.storage.heartbeat_store import async_list_heartbeat_tasks
+        tasks = await async_list_heartbeat_tasks(hass)
+        return {"tasks": tasks}
+
+    hass.services.async_register(DOMAIN, _SERVICE_GET_TASKS, handle_get_tasks,
+                                  schema=_GET_TASKS_SCHEMA, supports_response=True)
+
+    # ── Service: set_task_enabled (G2) ──
+    async def handle_set_task_enabled(call: ServiceCall) -> ServiceResponse:
+        from .runtime.storage.heartbeat_store import (
+            async_list_heartbeat_tasks,
+            async_set_enabled,
+        )
+        slug = call.data["slug"]
+        enabled = call.data["enabled"]
+        result = await async_set_enabled(hass, slug=slug, enabled=enabled)
+        tasks = await async_list_heartbeat_tasks(hass)
+        result["tasks"] = tasks
+        return result
+
+    hass.services.async_register(DOMAIN, _SERVICE_SET_TASK_ENABLED, handle_set_task_enabled,
+                                  schema=_SET_TASK_ENABLED_SCHEMA, supports_response=True)
+
+    # ── Service: run_task_now (G2) ──
+    async def handle_run_task_now(call: ServiceCall) -> ServiceResponse:
+        from .runtime.storage.heartbeat_store import (
+            async_list_heartbeat_tasks,
+            async_run_now,
+        )
+        slug = call.data["slug"]
+        result = await async_run_now(hass, slug=slug)
+        tasks = await async_list_heartbeat_tasks(hass)
+        result["tasks"] = tasks
+        return result
+
+    hass.services.async_register(DOMAIN, _SERVICE_RUN_TASK_NOW, handle_run_task_now,
+                                  schema=_RUN_TASK_NOW_SCHEMA, supports_response=True)
+
+    # ── Service: delete_task (G2) ──
+    async def handle_delete_task(call: ServiceCall) -> ServiceResponse:
+        from .runtime.storage.heartbeat_store import (
+            async_delete_heartbeat_task,
+            async_list_heartbeat_tasks,
+        )
+        slug = call.data["slug"]
+        await async_delete_heartbeat_task(hass, slug)
+        tasks = await async_list_heartbeat_tasks(hass)
+        return {"ok": True, "tasks": tasks}
+
+    hass.services.async_register(DOMAIN, _SERVICE_DELETE_TASK, handle_delete_task,
+                                  schema=_DELETE_TASK_SCHEMA, supports_response=True)
+
+    # ── Service: create_task (G2, simplified) ──
+    async def handle_create_task(call: ServiceCall) -> ServiceResponse:
+        from .runtime.storage.heartbeat_store import (
+            async_list_heartbeat_tasks,
+            async_upsert_heartbeat_task,
+        )
+        title = call.data["title"]
+        schedule = call.data.get("schedule", "")
+        path = await async_upsert_heartbeat_task(
+            hass,
+            title=title,
+            schedule=schedule,
+            objective=title,
+            steps=title,
+        )
+        tasks = await async_list_heartbeat_tasks(hass)
+        return {"ok": True, "path": str(path), "tasks": tasks}
+
+    hass.services.async_register(DOMAIN, _SERVICE_CREATE_TASK, handle_create_task,
+                                  schema=_CREATE_TASK_SCHEMA, supports_response=True)
+
+    # ── Service: get_pending_insights (G3) ──
+    async def handle_get_pending_insights(call: ServiceCall) -> ServiceResponse:
+        from .runtime.storage.pending_insights import InsightQueue
+        pending = await hass.async_add_executor_job(InsightQueue.list_pending)
+        learned = await hass.async_add_executor_job(InsightQueue.list_learned)
+        return {"pending": pending, "learned": learned}
+
+    hass.services.async_register(DOMAIN, _SERVICE_GET_PENDING_INSIGHTS, handle_get_pending_insights,
+                                  schema=_GET_PENDING_INSIGHTS_SCHEMA, supports_response=True)
+
+    # ── Service: confirm_insight (G3) ──
+    async def handle_confirm_insight(call: ServiceCall) -> ServiceResponse:
+        from .runtime.storage.pending_insights import InsightQueue
+        insight_id = call.data["insight_id"]
+        user_key = call.data.get("user_key", "")
+        result = await InsightQueue.confirm(hass, insight_id, user_key=user_key)
+        pending = await hass.async_add_executor_job(InsightQueue.list_pending)
+        learned = await hass.async_add_executor_job(InsightQueue.list_learned)
+        result["pending"] = pending
+        result["learned"] = learned
+        return result
+
+    hass.services.async_register(DOMAIN, _SERVICE_CONFIRM_INSIGHT, handle_confirm_insight,
+                                  schema=_CONFIRM_INSIGHT_SCHEMA, supports_response=True)
+
+    # ── Service: dismiss_insight (G3) ──
+    async def handle_dismiss_insight(call: ServiceCall) -> ServiceResponse:
+        from .runtime.storage.pending_insights import InsightQueue
+        insight_id = call.data["insight_id"]
+        ok = await hass.async_add_executor_job(InsightQueue.dismiss, insight_id)
+        pending = await hass.async_add_executor_job(InsightQueue.list_pending)
+        return {"ok": ok, "pending": pending}
+
+    hass.services.async_register(DOMAIN, _SERVICE_DISMISS_INSIGHT, handle_dismiss_insight,
+                                  schema=_DISMISS_INSIGHT_SCHEMA, supports_response=True)
+
+    # ── Service: block_insight (G3) ──
+    async def handle_block_insight(call: ServiceCall) -> ServiceResponse:
+        from .runtime.storage.pending_insights import InsightQueue
+        insight_id = call.data["insight_id"]
+        ok = await hass.async_add_executor_job(InsightQueue.block, insight_id)
+        pending = await hass.async_add_executor_job(InsightQueue.list_pending)
+        return {"ok": ok, "pending": pending}
+
+    hass.services.async_register(DOMAIN, _SERVICE_BLOCK_INSIGHT, handle_block_insight,
+                                  schema=_BLOCK_INSIGHT_SCHEMA, supports_response=True)
+
+    # ── Service: list_learned (G3) ──
+    async def handle_list_learned(call: ServiceCall) -> ServiceResponse:
+        from .runtime.storage.pending_insights import InsightQueue
+        learned = await hass.async_add_executor_job(InsightQueue.list_learned)
+        return {"learned": learned}
+
+    hass.services.async_register(DOMAIN, _SERVICE_LIST_LEARNED, handle_list_learned,
+                                  schema=_LIST_LEARNED_SCHEMA, supports_response=True)
+
     entry.async_on_unload(entry.add_update_listener(_async_dashboard_update_listener))
 
     # ── Register dashboard panel ──
@@ -1063,6 +1243,125 @@ class ClawDashboardView(HomeAssistantView):
             except Exception as e:
                 return web.json_response({"error": str(e)})
 
+        # ── G2 scheduled task panel proxy ──
+        if action == "get_tasks":
+            try:
+                result = await hass.services.async_call(
+                    DOMAIN, _SERVICE_GET_TASKS, {},
+                    blocking=True, return_response=True,
+                )
+                return web.json_response(result or {"tasks": []})
+            except Exception as e:
+                return web.json_response({"error": str(e)})
+
+        if action == "set_task_enabled":
+            try:
+                result = await hass.services.async_call(
+                    DOMAIN, _SERVICE_SET_TASK_ENABLED,
+                    {
+                        "slug": body.get("slug", ""),
+                        "enabled": str(body.get("enabled", False)).lower()
+                        not in ("false", "0", ""),
+                    },
+                    blocking=True, return_response=True,
+                )
+                return web.json_response(result or {"ok": False, "tasks": []})
+            except Exception as e:
+                return web.json_response({"error": str(e)})
+
+        if action == "run_task_now":
+            try:
+                result = await hass.services.async_call(
+                    DOMAIN, _SERVICE_RUN_TASK_NOW,
+                    {"slug": body.get("slug", "")},
+                    blocking=True, return_response=True,
+                )
+                return web.json_response(result or {"ok": False, "tasks": []})
+            except Exception as e:
+                return web.json_response({"error": str(e)})
+
+        if action == "delete_task":
+            try:
+                result = await hass.services.async_call(
+                    DOMAIN, _SERVICE_DELETE_TASK,
+                    {"slug": body.get("slug", "")},
+                    blocking=True, return_response=True,
+                )
+                return web.json_response(result or {"ok": False, "tasks": []})
+            except Exception as e:
+                return web.json_response({"error": str(e)})
+
+        if action == "create_task":
+            try:
+                result = await hass.services.async_call(
+                    DOMAIN, _SERVICE_CREATE_TASK,
+                    {
+                        "title": body.get("title", ""),
+                        "schedule": body.get("schedule", ""),
+                    },
+                    blocking=True, return_response=True,
+                )
+                return web.json_response(result or {"ok": False, "tasks": []})
+            except Exception as e:
+                return web.json_response({"error": str(e)})
+
+        # ── G3 passive learning proxy ──
+        if action == "get_pending_insights":
+            try:
+                result = await hass.services.async_call(
+                    DOMAIN, _SERVICE_GET_PENDING_INSIGHTS, {},
+                    blocking=True, return_response=True,
+                )
+                return web.json_response(result or {"pending": [], "learned": []})
+            except Exception as e:
+                return web.json_response({"error": str(e)})
+
+        if action == "confirm_insight":
+            try:
+                result = await hass.services.async_call(
+                    DOMAIN, _SERVICE_CONFIRM_INSIGHT,
+                    {
+                        "insight_id": body.get("insight_id", ""),
+                        "user_key": body.get("user_key", ""),
+                    },
+                    blocking=True, return_response=True,
+                )
+                return web.json_response(result or {"ok": False, "pending": [], "learned": []})
+            except Exception as e:
+                return web.json_response({"error": str(e)})
+
+        if action == "dismiss_insight":
+            try:
+                result = await hass.services.async_call(
+                    DOMAIN, _SERVICE_DISMISS_INSIGHT,
+                    {"insight_id": body.get("insight_id", "")},
+                    blocking=True, return_response=True,
+                )
+                return web.json_response(result or {"ok": False, "pending": []})
+            except Exception as e:
+                return web.json_response({"error": str(e)})
+
+        if action == "block_insight":
+            try:
+                result = await hass.services.async_call(
+                    DOMAIN, _SERVICE_BLOCK_INSIGHT,
+                    {"insight_id": body.get("insight_id", "")},
+                    blocking=True, return_response=True,
+                )
+                return web.json_response(result or {"ok": False, "pending": []})
+            except Exception as e:
+                return web.json_response({"error": str(e)})
+
+        if action == "list_learned":
+            try:
+                result = await hass.services.async_call(
+                    DOMAIN, _SERVICE_LIST_LEARNED, {},
+                    blocking=True, return_response=True,
+                )
+                return web.json_response(result or {"learned": []})
+            except Exception as e:
+                return web.json_response({"error": str(e)})
+
         if action == "reload_conversation":
             try:
                 await hass.services.async_call("conversation", "reload", {}, blocking=True)
@@ -1182,7 +1481,19 @@ class ClawDashboardView(HomeAssistantView):
                         "plugin_manager": "管理安装插件 ｜ Hermes 兼容插件",
                         "rules_editor": "硬边界规则 ｜ 强制约束与安全红线",
                         "members": "成员与权限 ｜ 角色分级与操作确认",
+                        "scheduled_tasks": "定时任务 ｜ 自动跟进任务管理",
+                        "learning": "学习 ｜ 被动学习与规律确认",
                     },
+                },
+                "scheduled_tasks": {
+                    "title": "定时任务",
+                    "description": "查看与管理自动跟进任务：暂停/恢复、立即运行、删除或新建。",
+                    "data": {},
+                },
+                "learning": {
+                    "title": "学习",
+                    "description": "查看 AI 发现的规律候选，确认后写入长期记忆。",
+                    "data": {},
                 },
                 "agent_settings": {
                     "title": "配置智能代理",
@@ -1309,6 +1620,8 @@ class ClawDashboardView(HomeAssistantView):
                 "plugin_manager": "感谢 Hermes Agent 项目，本功能特别支持 **Hermes 兼容的扩展模块**。",
                 "rules_editor": "**硬边界规则**\n规则会注入 AI 的 system prompt，启用后 AI 必须无条件遵守。\n「始终遵循」是正向要求；「绝对禁止」是安全红线；「回复要求」约束回复格式。",
                 "members": "**成员与权限**\nowner 无感放行全部操作；member/shadow 的 R0/R1 只读与可逆控制在允许区域内放行，R2 系统变更需人工确认，R3 破坏性操作默认拒绝。所有决策写入审计日志。",
+                "scheduled_tasks": "**定时任务**\n查看与管理自动跟进任务：暂停/恢复、立即运行、删除或新建。任务由心跳 Ticker 按周期自动执行。",
+                "learning": "**被动学习**\n查看 AI 从日常对话中发现的规律候选（如定时关灯），确认后写入长期记忆；含实体/操作的建议同时加入免确认白名单。",
                 "user_mapping": "将飞书、微信、QQ 等 IM 通道里的外部身份，绑定到 HA 家庭成员。",
                 "conv_dialog": "设置 AI 生成回复时使用的策略。",
                 "conv_display": "设置聊天界面的交互和显示方式。",

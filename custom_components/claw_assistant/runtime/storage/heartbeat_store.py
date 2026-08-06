@@ -287,6 +287,63 @@ async def async_upsert_heartbeat_task(
     return await hass.async_add_executor_job(_write_text, _heartbeat_path(), updated)
 
 
+async def async_set_enabled(
+    hass: HomeAssistant,
+    *,
+    slug: str,
+    enabled: bool,
+) -> dict[str, Any]:
+    """Enable or disable a heartbeat task by slug.
+
+    Reuses the existing markdown round-trip so the task's other fields are
+    preserved exactly. Returns the updated task payload (or an error dict when
+    the slug does not exist).
+    """
+    markdown = await hass.async_add_executor_job(_read_text, _heartbeat_path())
+    tasks = {task.slug: task for task in parse_heartbeat_tasks(markdown)}
+    target_slug = _slugify(slug)
+    task = tasks.get(target_slug)
+    if task is None:
+        return {"ok": False, "error": "task_not_found", "slug": target_slug}
+    updated = upsert_heartbeat_task_markdown(
+        markdown,
+        slug=task.slug,
+        title=task.title,
+        schedule=task.schedule,
+        objective=task.objective,
+        steps=task.steps,
+        notes=task.notes,
+        enabled=bool(enabled),
+        delete_after_success=task.delete_after_success,
+        notify_channel=task.notify_channel,
+    )
+    await hass.async_add_executor_job(_write_text, _heartbeat_path(), updated)
+    return {"ok": True, "slug": target_slug, "enabled": bool(enabled)}
+
+
+async def async_run_now(
+    hass: HomeAssistant,
+    *,
+    slug: str,
+) -> dict[str, Any]:
+    """Trigger a heartbeat task immediately (does not wait for the next tick).
+
+    The actual execution is delegated to the ticker's ``_run_single_task`` so
+    run-now and scheduled ticks share one execution path. Lazy import avoids a
+    circular dependency (heartbeat_ticker imports this module at module level).
+    """
+    markdown = await hass.async_add_executor_job(_read_text, _heartbeat_path())
+    tasks = {task.slug: task for task in parse_heartbeat_tasks(markdown)}
+    target_slug = _slugify(slug)
+    task = tasks.get(target_slug)
+    if task is None:
+        return {"ok": False, "error": "task_not_found", "slug": target_slug}
+    from .heartbeat_ticker import _run_single_task
+
+    await _run_single_task(hass, task)
+    return {"ok": True, "slug": target_slug}
+
+
 async def async_delete_heartbeat_task(hass: HomeAssistant, slug: str) -> Path:
 
     markdown = await hass.async_add_executor_job(_read_text, _heartbeat_path())
