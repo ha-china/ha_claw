@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 from typing import Any
 
 from homeassistant.helpers import llm
@@ -13,6 +14,8 @@ from .tool_result_summary import (
     extract_successful_tool_response,
 )
 from ..hooks.events import HookPayload, fire_hook_event
+
+LOGGER = logging.getLogger(__name__)
 
 def _sanitize_tool_payload(value: Any) -> Any:
 
@@ -171,20 +174,38 @@ async def _enforce_policy_gate(
     """Run the G5 PolicyGate three-state gate.
 
     Returns a blocked/cancelled tool result when the call must not proceed,
-    otherwise None (ALLOW / approved CONFIRM). Any internal failure degrades to
-    ALLOW so the executor never breaks for unrelated errors.
+    otherwise None (ALLOW / approved CONFIRM).
+
+    Fail-closed: if the gate infrastructure cannot be loaded or evaluation
+    raises, we return a blocked result instead of None so an internal failure
+    never degrades into an un-policed ALLOW.
     """
     try:
         from ..storage.user_activity import get_active_user_key
         from ..storage.authorization import PolicyGate, risk_of
         from ..storage import approval_store
-    except Exception:
-        return None
+    except Exception as exc:
+        LOGGER.error("Policy gate unavailable (%s); failing closed for %s", exc, tool_name)
+        return _gated_tool_result(
+            tool_name,
+            tool_args,
+            "策略门控不可用，已安全拒绝该操作",
+            f"{tool_name} was denied because the policy gate is unavailable.",
+        )
 
-    user_key = get_active_user_key(hass)
-    entity_id = _extract_entity_from_args(tool_args)
-    risk = risk_of(tool_name)
-    decision = PolicyGate.evaluate(user_key, tool_name, entity_id)
+    try:
+        user_key = get_active_user_key(hass)
+        entity_id = _extract_entity_from_args(tool_args)
+        risk = risk_of(tool_name)
+        decision = PolicyGate.evaluate(user_key, tool_name, entity_id)
+    except Exception as exc:
+        LOGGER.error("Policy gate evaluation failed (%s); failing closed for %s", exc, tool_name)
+        return _gated_tool_result(
+            tool_name,
+            tool_args,
+            "策略门控评估失败，已安全拒绝该操作",
+            f"{tool_name} was denied because policy evaluation failed.",
+        )
 
     if decision == "ALLOW":
         _record_audit(

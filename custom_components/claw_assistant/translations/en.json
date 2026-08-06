@@ -69,11 +69,13 @@
           "conversation_settings": "Tune Conversation Style | Display, streaming & dimensions",
           "workspace_editor": "Edit Workspace Docs | Master prompt & skill library",
           "skill_editor": "Manage Installed Skills | Live view & edit",
+          "conversation_manager": "Conversations | History & statistics",
           "plugin_manager": "Manage Plugins | Hermes compatible plugins",
           "rules_editor": "Hard Boundary Rules | Constraints & safety red lines",
           "members": "Members & Permissions | Roles and operation confirmation",
           "scheduled_tasks": "Scheduled Tasks | Manage follow-up tasks",
-          "learning": "Learning | Passive insights & confirmation"
+          "learning": "Learning | Passive insights & confirmation",
+          "dynamic": "Activity | Operation history & audit log"
         }
       },
       "members": {
@@ -83,7 +85,7 @@
       },
       "rules_editor": {
         "title": "Hard Boundary Rules",
-        "description": "**Hard Boundary Rules**\nRules are injected into the AI system prompt; once enabled, the AI must obey them unconditionally.\n\"Always\" are positive requirements; \"Never\" are safety red lines; \"Reply\" constrain response format.\n\nChanges take effect immediately without restarting.",
+        "description": "**Hard Boundary Rules**\nRules are injected into the AI system prompt; once enabled, the AI must obey them unconditionally.\n\"Always\" are positive requirements; \"Never\" are safety red lines; \"Reply\" constrain response format.\n\nChanges take effect immediately without restarting.\n\nRelation to Learning: rules here are manually defined hard constraints; the Learning tab confirms AI-discovered routine candidates, which are then written to long-term memory.",
         "data": {}
       },
       "agent_settings": {
@@ -430,7 +432,12 @@
       },
       "learning": {
         "title": "Learning",
-        "description": "**Passive Learning**\nReview routine candidates discovered from daily conversations (e.g. turning off lights at night). Confirming writes them to long-term memory; suggestions with entity/action also join the no-confirmation whitelist.",
+        "description": "**Passive Learning**\nReview routine candidates discovered from daily conversations (e.g. turning off lights at night). Confirming writes them to long-term memory; suggestions with entity/action also join the no-confirmation whitelist.\n\nRelation to Rules: candidates here are AI-discovered and, once confirmed, written to long-term memory; the Rules tab holds manually defined hard constraints.",
+        "data": {}
+      },
+      "dynamic": {
+        "title": "Activity",
+        "description": "**Operation History & Audit Log**\nEvery AI tool-call policy decision (ALLOW / CONFIRM / DENY) and human approval outcome is recorded here, newest first.\nFilter by decision type for traceability and security review.",
         "data": {}
       }
     },

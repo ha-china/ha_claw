@@ -360,6 +360,7 @@ var ICONS = {
   members:'mdi:account-group',
   scheduled_tasks:'mdi:calendar-clock',
   learning:'mdi:lightbulb-on-outline',
+  dynamic:'mdi:history',
   conversation_manager:'mdi:chat-outline'
 };
 function nodeIcon(k){ return ICONS[k] || 'mdi:tune'; }
@@ -564,7 +565,7 @@ function renderLeaf(node, o, preHtml) {
   var h = preHtml || '';
   // 这些特殊页渲染卡片列表，撑满网格更好看
   if (key === 'skill_editor' || key === 'plugin_manager' || key === 'conversation_manager' || key.indexOf('ws_') === 0 ||
-      key === 'rules_editor' || key === 'members' || key === 'um_pick_channel' || key === 'um_remove' || (node.fields||[]).indexOf('content') >= 0) {
+      key === 'rules_editor' || key === 'members' || key === 'dynamic' || key === 'um_pick_channel' || key === 'um_remove' || (node.fields||[]).indexOf('content') >= 0) {
     gd.classList.remove('narrow'); gd.classList.remove('group');
   }
   if (key === 'skill_editor') { renderSkillsList(); return; }
@@ -574,6 +575,7 @@ function renderLeaf(node, o, preHtml) {
   if (key === 'members') { renderMembersPage(); return; }
   if (key === 'scheduled_tasks') { renderScheduledTasksPage(); return; }
   if (key === 'learning') { renderLearningPage(); return; }
+  if (key === 'dynamic') { renderDynamicPage(); return; }
   if (key.indexOf('ws_') === 0) { renderDocEditor(node, o); return; }
   if (key === 'um_pick_channel') { showAddMappingWizard(); return; }
   if (key === 'um_remove') { renderRemoveList(); return; }
@@ -1485,6 +1487,80 @@ function blockInsight(insightId) {
   api({action:'block_insight', insight_id:insightId}).then(function(r){
     if (r.ok) { toast('已停用此类规律'); renderLearningPending(); }
     else toast('停用失败: '+(r.error||''));
+  });
+}
+
+// ── 动态（G6）：操作历史 / 审计日志 ──
+// 复用 G5 已注册的 list_audit 服务（append-only JSONL，最新在前），仅前端展示。
+var _auditFilter = 'ALL';
+var _auditLoaded = 0;
+function renderDynamicPage() {
+  var gd = $('cardGrid');
+  var node = nodeAtPath(_path);
+  var h = stepIntroHtml(node);
+  h += '<div style="display:flex;justify-content:flex-end;margin-bottom:14px;gap:8px;flex-wrap:wrap;align-items:center">'
+     + '<span style="font-size:.84rem;color:var(--sec)">决策类型</span>'
+     + '<select class="sel" id="auditFilter" style="width:auto;min-width:150px" onchange="auditApplyFilter()">'
+     + '<option value="ALL">全部</option><option value="ALLOW">ALLOW</option><option value="CONFIRM">CONFIRM</option><option value="DENY">DENY</option>'
+     + '</select>'
+     + '<button class="btn" onclick="auditReload()"><ha-icon icon="mdi:refresh"></ha-icon> 刷新</button></div>';
+  h += '<div class="group-card open"><div class="gc-head" onclick="this.parentElement.classList.toggle(\'open\')">'
+     + '<div class="gc-ic"><ha-icon icon="mdi:history"></ha-icon></div>'
+     + '<div class="gc-tx"><div class="gc-t">操作历史</div><div class="gc-d">最新在前，含 ALLOW / CONFIRM / DENY 全部策略决策与人工批准结果</div></div>'
+     + '<ha-icon icon="mdi:chevron-down" class="gc-chev"></ha-icon></div>'
+     + '<div class="gc-body" id="auditBody"><div style="padding:10px;color:var(--sec)">加载中...</div></div></div>';
+  h += '<div id="auditMoreWrap" style="display:none;justify-content:center;margin-top:14px"><button class="btn" onclick="auditLoadMore()"><ha-icon icon="mdi:chevron-down"></ha-icon> 加载更多</button></div>';
+  gd.innerHTML = h;
+  _auditFilter = 'ALL';
+  _auditLoaded = 0;
+  var f = $('auditFilter'); if (f) f.value = 'ALL';
+  auditLoad();
+}
+function auditDecisionBadge(decision) {
+  var badge = decision === 'ALLOW' ? 'RUNNING' : (decision === 'DENY' ? 'FAILED' : 'STOPPED');
+  return '<span class="pbadge '+badge+'">'+eh(decision||'-')+'</span>';
+}
+function auditApplyFilter() {
+  var f = $('auditFilter');
+  _auditFilter = f ? f.value : 'ALL';
+  _auditLoaded = 0;
+  auditLoad();
+}
+function auditReload() { _auditLoaded = 0; auditLoad(); }
+function auditLoadMore() { auditLoad(); }
+function auditLoad() {
+  var body = $('auditBody'); if (!body) return;
+  body.innerHTML = '<div style="padding:10px;color:var(--sec)">加载中...</div>';
+  var limit = _auditLoaded + 100;
+  api({action:'list_audit', limit: limit}).then(function(d){
+    if (!body) return;
+    var entries = d.entries || [];
+    if (d.error) { body.innerHTML = '<div style="padding:10px;color:#FF453A">读取失败: '+eh(d.error)+'</div>'; return; }
+    _auditLoaded = entries.length;
+    var filtered = (_auditFilter === 'ALL') ? entries : entries.filter(function(e){ return (e.decision||'') === _auditFilter; });
+    if (!filtered.length) {
+      body.innerHTML = '<div style="padding:10px;color:var(--sec)">' + (entries.length ? '当前筛选条件下没有记录。' : '暂无审计记录。AI 工具调用产生的策略决策会在这里生成记录。') + '</div>';
+    } else {
+      var h = '';
+      filtered.forEach(function(e){
+        var ts = e.ts ? new Date(e.ts*1000).toLocaleString('zh-CN',{hour12:false}) : '-';
+        var risk = 'R'+(e.risk==null?1:e.risk);
+        var approver = e.approver ? ' · 批准 '+eh(e.approver) : '';
+        var entity = e.entity_id ? '<div style="font-size:.72rem;color:var(--sec);word-break:break-all">'+eh(e.entity_id)+'</div>' : '';
+        h += '<div style="display:flex;align-items:flex-start;gap:12px;padding:10px 0;border-bottom:1px solid var(--div)">'
+          + '<div style="flex:1;min-width:0"><div style="font-size:.84rem;line-height:1.5">'
+          + auditDecisionBadge(e.decision) + ' <b>'+eh(e.tool||'-')+'</b> <span style="color:var(--sec)">'+risk+'</span></div>'
+          + '<div style="font-size:.72rem;color:var(--sec);word-break:break-all">'+eh(ts)+' · '+eh(e.user_key||'-')+approver+'</div>'
+          + entity + '</div>'
+          + '<span style="font-size:.72rem;color:var(--sec);flex-shrink:0">'+eh(e.result||'')+'</span></div>';
+      });
+      body.innerHTML = h;
+    }
+    var moreWrap = $('auditMoreWrap');
+    if (moreWrap) {
+      // 拉满一页说明可能还有更早的记录；不足一页说明已到日志开头（最新在前）。
+      moreWrap.style.display = (limit > 0 && entries.length >= limit) ? 'flex' : 'none';
+    }
   });
 }
 

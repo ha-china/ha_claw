@@ -232,14 +232,20 @@ class PolicyGate:
         - None / shadow users -> member
         - MappingStore entry -> its role field (default member)
         - Un-mapped HA user -> owner (backward-compatible bootstrap default)
+        - Lookup failure (import/parse error) -> member (fail-closed: never
+          promote an unresolved identity to owner)
         """
         if not user_key:
             return ROLE_MEMBER
         if str(user_key).startswith("shadow:"):
             return ROLE_MEMBER
-        from .user_mapping import MappingStore
+        try:
+            from .user_mapping import MappingStore
 
-        mapping = MappingStore.resolve_by_user_key(user_key)
+            mapping = MappingStore.resolve_by_user_key(user_key)
+        except Exception as exc:
+            LOGGER.warning("User role lookup failed for %r (%s); treating as member", user_key, exc)
+            return ROLE_MEMBER
         if mapping:
             role = str(mapping.get("role") or ROLE_MEMBER).strip()
             return role if role in (ROLE_OWNER, ROLE_MEMBER) else ROLE_MEMBER
@@ -247,12 +253,20 @@ class PolicyGate:
 
     @staticmethod
     def get_allowed_areas(user_key: str | None) -> list[str]:
-        """Return the allowed_areas list for a user (empty == unrestricted)."""
+        """Return the allowed_areas list for a user (empty == unrestricted).
+
+        On lookup failure returns [] (no area grants) — the caller may then
+        deny out-of-area R0/R1 calls, which is the conservative choice.
+        """
         if not user_key or str(user_key).startswith("shadow:"):
             return []
-        from .user_mapping import MappingStore
+        try:
+            from .user_mapping import MappingStore
 
-        mapping = MappingStore.resolve_by_user_key(user_key)
+            mapping = MappingStore.resolve_by_user_key(user_key)
+        except Exception as exc:
+            LOGGER.warning("Allowed-areas lookup failed for %r (%s); returning none", user_key, exc)
+            return []
         if not mapping:
             return []
         areas = mapping.get("allowed_areas") or []

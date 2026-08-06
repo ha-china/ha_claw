@@ -18,30 +18,102 @@ from ..utils.route_hints import build_route_envelope, build_route_hint
 MEMORY_TARGETS = ("memory", "user")
 
 
+def _safe_filename(key: str) -> str:
+    """Turn an arbitrary key into a safe filename.
+
+    user_key values may contain characters that are illegal in paths
+    (``shadow:wechat:xxx``, ``wechat/openid``, etc.). Every unsafe character is
+    replaced with an ``_<hex>`` escape (mirrors persona_store._safe_filename)
+    so the result can never contain a path separator and never produces ``..``
+    traversal. Kept readable for keys that only use ``[A-Za-z0-9-_.]``.
+    """
+    safe: list[str] = []
+    for ch in str(key or ""):
+        if ch.isalnum() or ch in ("-", "_", "."):
+            safe.append(ch)
+        else:
+            safe.append(f"_{ord(ch):02x}")
+    name = "".join(safe)
+    # Strip trailing dots (Windows-invalid) and reject traversal-ish names.
+    name = name.rstrip(".")
+    if not name or name in (".", "..") or name.startswith(".."):
+        return "unnamed"
+    return name
+
+
+def _is_user_target(target: str) -> bool:
+    """True for legacy 'user' and per-user 'user:<key>' routing targets."""
+    t = str(target or "").strip().lower()
+    return t == "user" or t.startswith("user:")
+
+
+def _resolve_memory_path(target: str = "memory") -> Path:
+    """Resolve a memory target string to a concrete markdown file path (G4).
+
+    Routing rules:
+    - ``"user"``            -> <data>/workspace/USER.md   (legacy single-user)
+    - ``"memory"``          -> <data>/workspace/MEMORY.md (legacy default)
+    - ``"user:<user_key>"`` -> <data>/memory/{safe(user_key)}/USER.md
+    - ``"area:<area_id>"``  -> <data>/memory/areas/{safe(area_id)}.md
+    - anything else         -> <data>/workspace/{TARGET.upper()}.md (backward
+      compatible; unknown targets behave like a named workspace memory doc)
+
+    New ``user:``/``area:`` targets are created under ``<data>/memory`` (not
+    ``workspace/``) so personal and area-scoped memories stay separate from the
+    legacy shared workspace docs. Parent directories are created on write by
+    the callers (``_write_memory_markdown``).
+    """
+    data_dir = get_data_dir()
+    raw = str(target or "").strip()
+    t = raw.lower()
+    if t == "user":
+        return data_dir / "workspace" / "USER.md"
+    if t == "memory":
+        return data_dir / "workspace" / "MEMORY.md"
+    if t.startswith("user:"):
+        user_key = raw[len("user:"):].strip()
+        safe_key = _safe_filename(user_key)
+        return data_dir / "memory" / safe_key / "USER.md"
+    if t.startswith("area:"):
+        area_id = raw[len("area:"):].strip()
+        safe_area = _safe_filename(area_id)
+        return data_dir / "memory" / "areas" / f"{safe_area}.md"
+    if not t:
+        return data_dir / "workspace" / "MEMORY.md"
+    return data_dir / "workspace" / f"{raw.upper()}.md"
+
+
 def _memory_path(target: str = "memory") -> Path:
-    ws = get_data_dir() / "workspace"
-    if target == "user":
-        return ws / "USER.md"
-    return ws / "MEMORY.md"
+    """Backward-compatible alias of :func:`_resolve_memory_path`."""
+    return _resolve_memory_path(target)
 
 
 def _target_subtitle(target: str) -> str:
-    if target == "user":
+    if _is_user_target(target):
         return "_User preferences, style, habits for claw_assistant._"
     return "_Curated long-term memory for claw_assistant._"
 
 
 def _target_limit(target: str) -> int:
-    if target == "user":
+    if _is_user_target(target):
         return USER_NOTES_CHAR_LIMIT
     return MEMORY_CHAR_LIMIT
 
 
 def _normalize_target(target: str) -> str:
-    t = (target or "").strip().lower()
-    if t not in MEMORY_TARGETS:
-        return "memory"
-    return t
+    """Normalize a target while preserving G4 routing targets.
+
+    Legacy values are lower-cased for membership checks; ``user:<key>`` and
+    ``area:<id>`` targets keep their original casing (the key part matters) and
+    pass through unchanged. Anything else falls back to ``"memory"``.
+    """
+    raw = (target or "").strip()
+    t = raw.lower()
+    if t in MEMORY_TARGETS:
+        return t
+    if t.startswith("user:") or t.startswith("area:"):
+        return raw
+    return "memory"
 
 MEMORY_SUBTITLE = "_Curated long-term memory for claw_assistant._"
 _TIMESTAMP_RE = re.compile(r"\s*\[(\d{4}-\d{2}-\d{2}T[^\]]+)\]\s*$")
@@ -343,7 +415,7 @@ async def async_save_memory_entry_result(
     if outcome.status in ("stored", "updated"):
         try:
             from .graph_service import async_link, async_recall, async_remember
-            kind = "preference" if target == "user" else "fact"
+            kind = "preference" if _is_user_target(target) else "fact"
             result = await async_remember(
                 hass,
                 kind=kind,

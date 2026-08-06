@@ -1622,6 +1622,7 @@ class ClawDashboardView(HomeAssistantView):
                 "members": "**成员与权限**\nowner 无感放行全部操作；member/shadow 的 R0/R1 只读与可逆控制在允许区域内放行，R2 系统变更需人工确认，R3 破坏性操作默认拒绝。所有决策写入审计日志。",
                 "scheduled_tasks": "**定时任务**\n查看与管理自动跟进任务：暂停/恢复、立即运行、删除或新建。任务由心跳 Ticker 按周期自动执行。",
                 "learning": "**被动学习**\n查看 AI 从日常对话中发现的规律候选（如定时关灯），确认后写入长期记忆；含实体/操作的建议同时加入免确认白名单。",
+                "dynamic": "**操作历史与审计日志**\n记录每次 AI 工具调用的策略决策（ALLOW / CONFIRM / DENY）与人工批准结果，最新在前，可按决策类型筛选。",
                 "user_mapping": "将飞书、微信、QQ 等 IM 通道里的外部身份，绑定到 HA 家庭成员。",
                 "conv_dialog": "设置 AI 生成回复时使用的策略。",
                 "conv_display": "设置聊天界面的交互和显示方式。",
