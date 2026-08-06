@@ -356,6 +356,7 @@ var ICONS = {
   ws_heartbeat:'mdi:heart-pulse', ws_identity:'mdi:badge-account', ws_memory:'mdi:brain',
   ws_soul:'mdi:emoticon-happy', ws_tools:'mdi:tools', ws_user:'mdi:account',
   skill_editor:'mdi:lightning-bolt', plugin_manager:'mdi:puzzle',
+  rules_editor:'mdi:shield-alert-outline',
   conversation_manager:'mdi:chat-outline'
 };
 function nodeIcon(k){ return ICONS[k] || 'mdi:tune'; }
@@ -560,12 +561,13 @@ function renderLeaf(node, o, preHtml) {
   var h = preHtml || '';
   // 这些特殊页渲染卡片列表，撑满网格更好看
   if (key === 'skill_editor' || key === 'plugin_manager' || key === 'conversation_manager' || key.indexOf('ws_') === 0 ||
-      key === 'um_pick_channel' || key === 'um_remove' || (node.fields||[]).indexOf('content') >= 0) {
+      key === 'rules_editor' || key === 'um_pick_channel' || key === 'um_remove' || (node.fields||[]).indexOf('content') >= 0) {
     gd.classList.remove('narrow'); gd.classList.remove('group');
   }
   if (key === 'skill_editor') { renderSkillsList(); return; }
   if (key === 'plugin_manager') { renderPluginsList(); return; }
   if (key === 'conversation_manager') { renderConversationList(); return; }
+  if (key === 'rules_editor') { renderRulesList(); return; }
   if (key.indexOf('ws_') === 0) { renderDocEditor(node, o); return; }
   if (key === 'um_pick_channel') { showAddMappingWizard(); return; }
   if (key === 'um_remove') { renderRemoveList(); return; }
@@ -1024,6 +1026,101 @@ function removeMapping(provider, extId) {
   if (!confirm('确定删除该关联？')) return;
   api({action:'remove_mapping', provider:provider, ext_id:extId}).then(function(r){
     if (r.ok) { toast('关联已删除'); renderRemoveList(); refreshNow(); }
+    else toast('删除失败: '+(r.error||''));
+  });
+}
+
+// ── 硬边界规则 ──
+var RULE_CATS = [
+  ['always','始终遵循','mdi:check-circle-outline','正向要求，AI 必须做到'],
+  ['never','绝对禁止','mdi:shield-alert-outline','安全红线，AI 严禁违反'],
+  ['reply','回复要求','mdi:message-text-outline','回复格式约束'],
+  ['custom','自定义','mdi:tag-outline','自定义分类']
+];
+function ruleCatMeta(cat) {
+  for (var i=0;i<RULE_CATS.length;i++) if (RULE_CATS[i][0]===cat) return RULE_CATS[i];
+  return [cat, cat, 'mdi:tag-outline', ''];
+}
+function ruleCatOrder(cat) {
+  for (var i=0;i<RULE_CATS.length;i++) if (RULE_CATS[i][0]===cat) return i;
+  return RULE_CATS.length;
+}
+function renderRulesList() {
+  var gd = $('cardGrid');
+  var node = nodeAtPath(_path);
+  gd.innerHTML = stepIntroHtml(node)
+    + '<div style="display:flex;justify-content:flex-end;margin-bottom:14px"><button class="btn pri" onclick="openNewRuleModal()"><ha-icon icon="mdi:plus"></ha-icon> 新建规则</button></div>'
+    + '<div class="group-grid" id="rulesBox"><div class="action-card" style="cursor:default;grid-column:1/-1"><div class="ac-ic"><ha-icon icon="mdi:loading"></ha-icon></div><div class="ac-tx"><div class="ac-t">加载中...</div></div></div></div>';
+  api({action:'get_rules'}).then(function(d){
+    var box = $('rulesBox'); if (!box) return;
+    var rules = d.rules || [];
+    if (!rules.length) {
+      box.innerHTML = '<div class="action-card" style="cursor:default;grid-column:1/-1"><div class="ac-ic"><ha-icon icon="mdi:shield-alert-outline"></ha-icon></div><div class="ac-tx"><div class="ac-t">暂无规则</div><div class="ac-d">点击右上角「新建规则」添加第一条硬边界规则。规则会注入 AI 的 system prompt，启用后立即生效。</div></div></div>';
+      return;
+    }
+    var groups = {}, order = [];
+    rules.forEach(function(r){
+      var c = r.category || 'custom';
+      if (!groups[c]) { groups[c] = []; order.push(c); }
+      groups[c].push(r);
+    });
+    order.sort(function(a,b){ return ruleCatOrder(a)-ruleCatOrder(b); });
+    var h = '';
+    order.forEach(function(cat){
+      var meta = ruleCatMeta(cat);
+      var items = groups[cat];
+      h += '<div class="group-card open"><div class="gc-head" onclick="this.parentElement.classList.toggle(\'open\')">'
+        + '<div class="gc-ic"><ha-icon icon="'+meta[2]+'"></ha-icon></div>'
+        + '<div class="gc-tx"><div class="gc-t">'+meta[1]+' <span style="color:var(--sec);font-weight:400;font-size:.76rem">'+items.length+' 条</span></div>'
+        + '<div class="gc-d">'+meta[3]+'</div></div>'
+        + '<ha-icon icon="mdi:chevron-down" class="gc-chev"></ha-icon></div>'
+        + '<div class="gc-body">';
+      items.forEach(function(r){
+        h += '<div style="display:flex;align-items:center;gap:12px;padding:10px 0;border-bottom:1px solid var(--div)">'
+          + '<div style="flex:1;min-width:0"><div style="font-size:.88rem;color:var(--txt);line-height:1.45;word-break:break-word">'+eh(r.description)+'</div>'
+          + '<div style="font-size:.7rem;color:var(--sec);margin-top:2px">'+eh(r.id)+'</div></div>'
+          + '<label class="tg" title="启用/停用"><input type="checkbox"'+(r.enabled?' checked':'')+' onchange="toggleRule(\''+eh(r.id)+'\', this.checked)"><span class="tg-sl"></span></label>'
+          + '<button class="btn danger-ghost" style="padding:4px 10px" title="删除规则" onclick="deleteRule(\''+eh(r.id)+'\')"><ha-icon icon="mdi:delete"></ha-icon></button>'
+          + '</div>';
+      });
+      h += '</div></div>';
+    });
+    box.innerHTML = h;
+  });
+}
+function toggleRule(ruleId, enabled) {
+  api({action:'toggle_rule', rule_id:ruleId, enabled:enabled}).then(function(r){
+    if (r.ok === false) toast('切换失败: '+(r.error||''));
+    else toast(enabled ? '规则已启用' : '规则已停用');
+    renderRulesList();
+  });
+}
+function openNewRuleModal() {
+  var opts = '';
+  RULE_CATS.forEach(function(c){ opts += '<option value="'+c[0]+'">'+c[1]+'</option>'; });
+  openModal('新建硬边界规则',
+    '<div class="fields" style="border:none;box-shadow:none;padding:0">'
+    + '<div class="field"><div class="field-label">分类</div><select class="sel" id="nrCat">'+opts+'</select>'
+    + '<div class="field-help">「绝对禁止」是安全红线，请描述清楚禁止的具体操作。</div></div>'
+    + '<div class="field"><div class="field-label">规则内容</div><textarea class="inp" id="nrDesc" rows="3" placeholder="例如：不要删除或修改自动化规则"></textarea>'
+    + '<div class="field-help">规则会注入 AI 的 system prompt，创建后立即生效。</div></div>'
+    + '</div>',
+    '<button class="btn" onclick="tryCloseEditor()">取消</button><button class="btn pri" onclick="createRule()">创建</button>');
+}
+function createRule() {
+  var cat = $('nrCat') ? $('nrCat').value : 'always';
+  var desc = $('nrDesc') ? $('nrDesc').value.trim() : '';
+  if (!desc) { toast('请填写规则内容'); return; }
+  api({action:'add_rule', category:cat, description:desc}).then(function(r){
+    closeModal();
+    if (r.ok) { toast('规则已创建'); renderRulesList(); refreshNow(); }
+    else toast('创建失败: '+(r.error||''));
+  });
+}
+function deleteRule(ruleId) {
+  if (!confirm('确定删除规则「'+ruleId+'」？此操作不可恢复。')) return;
+  api({action:'delete_rule', rule_id:ruleId}).then(function(r){
+    if (r.ok) { toast('规则已删除'); renderRulesList(); refreshNow(); }
     else toast('删除失败: '+(r.error||''));
   });
 }

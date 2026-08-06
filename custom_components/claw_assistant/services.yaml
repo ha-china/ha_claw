@@ -67,6 +67,66 @@ write_workspace_file:
         text:
           multiline: true
 
+get_rules:
+  name: Get hard boundary rules
+  description: "List all hard boundary rules (enabled and disabled) from the rules store"
+  fields: {}
+
+toggle_rule:
+  name: Toggle hard boundary rule
+  description: "Enable or disable a hard boundary rule by id"
+  fields:
+    rule_id:
+      name: Rule ID
+      description: "Rule identifier, e.g. rule_001"
+      required: true
+      example: "rule_001"
+      selector:
+        text:
+    enabled:
+      name: Enabled
+      description: "Whether the rule is enabled"
+      required: true
+      selector:
+        boolean:
+
+add_rule:
+  name: Add hard boundary rule
+  description: "Create a new enabled hard boundary rule"
+  fields:
+    category:
+      name: Category
+      description: "Rule category (always, never, reply, custom)"
+      required: true
+      example: "never"
+      selector:
+        select:
+          options:
+            - "always"
+            - "never"
+            - "reply"
+            - "custom"
+    description:
+      name: Description
+      description: "Rule text injected into the AI system prompt"
+      required: true
+      example: "不要删除或修改自动化规则"
+      selector:
+        text:
+          multiline: true
+
+delete_rule:
+  name: Delete hard boundary rule
+  description: "Remove a hard boundary rule by id"
+  fields:
+    rule_id:
+      name: Rule ID
+      description: "Rule identifier, e.g. rule_001"
+      required: true
+      example: "rule_001"
+      selector:
+        text:
+
 refresh_sensor:
   name: Refresh config sensor
   description: "Force refresh the Claw Config sensor state"

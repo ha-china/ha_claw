@@ -354,6 +354,7 @@ def init_storage(hass: HomeAssistant) -> Path:
         "prompts",
         "workspace",
         "homeassistant_guide",
+        "rules",
     ]
     for name in entries:
         src = BUNDLED_DATA_DIR / name

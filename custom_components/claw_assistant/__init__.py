@@ -208,6 +208,10 @@ _SERVICE_SET_OPTION = "set_option"
 _SERVICE_LIST_WORKSPACE = "list_workspace"
 _SERVICE_READ_FILE = "read_workspace_file"
 _SERVICE_WRITE_FILE = "write_workspace_file"
+_SERVICE_GET_RULES = "get_rules"
+_SERVICE_TOGGLE_RULE = "toggle_rule"
+_SERVICE_ADD_RULE = "add_rule"
+_SERVICE_DELETE_RULE = "delete_rule"
 
 _SET_OPTION_SCHEMA = vol.Schema({
     vol.Required("key"): cv.string,
@@ -225,6 +229,22 @@ _READ_FILE_SCHEMA = vol.Schema({
 _WRITE_FILE_SCHEMA = vol.Schema({
     vol.Required("path"): cv.string,
     vol.Required("content"): cv.string,
+})
+
+_RULE_CATEGORIES = ("always", "never", "reply", "custom")
+
+_TOGGLE_RULE_SCHEMA = vol.Schema({
+    vol.Required("rule_id"): cv.string,
+    vol.Required("enabled"): bool,
+})
+
+_ADD_RULE_SCHEMA = vol.Schema({
+    vol.Required("category"): vol.In(_RULE_CATEGORIES),
+    vol.Required("description"): cv.string,
+})
+
+_DELETE_RULE_SCHEMA = vol.Schema({
+    vol.Required("rule_id"): cv.string,
 })
 
 
@@ -421,6 +441,50 @@ async def _async_setup_dashboard_entry(hass: HomeAssistant, entry: ConfigEntry) 
     hass.services.async_register(DOMAIN, _SERVICE_WRITE_FILE, handle_write_file,
                                   schema=_WRITE_FILE_SCHEMA, supports_response=True)
 
+    # ── Service: get_rules ──
+    async def handle_get_rules(call: ServiceCall) -> ServiceResponse:
+        from .runtime.storage.rules_store import list_rules
+        rules = await hass.async_add_executor_job(list_rules)
+        return {"rules": rules}
+
+    hass.services.async_register(DOMAIN, _SERVICE_GET_RULES, handle_get_rules,
+                                  supports_response=True)
+
+    # ── Service: toggle_rule ──
+    async def handle_toggle_rule(call: ServiceCall) -> ServiceResponse:
+        rule_id = call.data["rule_id"]
+        enabled = call.data["enabled"]
+        from .runtime.storage.rules_store import list_rules, toggle_rule
+        ok = await hass.async_add_executor_job(toggle_rule, rule_id, enabled)
+        rules = await hass.async_add_executor_job(list_rules)
+        return {"ok": ok, "rules": rules}
+
+    hass.services.async_register(DOMAIN, _SERVICE_TOGGLE_RULE, handle_toggle_rule,
+                                  schema=_TOGGLE_RULE_SCHEMA, supports_response=True)
+
+    # ── Service: add_rule ──
+    async def handle_add_rule(call: ServiceCall) -> ServiceResponse:
+        category = call.data["category"]
+        description = call.data["description"]
+        from .runtime.storage.rules_store import add_rule, list_rules
+        rule = await hass.async_add_executor_job(add_rule, category, description)
+        rules = await hass.async_add_executor_job(list_rules)
+        return {"ok": rule is not None, "rule": rule, "rules": rules}
+
+    hass.services.async_register(DOMAIN, _SERVICE_ADD_RULE, handle_add_rule,
+                                  schema=_ADD_RULE_SCHEMA, supports_response=True)
+
+    # ── Service: delete_rule ──
+    async def handle_delete_rule(call: ServiceCall) -> ServiceResponse:
+        rule_id = call.data["rule_id"]
+        from .runtime.storage.rules_store import delete_rule, list_rules
+        ok = await hass.async_add_executor_job(delete_rule, rule_id)
+        rules = await hass.async_add_executor_job(list_rules)
+        return {"ok": ok, "rules": rules}
+
+    hass.services.async_register(DOMAIN, _SERVICE_DELETE_RULE, handle_delete_rule,
+                                  schema=_DELETE_RULE_SCHEMA, supports_response=True)
+
     entry.async_on_unload(entry.add_update_listener(_async_dashboard_update_listener))
 
     # ── Register dashboard panel ──
@@ -604,6 +668,53 @@ class ClawDashboardView(HomeAssistantView):
             except Exception as e:
                 return web.json_response({"error": str(e)})
 
+        if action == "get_rules":
+            try:
+                result = await hass.services.async_call(
+                    DOMAIN, _SERVICE_GET_RULES, {},
+                    blocking=True, return_response=True,
+                )
+                return web.json_response(result or {"rules": []})
+            except Exception as e:
+                return web.json_response({"error": str(e)})
+
+        if action == "toggle_rule":
+            rule_id = body.get("rule_id", "")
+            enabled = bool(body.get("enabled", False))
+            try:
+                result = await hass.services.async_call(
+                    DOMAIN, _SERVICE_TOGGLE_RULE,
+                    {"rule_id": rule_id, "enabled": enabled},
+                    blocking=True, return_response=True,
+                )
+                return web.json_response(result or {"ok": False, "rules": []})
+            except Exception as e:
+                return web.json_response({"error": str(e)})
+
+        if action == "add_rule":
+            category = body.get("category", "always")
+            description = body.get("description", "")
+            try:
+                result = await hass.services.async_call(
+                    DOMAIN, _SERVICE_ADD_RULE,
+                    {"category": category, "description": description},
+                    blocking=True, return_response=True,
+                )
+                return web.json_response(result or {"ok": False, "rules": []})
+            except Exception as e:
+                return web.json_response({"error": str(e)})
+
+        if action == "delete_rule":
+            rule_id = body.get("rule_id", "")
+            try:
+                result = await hass.services.async_call(
+                    DOMAIN, _SERVICE_DELETE_RULE, {"rule_id": rule_id},
+                    blocking=True, return_response=True,
+                )
+                return web.json_response(result or {"ok": False, "rules": []})
+            except Exception as e:
+                return web.json_response({"error": str(e)})
+
         if action == "reload_conversation":
             try:
                 await hass.services.async_call("conversation", "reload", {}, blocking=True)
@@ -721,6 +832,7 @@ class ClawDashboardView(HomeAssistantView):
                         "workspace_editor": "编辑工作文档 ｜ 主提示词与技能资料",
                         "skill_editor": "管理安装技能 ｜ 动态查看与编辑",
                         "plugin_manager": "管理安装插件 ｜ Hermes 兼容插件",
+                        "rules_editor": "硬边界规则 ｜ 强制约束与安全红线",
                     },
                 },
                 "agent_settings": {
@@ -796,6 +908,7 @@ class ClawDashboardView(HomeAssistantView):
                 "ws_user": {"title": "USER", "description": "用户基本信息，AI 据此个性化回复。", "data": {"content": "Markdown 编辑器"}},
                 "skill_editor": {"title": "管理安装技能", "data": {}},
                 "plugin_manager": {"title": "管理安装插件", "data": {}},
+                "rules_editor": {"title": "硬边界规则", "data": {}},
                 "user_mapping": {"title": "用户关联", "description": "把外部 IM 用户映射到 HA 成员", "menu_options": {
                     "um_pick_channel": "选择通道",
                     "um_pick_identity": "选择外部用户",
@@ -844,6 +957,7 @@ class ClawDashboardView(HomeAssistantView):
                 "workspace_editor": "**使用说明：**\n这些文档定义了 AI 助手的**核心人格与行为**，使用 Markdown 格式编写。",
                 "skill_editor": "选择一个技能查看其 Markdown 全文，或直接在下一步进行编辑/删除。",
                 "plugin_manager": "感谢 Hermes Agent 项目，本功能特别支持 **Hermes 兼容的扩展模块**。",
+                "rules_editor": "**硬边界规则**\n规则会注入 AI 的 system prompt，启用后 AI 必须无条件遵守。\n「始终遵循」是正向要求；「绝对禁止」是安全红线；「回复要求」约束回复格式。",
                 "user_mapping": "将飞书、微信、QQ 等 IM 通道里的外部身份，绑定到 HA 家庭成员。",
                 "conv_dialog": "设置 AI 生成回复时使用的策略。",
                 "conv_display": "设置聊天界面的交互和显示方式。",

@@ -69,8 +69,14 @@
           "conversation_settings": "Tune Conversation Style | Display, streaming & dimensions",
           "workspace_editor": "Edit Workspace Docs | Master prompt & skill library",
           "skill_editor": "Manage Installed Skills | Live view & edit",
-          "plugin_manager": "Manage Plugins | Hermes compatible plugins"
+          "plugin_manager": "Manage Plugins | Hermes compatible plugins",
+          "rules_editor": "Hard Boundary Rules | Constraints & safety red lines"
         }
+      },
+      "rules_editor": {
+        "title": "Hard Boundary Rules",
+        "description": "**Hard Boundary Rules**\nRules are injected into the AI system prompt; once enabled, the AI must obey them unconditionally.\n\"Always\" are positive requirements; \"Never\" are safety red lines; \"Reply\" constrain response format.\n\nChanges take effect immediately without restarting.",
+        "data": {}
       },
       "agent_settings": {
         "title": "Agent Settings",

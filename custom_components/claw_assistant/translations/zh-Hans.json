@@ -70,8 +70,14 @@
           "workspace_editor": "编辑工作文档 ｜ 主提示词与技能资料",
           "skill_editor": "管理安装技能 ｜ 动态查看与编辑",
           "conversation_manager": "对话管理 ｜ 历史记录与统计",
-          "plugin_manager": "管理安装插件 ｜ Hermes 兼容插件"
+          "plugin_manager": "管理安装插件 ｜ Hermes 兼容插件",
+          "rules_editor": "硬边界规则 ｜ 强制约束与安全红线"
         }
+      },
+      "rules_editor": {
+        "title": "硬边界规则",
+        "description": "**硬边界规则**\n规则会注入 AI 的 system prompt，启用后 AI 必须无条件遵守。\n「始终遵循」是正向要求；「绝对禁止」是安全红线；「回复要求」约束回复格式。\n\n修改规则后立即生效，无需重启。",
+        "data": {}
       },
       "agent_settings": {
         "title": "对话代理设置",
