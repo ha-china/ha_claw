@@ -1,8 +1,40 @@
 {
+  "config": {
+    "step": {
+      "user": {
+        "title": "Choose installation type",
+        "description": "Select what to install:",
+        "menu_options": {
+          "core": "Core - Full Claw Assistant runtime",
+          "dashboard": "Dashboard - Management panel only"
+        }
+      },
+      "core": {
+        "title": "Claw Assistant Core",
+        "description": "Install the full Claw Assistant runtime with AI agent orchestration, plugin system, and workspace management."
+      },
+      "dashboard": {
+        "title": "Claw Dashboard",
+        "description": "Install the management panel with Voice FAB, config sensor, and workspace tools."
+      },
+      "agent_settings": {
+        "title": "Configure AI Agents",
+        "description": "Select the conversation agents to use. The system tries them in order until a valid response is received.",
+        "data": {
+          "primary_agent": "Primary AI entity",
+          "fallback_agent": "Fallback AI entity",
+          "secondary_fallback_agent": "Summary AI entity (optional)"
+        }
+      }
+    }
+  },
   "entity": {
     "sensor": {
       "heartbeat": {
         "name": "Heartbeat"
+      },
+      "claw_config": {
+        "name": "Claw Config"
       }
     }
   }

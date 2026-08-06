@@ -35,6 +35,8 @@ from .const import (
     CONF_ENABLE_TOOL_DETAILS,
     CONF_ENABLE_TOOL_PROGRESS,
     CONF_ENABLE_WEB_SEARCH,
+    CONF_ENTRY_TYPE,
+    ENTRY_TYPE_DASHBOARD,
     CONF_ERROR_RESPONSES,
     CONF_FALLBACK_AGENT,
     CONF_IDENTICAL_CALL_STOP,
@@ -264,12 +266,32 @@ class ClawAssistantConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         self._title: str = ""
 
     async def async_step_user(self, user_input: dict[str, Any] | None = None) -> FlowResult:
+        """Show menu: install core or dashboard."""
+        if user_input is not None:
+            choice = user_input.get("next_step")
+            if choice == "dashboard":
+                return await self.async_step_dashboard()
+            return await self.async_step_core()
+        return self.async_show_menu(
+            step_id="user",
+            menu_options=["core", "dashboard"],
+        )
+
+    async def async_step_core(self, user_input: dict[str, Any] | None = None) -> FlowResult:
+        """Core entry setup - full Claw Assistant runtime."""
         self._title = "Claw Assistant"
         if user_input is not None:
             return await self.async_step_agent_settings()
         return self.async_show_form(
-            step_id="user",
+            step_id="core",
             data_schema=vol.Schema({}),
+        )
+
+    async def async_step_dashboard(self, user_input: dict[str, Any] | None = None) -> FlowResult:
+        """Dashboard entry setup - management panel only."""
+        return self.async_create_entry(
+            title="Claw Dashboard",
+            data={CONF_ENTRY_TYPE: ENTRY_TYPE_DASHBOARD},
         )
 
     async def async_step_agent_settings(self, user_input: dict[str, Any] | None = None) -> FlowResult:

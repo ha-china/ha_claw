@@ -24,14 +24,29 @@
     "sensor": {
       "heartbeat": {
         "name": "心跳"
+      },
+      "claw_config": {
+        "name": "Claw 配置"
       }
     }
   },
   "config": {
     "step": {
       "user": {
-        "title": "初始化配置",
-        "description": "## 欢迎使用 Claw Assistant 集成\n\nHome Assistant 的 **AI 调度中枢与决策大脑**。\n\n**插件化架构** — 所安装的任何对话代理（OpenAI、Google AI、Ollama、本地模型等）均可作为能力插件接入，由 Claw Assistant 编排调度、智能容灾切换与深度能力增强。\n\n**自然语言驱动** — 将原本不可能的操作化为现实，赋予 AI 自主进化与持久记忆的能力。\n\n**零门槛使用** — 支持任何富有创造力的能力诉求，只需以最直白的语言与 AI 对话，它足以理解你的意图。\n\n**协同即进化** — 每项能力独立来看只是工具，协同运作时 AI 便化身为全天候智能家庭运维：审阅日志、追溯历史、修复自动化、重整仪表盘、沉淀经验教训，让每一次决策都比上一次更精准。\n\n---\n\n⚠️首次安装后请 **重启 Home Assistant**，点击 **提交** 开始配置。"
+        "title": "选择安装类型",
+        "description": "选择要安装的组件：",
+        "menu_options": {
+          "core": "核心功能 - 完整 Claw Assistant 运行时",
+          "dashboard": "仪表盘 - 仅管理面板"
+        }
+      },
+      "core": {
+        "title": "Claw Assistant 核心",
+        "description": "安装完整的 Claw Assistant 运行时，包含 AI 代理编排、插件系统和工作区管理。"
+      },
+      "dashboard": {
+        "title": "Claw 仪表盘",
+        "description": "安装管理面板，包含语音悬浮按钮、配置传感器和工作区工具。"
       },
       "agent_settings": {
         "title": "配置 AI 代理",
@@ -54,6 +69,7 @@
           "conversation_settings": "调整对话风格 ｜ 显示、流式与维度",
           "workspace_editor": "编辑工作文档 ｜ 主提示词与技能资料",
           "skill_editor": "管理安装技能 ｜ 动态查看与编辑",
+          "conversation_manager": "对话管理 ｜ 历史记录与统计",
           "plugin_manager": "管理安装插件 ｜ Hermes 兼容插件"
         }
       },

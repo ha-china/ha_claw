@@ -1,0 +1,72 @@
+set_option:
+  name: Set option
+  description: "Update a Claw Assistant configuration option"
+  fields:
+    key:
+      name: Key
+      description: Config option key
+      required: true
+      example: "enable_web_search"
+      selector:
+        text:
+          multiple: false
+          multiline: false
+    value:
+      name: Value
+      description: Config option value
+      required: true
+      selector:
+        text:
+
+list_workspace:
+  name: List workspace
+  description: "List skills, docs, and plugins in the Claw workspace"
+  fields:
+    category:
+      name: Category
+      description: "Category to list (skills, docs, plugins, or all)"
+      required: false
+      example: "all"
+      selector:
+        select:
+          options:
+            - "skills"
+            - "docs"
+            - "plugins"
+            - "all"
+
+read_workspace_file:
+  name: Read workspace file
+  description: "Read a file from the Claw workspace"
+  fields:
+    path:
+      name: Path
+      description: "Relative path within the workspace"
+      required: true
+      example: "SOUL.md"
+      selector:
+        text:
+
+write_workspace_file:
+  name: Write workspace file
+  description: "Write a file to the Claw workspace"
+  fields:
+    path:
+      name: Path
+      description: "Relative path within the workspace"
+      required: true
+      example: "SOUL.md"
+      selector:
+        text:
+          multiline: true
+    content:
+      name: Content
+      description: "File content to write"
+      required: true
+      selector:
+        text:
+          multiline: true
+
+refresh_sensor:
+  name: Refresh config sensor
+  description: "Force refresh the Claw Config sensor state"

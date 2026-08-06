@@ -24,14 +24,29 @@
     "sensor": {
       "heartbeat": {
         "name": "Heartbeat"
+      },
+      "claw_config": {
+        "name": "Claw Config"
       }
     }
   },
   "config": {
     "step": {
       "user": {
-        "title": "Initial Setup",
-        "description": "## Welcome to Claw Assistant\n\nThe **AI orchestration hub and decision-making brain** for Home Assistant.\n\n**Plugin Architecture** — Every conversation agent you install (OpenAI, Google AI, Ollama, local models, etc.) plugs in as a capability module, with Claw Assistant handling unified orchestration, intelligent failover, and deep capability enhancement.\n\n**Natural Language Driven** — Turns the previously impossible into reality, endowing AI with autonomous evolution and persistent memory.\n\n**Zero Barrier to Use** — Supports any creative capability you envision. Simply speak to AI in the most straightforward language, it is fully capable of grasping your intent.\n\n**Synergy as Evolution** — Each capability alone is merely a tool. In concert, AI becomes an around-the-clock intelligent home operator: auditing logs, tracing history, repairing automations, reorganizing dashboards, distilling lessons learned, making every decision sharper than the last.\n\n---\n\nPlease **restart Home Assistant** after first install. Click **Submit** to begin setup."
+        "title": "Choose installation type",
+        "description": "Select what to install:",
+        "menu_options": {
+          "core": "Core - Full Claw Assistant runtime",
+          "dashboard": "Dashboard - Management panel only"
+        }
+      },
+      "core": {
+        "title": "Claw Assistant Core",
+        "description": "Install the full Claw Assistant runtime with AI agent orchestration, plugin system, and workspace management."
+      },
+      "dashboard": {
+        "title": "Claw Dashboard",
+        "description": "Install the management panel with Voice FAB, config sensor, and workspace tools."
       },
       "agent_settings": {
         "title": "Configure AI Agents",
