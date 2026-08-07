@@ -940,6 +940,69 @@ async def _register_dashboard_panel(hass: HomeAssistant) -> None:
     LOGGER.info("Dashboard panel registered")
 
 
+# ── Continue-conversation API (panel chat modal) ──
+# These actions reuse the existing resume-history mechanism
+# (runtime/history/chat_history_api.py) so the panel chat writes into and
+# reads from the same conversation history as the parent-window dock.
+
+_CONVERSATION_RESUME_SCHEMA = vol.Schema({
+    vol.Required("conversation_id"): cv.string,
+    vol.Required("window_id"): cv.string,
+}, extra=vol.ALLOW_EXTRA)
+
+_CONVERSATION_PROCESS_SCHEMA = vol.Schema({
+    vol.Required("text"): cv.string,
+    vol.Required("conversation_id"): cv.string,
+    vol.Optional("agent_id"): vol.Any(cv.string, None),
+    vol.Optional("language"): vol.Any(cv.string, None),
+    vol.Optional("user_id"): vol.Any(cv.string, None),
+}, extra=vol.ALLOW_EXTRA)
+
+_CONVERSATION_RELEASE_SCHEMA = vol.Schema({}, extra=vol.ALLOW_EXTRA)
+
+
+def _resolve_claw_agent_entity(hass) -> str | None:
+    """Resolve the Claw conversation-agent entity id at runtime.
+
+    The entity name is not stable (it can be ``conversation.claw_assistant``,
+    ``conversation.claw_assistant_ai`` or ``conversation.<entry_id>``), so we
+    match the ``entity == "claw_assistant.ai"`` attribute marker first (same
+    convention as config_flow._get_agent_options), then fall back to the
+    per-entry ``conversation.{entry_id}`` id, then to any conversation entity
+    whose id contains "claw".
+    """
+    from homeassistant.components.conversation import async_get_agent
+
+    # 1. Attribute marker set by FallbackConversationAgent.state_attributes.
+    for entity_id in hass.states.async_entity_ids("conversation"):
+        try:
+            state = hass.states.get(entity_id)
+            if state and state.attributes.get("entity") == "claw_assistant.ai":
+                if async_get_agent(hass, entity_id) is not None:
+                    return entity_id
+        except Exception:
+            continue
+
+    # 2. Per-config-entry fallback id (same convention as delegation/executor).
+    for entry in hass.config_entries.async_entries(DOMAIN):
+        agent_id = f"conversation.{entry.entry_id}"
+        try:
+            if async_get_agent(hass, agent_id) is not None:
+                return agent_id
+        except Exception:
+            continue
+
+    # 3. Last-resort heuristic: any conversation entity containing "claw".
+    for entity_id in hass.states.async_entity_ids("conversation"):
+        if "claw" in entity_id.lower():
+            try:
+                if async_get_agent(hass, entity_id) is not None:
+                    return entity_id
+            except Exception:
+                continue
+    return None
+
+
 class ClawDashboardView(HomeAssistantView):
     """Serve and handle the Claw dashboard (GET = HTML, POST = JSON API)."""
 
@@ -2109,5 +2172,99 @@ class ClawDashboardView(HomeAssistantView):
                 return web.json_response({"ok": True, "removed": removed})
             except Exception as e:
                 return web.json_response({"error": str(e)})
+
+        # ── Continue conversation (panel chat modal) ──
+        if action == "conversation_resume":
+            try:
+                body = _CONVERSATION_RESUME_SCHEMA(body)
+            except Exception as e:
+                return web.json_response({"ok": False, "error": f"invalid_request: {e}"})
+            conversation_id = str(body.get("conversation_id", "") or "")
+            window_id = str(body.get("window_id", "") or "")
+            try:
+                from .conversation_utils import get_conversation_history
+                from .runtime.core.state import get_conversation_status
+                from .runtime.history.chat_history_api import (
+                    _HISTORY_WINDOW_ID_KEY,
+                    _RESUME_HISTORY_ID_KEY,
+                    _RESUME_HISTORY_WINDOW_ID_KEY,
+                )
+                history = get_conversation_history()
+                turns = history.get_history(conversation_id)
+                if not turns:
+                    return web.json_response({"ok": False, "error": "No history found for this conversation"})
+                # Bind the panel window to this conversation so the next
+                # conversation_process write is anchored to this history id.
+                status = get_conversation_status(hass)
+                status[_HISTORY_WINDOW_ID_KEY] = window_id
+                status[_RESUME_HISTORY_ID_KEY] = conversation_id
+                status[_RESUME_HISTORY_WINDOW_ID_KEY] = window_id
+                return web.json_response({
+                    "ok": True,
+                    "conversation_id": conversation_id,
+                    "turn_count": len(turns),
+                })
+            except Exception as e:
+                return web.json_response({"ok": False, "error": str(e)})
+
+        if action == "conversation_process":
+            try:
+                body = _CONVERSATION_PROCESS_SCHEMA(body)
+            except Exception as e:
+                return web.json_response({"ok": False, "error": f"invalid_request: {e}"})
+            text = str(body.get("text", "") or "").strip()
+            conversation_id = str(body.get("conversation_id", "") or "")
+            agent_id = body.get("agent_id") or None
+            language = body.get("language") or None
+            user_id = body.get("user_id") or None
+            if not text:
+                return web.json_response({"ok": False, "error": "empty_text"})
+            try:
+                from homeassistant.components import conversation as ha_conversation
+                from homeassistant.core import Context
+
+                resolved_agent_id = agent_id or _resolve_claw_agent_entity(hass)
+                if not resolved_agent_id:
+                    return web.json_response({"ok": False, "error": "agent_not_found"})
+                if language is None:
+                    language = hass.config.language
+                context = Context(user_id=user_id) if user_id else Context()
+                result = await ha_conversation.async_converse(
+                    hass,
+                    text=text,
+                    conversation_id=conversation_id,
+                    context=context,
+                    language=language,
+                    agent_id=resolved_agent_id,
+                    device_id=None,
+                    satellite_id=None,
+                )
+                reply = ""
+                if result and result.response:
+                    resp = result.response
+                    speech = getattr(resp, "speech", None)
+                    if isinstance(speech, dict):
+                        plain = speech.get("plain") or {}
+                        reply = str(plain.get("speech") or "")
+                return web.json_response({
+                    "ok": True,
+                    "reply": reply,
+                    "conversation_id": conversation_id,
+                    "agent_id": resolved_agent_id,
+                })
+            except Exception as e:
+                return web.json_response({"ok": False, "error": str(e)})
+
+        if action == "conversation_release":
+            try:
+                _CONVERSATION_RELEASE_SCHEMA(body)
+            except Exception as e:
+                return web.json_response({"ok": False, "error": f"invalid_request: {e}"})
+            try:
+                from .runtime.history.chat_history_api import clear_resume_history_binding
+                clear_resume_history_binding(hass)
+                return web.json_response({"ok": True})
+            except Exception as e:
+                return web.json_response({"ok": False, "error": str(e)})
 
         return web.json_response({"error": "unknown_action"})

@@ -191,6 +191,30 @@ body{background:var(--bg);color:var(--txt);font-size:16px;font-family:-apple-sys
 .conv-turn-tools{padding:6px 14px;background:var(--side);font-size:.76rem;color:var(--sec);border-bottom:1px solid var(--div)}
 .conv-turn-tools ha-icon{--mdc-icon-size:13px;margin-right:3px}
 .conv-turn-asst{padding:10px 14px;background:var(--card)}
+/* ── 继续对话：聊天弹窗 ── */
+.chat-modal .modal-bd{display:flex;flex-direction:column;padding:0;overflow:hidden;min-height:0}
+.chat-msgs{flex:1;overflow-y:auto;padding:14px 16px;display:flex;flex-direction:column;gap:10px;background:var(--bg);min-height:0}
+.chat-hist-sep{align-self:center;font-size:.72rem;color:var(--sec);background:var(--side);border:1px solid var(--div);padding:3px 12px;border-radius:20px;margin:2px 0 6px}
+.chat-loading{padding:24px;text-align:center;color:var(--sec);font-size:.85rem}
+.chat-msg{max-width:82%;padding:9px 13px;border-radius:14px;font-size:.86rem;line-height:1.5;white-space:pre-wrap;word-break:break-word}
+.chat-msg.user{align-self:flex-end;background:var(--pri);color:#fff;border-bottom-right-radius:4px}
+.chat-msg.claw{align-self:flex-start;background:var(--card);border:1px solid var(--div);border-bottom-left-radius:4px}
+.chat-msg.err{align-self:flex-start;background:rgba(255,59,48,.12);border:1px solid rgba(255,59,48,.45);color:var(--txt)}
+.chat-msg .chat-msg-time{display:block;font-size:.66rem;opacity:.65;margin-top:3px;text-align:right}
+.chat-thinking{align-self:flex-start;display:inline-flex;align-items:center;gap:5px;padding:9px 13px;border-radius:14px;border:1px solid var(--div);background:var(--card);color:var(--sec);font-size:.8rem}
+.chat-thinking .dot{width:6px;height:6px;border-radius:50%;background:var(--sec);animation:chatBlink 1.2s infinite}
+.chat-thinking .dot:nth-child(2){animation-delay:.2s}
+.chat-thinking .dot:nth-child(3){animation-delay:.4s}
+@keyframes chatBlink{0%,100%{opacity:.25}50%{opacity:1}}
+.chat-input-row{display:flex;gap:8px;padding:12px 14px;border-top:1px solid var(--div);background:var(--card);align-items:flex-end;flex-shrink:0}
+.chat-input{flex:1;padding:9px 12px;border-radius:10px;border:1px solid var(--div);background:var(--bg);color:var(--txt);font-size:.86rem;font-family:inherit;resize:none;min-height:38px;max-height:120px;line-height:1.4}
+.chat-input:focus{outline:none;border-color:var(--pri)}
+.chat-input:disabled{opacity:.55}
+.chat-mic{display:inline-flex;align-items:center;justify-content:center;width:38px;height:38px;border-radius:10px;border:1px dashed var(--div);background:var(--side);color:var(--sec);cursor:not-allowed;flex-shrink:0;opacity:.6}
+.chat-mic ha-icon{--mdc-icon-size:18px}
+.chat-send{display:inline-flex;align-items:center;gap:5px;padding:9px 18px;border-radius:10px;flex-shrink:0}
+.chat-send ha-icon{--mdc-icon-size:16px}
+.chat-send:disabled{opacity:.5;cursor:not-allowed}
 @media (max-width:720px){
   .conv-split{flex-direction:column;height:auto}
   .conv-left{width:100%;border-right:none;border-bottom:1px solid var(--div);padding:12px 12px 0;max-height:260px}
@@ -398,6 +422,8 @@ function renderTabs() {
   var tb = $('tabBar'); if (tb) tb.innerHTML = h;
 }
 function selectTab(key) {
+  // 切换页面时若聊天弹窗打开，关闭并释放 resume 绑定，避免污染后续对话
+  if (_chat) chatClose();
   _path = [key];
   renderTabs();
   renderCurrentArea();
@@ -856,17 +882,140 @@ function convSelect(convId) {
     $('convDetail').innerHTML = h;
   });
 }
+// ── 继续对话：面板内聊天弹窗 ──
+// 生命周期：openChatModal → conversation_resume（绑定 window_id）→ chatSend
+// （conversation_process）→ chatClose/切页/卸载 → conversation_release（释放绑定）。
+// window_id 使用独立前缀 claw-panel-*，避免与父窗口 dock 的 claw-window-* 冲突；
+// 打开即绑定、关闭即释放，防止全局 resume 绑定污染后续对话。
+var _chat = null; // {convId, windowId, userId, sending, started}
+
 function convContinue(convId) {
-  // 尝试在父窗口打开 Claw 对话（HA 主页面），由 ha_crack.js 自动恢复对话历史
+  // 若已有聊天弹窗打开，先关闭并释放旧绑定
+  chatClose();
+  var userId = '';
   try {
-    if (window.parent && window.parent.location) {
-      window.parent.location.href = '/';
-    } else {
-      window.location.href = '/';
+    if (window.parent && window.parent.hass && window.parent.hass.user && window.parent.hass.user.id) {
+      userId = window.parent.hass.user.id;
     }
-  } catch(e) {
-    window.location.href = '/';
+  } catch(e) {}
+  var windowId = 'claw-panel-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 10);
+  openChatModal(convId, windowId, userId);
+}
+function openChatModal(convId, windowId, userId) {
+  var body = '<div class="chat-msgs" id="chatMsgs"><div class="chat-loading">加载历史对话...</div></div>'
+    + '<div class="chat-input-row">'
+    + '<textarea class="chat-input" id="chatInput" rows="1" placeholder="输入消息，回车发送（Shift+Enter 换行）" disabled onkeydown="chatInputKey(event)" oninput="chatInputGrow(this)"></textarea>'
+    + '<button class="chat-mic" id="chatMicBtn" disabled title="语音对话（即将推出）"><ha-icon icon="mdi:microphone"></ha-icon></button>'
+    + '<button class="btn pri chat-send" id="chatSendBtn" disabled onclick="chatSend()"><ha-icon icon="mdi:send"></ha-icon><span>发送</span></button>'
+    + '</div>';
+  openModal('继续对话', body, '<button class="btn" onclick="chatClose()">关闭</button>', true);
+  var box = document.querySelector('.modal-box');
+  if (box) box.classList.add('chat-modal');
+  _chat = { convId: convId, windowId: windowId, userId: userId || '', sending: false, started: false };
+  // 1) resume：校验历史存在并绑定 window_id；失败则不进入聊天态
+  api({action:'conversation_resume', conversation_id: convId, window_id: windowId}).then(function(r){
+    if (!_chat || _chat.convId !== convId) return; // 弹窗已被关闭
+    if (!r.ok) {
+      toast('历史已不存在或已删除');
+      // 未建立绑定，直接关闭且不调用 release（避免误清其他窗口的绑定）
+      _chat = null;
+      closeModal();
+      convRefresh();
+      return;
+    }
+    // 2) 回放历史 turns（复用 list/get_conversation 既有数据）
+    api({action:'get_conversation', conversation_id: convId}).then(function(d){
+      if (!_chat || _chat.convId !== convId) return;
+      var msgs = $('chatMsgs');
+      if (!msgs) return;
+      if (d.ok && d.turns && d.turns.length) {
+        var h = '<div class="chat-hist-sep">— 历史消息（' + (d.turn_count || d.turns.length) + ' 轮）—</div>';
+        d.turns.forEach(function(t){
+          if (t.user_message) h += chatBubbleHtml('user', t.user_message, t.timestamp);
+          if (t.assistant_response) h += chatBubbleHtml('claw', t.assistant_response, t.timestamp);
+        });
+        msgs.innerHTML = h;
+      } else {
+        msgs.innerHTML = '<div class="chat-hist-sep">— 空会话，开始新对话 —</div>';
+      }
+      msgs.scrollTop = msgs.scrollHeight;
+      _chat.started = true;
+      var inp = $('chatInput'); if (inp) inp.disabled = false;
+      var sb = $('chatSendBtn'); if (sb) sb.disabled = false;
+      if (inp) inp.focus();
+    });
+  });
+}
+function chatBubbleHtml(who, text, ts) {
+  var time = '';
+  if (ts) time = '<span class="chat-msg-time">' + new Date(ts * 1000).toLocaleTimeString('zh-CN',{hour:'2-digit',minute:'2-digit'}) + '</span>';
+  return '<div class="chat-msg ' + who + '">' + eh(text) + time + '</div>';
+}
+function chatAppendMsg(who, text, ts) {
+  var msgs = $('chatMsgs');
+  if (!msgs) return;
+  msgs.insertAdjacentHTML('beforeend', chatBubbleHtml(who, text, ts));
+  msgs.scrollTop = msgs.scrollHeight;
+}
+function chatShowThinking(on) {
+  var msgs = $('chatMsgs');
+  if (!msgs) return;
+  var el = $('chatThinking');
+  if (on) {
+    if (!el) msgs.insertAdjacentHTML('beforeend', '<div class="chat-thinking" id="chatThinking"><span class="dot"></span><span class="dot"></span><span class="dot"></span> Claw 正在思考...</div>');
+    msgs.scrollTop = msgs.scrollHeight;
+  } else if (el) {
+    el.remove();
   }
+}
+function chatSend() {
+  if (!_chat || _chat.sending || !_chat.started) return;
+  var inp = $('chatInput');
+  if (!inp) return;
+  var text = inp.value.trim();
+  if (!text) return;
+  _chat.sending = true;
+  inp.disabled = true;
+  var sb = $('chatSendBtn'); if (sb) sb.disabled = true;
+  chatAppendMsg('user', text, null);
+  inp.value = '';
+  chatShowThinking(true);
+  api({action:'conversation_process', text: text, conversation_id: _chat.convId, user_id: _chat.userId}).then(function(r){
+    if (!_chat) return; // 等待期间弹窗被关闭
+    chatShowThinking(false);
+    if (r.ok) {
+      chatAppendMsg('claw', r.reply || '(无回复)', null);
+    } else {
+      chatAppendMsg('err', '出错了：' + (r.error || '未知错误'), null);
+    }
+    _chat.sending = false;
+    var ci = $('chatInput');
+    if (ci) { ci.disabled = false; ci.focus(); }
+    var sb2 = $('chatSendBtn'); if (sb2) sb2.disabled = false;
+  });
+}
+function chatInputKey(e) {
+  if (e.key === 'Enter' && !e.shiftKey) {
+    e.preventDefault();
+    chatSend();
+  }
+}
+function chatClose() {
+  chatReleaseIfOpen();
+  closeModal();
+}
+// 释放 resume 绑定（幂等）：所有关闭路径（X/遮罩/关闭按钮/切页/卸载）统一经过这里
+function chatReleaseIfOpen() {
+  if (!_chat) return;
+  _chat = null;
+  try { api({action:'conversation_release'}); } catch(e) {}
+  // 释放后刷新详情列表，保证轮数/状态最新
+  if (window._convAll) convRefresh();
+}
+function chatInputGrow(el) {
+  if (!el) return;
+  el.style.height = 'auto';
+  el.style.height = Math.min(el.scrollHeight, 120) + 'px';
 }
 function convDelete(convId) {
   if (!confirm('确定删除该对话？')) return;
@@ -1661,6 +1810,7 @@ function edToggleFull(){
 function tryCloseEditor(){
   var area=$('codeArea');
   if(area && area.value!==(window.__edInitial||'') && !confirm('有未保存的修改，确定关闭？')) return;
+  chatReleaseIfOpen();
   closeModal();
 }
 function setupCodeEditor(){
@@ -1903,6 +2053,10 @@ function toast(msg) {
 }
 
 // ── Init ──
+// 面板 iframe 卸载时释放聊天 resume 绑定（尽力而为；agent 侧对失效绑定有自愈清理兜底）
+window.addEventListener('pagehide', function(){
+  if (_chat) { try { api({action:'conversation_release'}); } catch(e){} _chat = null; }
+});
 function init() {
   api({action:'get_option_schema'}).then(function(d){
     if (d && d.ok) { _schema = d; _agents = d.agents || []; }
