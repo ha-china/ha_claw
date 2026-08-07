@@ -1576,7 +1576,7 @@ class ClawDashboardView(HomeAssistantView):
                     "conv_dialog": "对话策略 ｜ 回复如何生成",
                     "conv_display": "聊天体验 ｜ 窗口如何使用",
                     "conv_runtime": "执行控制 ｜ 任务如何运行",
-                    "user_mapping": "用户关联 ｜ 通道身份映射",
+                    "user_mapping": "用户关联 ｜ 已统一至成员与权限",
                 }},
                 "conversation_manager": {"title": "对话管理", "data": {}},
                 "conv_dialog": {
@@ -1633,15 +1633,15 @@ class ClawDashboardView(HomeAssistantView):
                 "plugin_manager": {"title": "管理安装插件", "data": {}},
                 "rules_editor": {"title": "硬边界规则", "data": {}},
                 "members": {"title": "成员与权限", "description": "成员角色分级、操作确认队列、审计与白名单", "data": {}},
-                "user_mapping": {"title": "用户关联", "description": "把外部 IM 用户映射到 HA 成员", "menu_options": {
+                "user_mapping": {"title": "用户关联（已统一至成员与权限）", "description": "用户关联已统一到「成员与权限」页面，点击下方按钮前往管理", "menu_options": {
                     "um_pick_channel": "选择通道",
                     "um_pick_identity": "选择外部用户",
                     "um_pick_member": "选择 HA 成员",
                 }},
                 "um_pick_channel": {"title": "选择通道", "description": "第 1 步：选择已接入的 IM 通道。", "data": {"provider": "通道平台"}},
                 "um_pick_identity": {"title": "选择外部用户", "description": "第 2 步：选择该通道下的外部用户。", "data": {"ext_id": "外部用户", "ext_id_manual": "手动填写 ID"}, "data_description": {"ext_id": "从 cn_im_hub 与近期对话自动识别", "ext_id_manual": "选手动输入时填写，不含通道前缀"}},
-                "um_pick_member": {"title": "选择 HA 成员", "description": "第 3 步：选择要绑定的 HA 家庭成员。", "data": {"ha_user": "关联到"}, "data_description": {"ha_user": "选择已创建的 HA 用户账号"}},
-                "um_remove": {"title": "删除关联", "description": "解除外部身份与家庭成员的绑定。", "data": {"remove_key": "要删除的映射"}},
+                "um_pick_member": {"title": "选择 HA 成员", "description": "第 3 步：选择要绑定的 HA 家庭成员。绑定后可到面板「成员与权限」完善角色和区域设置。", "data": {"ha_user": "关联到", "role": "角色"}, "data_description": {"ha_user": "选择已创建的 HA 用户账号", "role": "owner 全部放行；member 分级确认"}},
+                "um_remove": {"title": "删除关联", "description": "解除外部身份与家庭成员的绑定。如需管理成员权限，请到面板「成员与权限」。", "data": {"remove_key": "要删除的映射"}},
             }
             _FALLBACK_SELECTORS = {
                 "conversation_mode": {
@@ -1686,7 +1686,7 @@ class ClawDashboardView(HomeAssistantView):
                 "scheduled_tasks": "**定时任务**\n查看与管理自动跟进任务：暂停/恢复、立即运行、删除或新建。任务由心跳 Ticker 按周期自动执行。",
                 "learning": "**被动学习**\n查看 AI 从日常对话中发现的规律候选（如定时关灯），确认后写入长期记忆；含实体/操作的建议同时加入免确认白名单。",
                 "dynamic": "**操作历史与审计日志**\n记录每次 AI 工具调用的策略决策（ALLOW / CONFIRM / DENY）与人工批准结果，最新在前，可按决策类型筛选。",
-                "user_mapping": "将飞书、微信、QQ 等 IM 通道里的外部身份，绑定到 HA 家庭成员。",
+                "user_mapping": "用户关联已统一到「成员与权限」页面。将飞书、微信、QQ 等 IM 通道里的外部身份，绑定到 HA 家庭成员。",
                 "conv_dialog": "设置 AI 生成回复时使用的策略。",
                 "conv_display": "设置聊天界面的交互和显示方式。",
                 "conv_runtime": "设置 AI 执行任务时的控制规则。",
@@ -2065,9 +2065,15 @@ class ClawDashboardView(HomeAssistantView):
             provider = body.get("provider", "")
             ext_id = body.get("ext_id", "")
             ha_user_id = body.get("ha_user_id", "")
+            role = body.get("role", "member")
+            allowed_areas = body.get("allowed_areas") or []
+            label = body.get("label", "")
             try:
                 from custom_components.claw_assistant.runtime.storage.user_mapping import MappingStore
-                ok = await hass.async_add_executor_job(MappingStore.set, provider, ext_id, ha_user_id)
+                ok = await hass.async_add_executor_job(
+                    MappingStore.set, provider, ext_id, ha_user_id,
+                    role=role, allowed_areas=allowed_areas, label=label,
+                )
                 return web.json_response({"ok": bool(ok)})
             except Exception as e:
                 return web.json_response({"error": str(e)})

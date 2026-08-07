@@ -107,7 +107,7 @@
           "conv_dialog": "对话策略 ｜ 回复如何生成",
           "conv_display": "聊天体验 ｜ 窗口如何使用",
           "conv_runtime": "执行控制 ｜ 任务如何运行",
-          "user_mapping": "用户关联 ｜ 通道身份映射"
+          "user_mapping": "用户关联 ｜ 已统一至成员与权限"
         }
       },
       "conv_dialog": {
@@ -375,8 +375,8 @@
         }
       },
       "user_mapping": {
-        "title": "用户关联",
-        "description": "**功能说明**\n将飞书、微信、QQ 等 IM 通道里的外部身份，绑定到 HA 家庭成员。绑定后，每位成员拥有**独立的 persona 与对话记忆**，互不干扰。\n\n**使用前准备**\n需先在「设置 → 设备与服务」中安装并启用 **cn_im_hub**，并至少接入一个 IM 通道。\n\n{cn_im_hub_status}{mapping_status}",
+        "title": "用户关联（已统一至成员与权限）",
+        "description": "**用户关联已统一到「成员与权限」页面**\n\n将飞书、微信、QQ 等 IM 通道里的外部身份，绑定到 HA 家庭成员。绑定后，每位成员拥有**独立的 persona 与对话记忆**，互不干扰。\n\n请在「成员与权限」页面进行添加、删除、角色和区域管理。\n\n{cn_im_hub_status}{mapping_status}",
         "menu_options": {
           "um_pick_channel": "＋ 添加关联",
           "um_remove": "－ 删除关联"
@@ -408,18 +408,20 @@
       },
       "um_pick_member": {
         "title": "添加关联 ｜ 家庭成员",
-        "description": "**第 3 步 / 共 3 步**\n\n- 通道：**{provider}**\n- 外部用户：`{ext_id}`\n\n选择要绑定的 **HA 家庭成员**，点击**提交**即可保存关联。\n\n成员须已在「设置 → 用户」中创建登录账号。",
+        "description": "**第 3 步 / 共 3 步**\n\n- 通道：**{provider}**\n- 外部用户：`{ext_id}`\n\n选择要绑定的 **HA 家庭成员**，点击**提交**即可保存关联。\n\n成员须已在「设置 → 用户」中创建登录账号。\n\n{role_hint}",
         "data": {
           "ha_user": "关联到",
+          "role": "角色",
           "back": "返回"
         },
         "data_description": {
-          "ha_user": "选择家庭成员；仅显示已创建的 HA 用户账号"
+          "ha_user": "选择家庭成员；仅显示已创建的 HA 用户账号",
+          "role": "owner 全部放行；member 分级确认。绑定后可到面板「成员与权限」完善"
         }
       },
       "um_remove": {
         "title": "删除关联",
-        "description": "**删除通道绑定**\n\n解除映射后，该外部身份将不再关联到对应家庭成员，其 persona 文件仍保留。\n\n{mapping_status}\n\n选中要删除的映射并**提交**确认。",
+        "description": "**删除通道绑定**\n\n解除映射后，该外部身份将不再关联到对应家庭成员，其 persona 文件仍保留。\n\n{mapping_status}\n\n{member_hint}\n\n选中要删除的映射并**提交**确认。",
         "data": {
           "remove_key": "要删除的映射",
           "back": "返回"

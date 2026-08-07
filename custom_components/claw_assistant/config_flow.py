@@ -735,10 +735,27 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
             provider=provider,
             ext_id=ext_id,
         )
+        zh = (self.hass.config.language or "").startswith("zh")
+        role_hint = (
+            "绑定后可到面板「成员与权限」完善角色和区域设置"
+            if zh
+            else "After linking, visit the Members & Permissions panel to refine role and areas"
+        )
         placeholders = {
             "provider": self._provider_label(provider),
             "ext_id": ext_id[:40],
+            "role_hint": role_hint,
         }
+
+        role_selector = SelectSelector(
+            SelectSelectorConfig(
+                options=[
+                    {"value": "member", "label": "member" + (" ｜ 分级确认" if zh else " | tiered confirm")},
+                    {"value": "owner", "label": "owner" + (" ｜ 全部放行" if zh else " | all pass")},
+                ],
+                mode=SelectSelectorMode.DROPDOWN,
+            )
+        )
 
         if not user_options:
             return self.async_show_form(
@@ -754,10 +771,11 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
             if user_input.get("back"):
                 return await self.async_step_um_pick_identity()
             ha_user = str(user_input.get("ha_user", "")).strip()
+            role = str(user_input.get("role", "member")).strip() or "member"
             errors: dict[str, str] = {}
             if not ha_user:
                 errors["ha_user"] = "missing_ha_user"
-            elif not MappingStore.set(provider, ext_id, ha_user):
+            elif not MappingStore.set(provider, ext_id, ha_user, role=role):
                 errors["base"] = "mapping_save_failed"
             if errors:
                 return self.async_show_form(
@@ -766,6 +784,7 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
                         vol.Required("ha_user", default=ha_user or default_ha_user): self._ha_user_select_schema(
                             user_options, ha_user or default_ha_user
                         ),
+                        vol.Optional("role", default=role): role_selector,
                         vol.Optional("back", default=False): bool,
                     }),
                     errors=errors,
@@ -780,6 +799,7 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
                 vol.Required("ha_user", default=default_ha_user): self._ha_user_select_schema(
                     user_options, default_ha_user
                 ),
+                vol.Optional("role", default="member"): role_selector,
                 vol.Optional("back", default=False): bool,
             }),
             description_placeholders=placeholders,
@@ -826,7 +846,14 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
                 vol.Required("remove_key", default=default_remove): vol.In(remove_options),
                 vol.Optional("back", default=False): bool,
             }),
-            description_placeholders=await self._user_mapping_description_placeholders(mappings),
+            description_placeholders={
+                **await self._user_mapping_description_placeholders(mappings),
+                "member_hint": (
+                    "如需管理成员权限，请到面板「成员与权限」"
+                    if (self.hass.config.language or "").startswith("zh")
+                    else "To manage member permissions, visit the Members & Permissions panel"
+                ),
+            },
         )
 
     async def async_step_workspace_editor(self, user_input: dict[str, Any] | None = None) -> FlowResult:

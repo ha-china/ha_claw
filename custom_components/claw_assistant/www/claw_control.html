@@ -569,6 +569,17 @@ function renderCurrentArea() {
       gd.classList.remove('narrow'); gd.classList.add('group');
       renderGroupPage(node, o); return;
     }
+    // user_mapping 已统一到「成员与权限」，渲染跳转卡片
+    if (node.key === 'user_mapping') {
+      h += stepIntroHtml(node);
+      h += '<div class="action-card" style="cursor:pointer;grid-column:1/-1" onclick="gotoMembersFromUserMapping()">'
+         + '<div class="ac-ic"><ha-icon icon="mdi:account-group"></ha-icon></div>'
+         + '<div class="ac-tx"><div class="ac-t">前往成员与权限管理</div>'
+         + '<div class="ac-d">用户关联已统一至「成员与权限」页面，点击前往完整管理（添加、删除、角色、区域、审批、白名单、审计）。</div></div>'
+         + '<ha-icon icon="mdi:chevron-right" style="margin-left:auto;color:var(--sec)"></ha-icon></div>';
+      gd.innerHTML = h;
+      return;
+    }
     // 普通菜单：显示子项卡片（drill 进入）
     h += stepIntroHtml(node);
     h += '<div class="menu-list">';
@@ -603,8 +614,7 @@ function renderLeaf(node, o, preHtml) {
   if (key === 'learning') { renderLearningPage(); return; }
   if (key === 'dynamic') { renderDynamicPage(); return; }
   if (key.indexOf('ws_') === 0) { renderDocEditor(node, o); return; }
-  if (key === 'um_pick_channel') { showAddMappingWizard(); return; }
-  if (key === 'um_remove') { renderRemoveList(); return; }
+  if (key === 'um_pick_channel' || key === 'um_remove') { gotoMembersFromUserMapping(); return; }
   if ((node.fields||[]).indexOf('content') >= 0) { renderDocEditor(node, o); return; }
   // 带 section 的叶子（conv_dialog/conv_display/conv_runtime）
   if (_schema.sections && _schema.sections[key]) {
@@ -627,7 +637,7 @@ function renderNodeInner(node, o) {
     for (var k in node.children) {
       if (!node.children.hasOwnProperty(k)) continue;
       var c = node.children[k];
-      var onclick = (k==='um_pick_channel')?'showAddMappingWizard()':(k==='um_remove')?'renderRemoveList()':'selectSub(\''+k+'\')';
+      var onclick = (k==='um_pick_channel'||k==='um_remove')?'gotoMembersFromUserMapping()':'selectSub(\''+k+'\')';
       h += '<div class="action-card" onclick="'+onclick+'"><div class="ac-ic"><ha-icon icon="'+nodeIcon(k)+'"></ha-icon></div><div class="ac-tx"><div class="ac-t">'+eh(c.title||k)+'</div>'+(c.subtitle?'<div class="ac-d">'+eh(c.subtitle)+'</div>':'')+'</div><ha-icon icon="mdi:chevron-right" style="margin-left:auto;color:var(--sec)"></ha-icon></div>';
     }
     return pre + h + '</div>';
@@ -1089,7 +1099,15 @@ function saveBootstrap() {
   });
 }
 
-// ── 用户关联 ──
+// ── 用户关联（已统一到成员与权限）──
+function gotoMembersFromUserMapping() {
+  // 导航到顶层「成员与权限」tab
+  _path = ['members'];
+  renderTabs();
+  renderCurrentArea();
+}
+
+// ── 用户关联（旧向导，保留但不再从 UI 入口调用）──
 function showAddMappingWizard() {
   api({action:'get_mapping_options'}).then(function(d){
     if (!d.ok) { toast('读取失败'); return; }
@@ -1307,25 +1325,70 @@ function renderMemberList() {
   box.innerHTML = '<div class="action-card" style="cursor:default;grid-column:1/-1"><div class="ac-ic"><ha-icon icon="mdi:loading"></ha-icon></div><div class="ac-tx"><div class="ac-t">加载中...</div></div></div>';
   api({action:'get_members'}).then(function(d){
     var ms = d.members || [];
+    // 搜索框
+    var searchHtml = '<div style="margin-bottom:12px;display:flex;gap:8px;align-items:center;grid-column:1/-1">'
+      + '<ha-icon icon="mdi:magnify" style="color:var(--sec)"></ha-icon>'
+      + '<input id="memSearch" class="inp" style="flex:1" placeholder="搜索通道、用户 ID、HA 用户或备注..." oninput="filterMemberList()">'
+      + '</div>';
     if (!ms.length) { box.innerHTML = '<div class="action-card" style="cursor:default;grid-column:1/-1"><div class="ac-ic"><ha-icon icon="mdi:account-group"></ha-icon></div><div class="ac-tx"><div class="ac-t">暂无成员</div><div class="ac-d">点击右上角「添加成员」绑定 IM 身份到 HA 用户并设置角色。</div></div></div>'; return; }
-    var h = '<div class="group-grid">';
-    ms.forEach(function(m){
-      var roleMeta = memberRoleMeta(m.role);
-      var areas = (m.allowed_areas||[]).join('、') || '全部区域';
-      var label = m.label ? '<div style="font-size:.78rem;color:var(--sec)">'+eh(m.label)+'</div>' : '';
-      h += '<div class="group-card open"><div class="gc-head">'
-        + '<div class="gc-ic"><ha-icon icon="mdi:account-circle"></ha-icon></div>'
-        + '<div class="gc-tx"><div class="gc-t">'+eh(m.ext_id||'?')+' <span style="color:var(--sec);font-weight:400;font-size:.76rem">'+(m.provider||'')+'</span>'
-        + ' <span class="pbadge '+(m.role==='owner'?'RUNNING':'STOPPED')+'" style="margin-left:4px">'+roleMeta[1]+'</span></div>'
-        + '<div class="gc-d">HA 用户: '+eh(m.ha_user_id||'')+'<br>允许区域: '+eh(areas)+'</div>'
-        + label + '</div>'
-        + '<div style="display:flex;gap:4px;flex-shrink:0"><button class="btn" style="padding:4px 10px" onclick="openMemberModal(\''+eh(m.provider||'')+'\',\''+eh(m.ext_id||'')+'\',\''+eh(m.ha_user_id||'')+'\',\''+eh(m.role||'member')+'\',\''+eh((m.allowed_areas||[]).join(','))+'\',\''+eh(m.label||'')+'\')"><ha-icon icon="mdi:pencil"></ha-icon></button>'
-        + '<button class="btn danger-ghost" style="padding:4px 10px" onclick="removeMember(\''+eh(m.provider||'')+'\',\''+eh(m.ext_id||'')+'\',\''+eh(m.ha_user_id||'')+'\')"><ha-icon icon="mdi:delete"></ha-icon></button></div>'
-        + '</div></div>';
-    });
+    window._memberData = ms;
+    var h = searchHtml + '<div class="group-grid" id="memGrid">';
+    h += renderMemberCards(ms);
     h += '</div>';
     box.innerHTML = h;
   });
+}
+function renderMemberCards(ms) {
+  var h = '';
+  ms.forEach(function(m){
+    var roleMeta = memberRoleMeta(m.role);
+    var areas = (m.allowed_areas||[]).join('、') || '全部区域';
+    var label = m.label ? '<div style="font-size:.78rem;color:var(--sec)">'+eh(m.label)+'</div>' : '';
+    var created = m.created_at ? '<div style="font-size:.72rem;color:var(--sec)">创建于 '+eh(m.created_at.slice(0,10))+'</div>' : '';
+    h += '<div class="group-card open" data-mem-key="'+eh((m.provider||'')+'|'+(m.ext_id||'')+'|'+(m.ha_user_id||'')+'|'+(m.label||''))+'"><div class="gc-head">'
+      + '<div class="gc-ic"><ha-icon icon="mdi:account-circle"></ha-icon></div>'
+      + '<div class="gc-tx"><div class="gc-t">'+eh(m.ext_id||'?')+' <span style="color:var(--sec);font-weight:400;font-size:.76rem">'+(m.provider||'')+'</span>'
+      + ' <span class="pbadge '+(m.role==='owner'?'RUNNING':'STOPPED')+'" style="margin-left:4px">'+roleMeta[1]+'</span></div>'
+      + '<div class="gc-d">HA 用户: '+eh(m.ha_user_id||'')+'<br>允许区域: '+eh(areas)+'</div>'
+      + label + created + '</div>'
+      + '<div style="display:flex;gap:4px;flex-shrink:0;flex-wrap:wrap">'
+      + '<button class="btn" style="padding:4px 10px" title="人设" onclick="openPersonaModal(\''+eh(m.provider||'')+'\',\''+eh(m.ext_id||'')+'\',\''+eh(m.ha_user_id||'')+'\')"><ha-icon icon="mdi:account-edit"></ha-icon></button>'
+      + '<button class="btn" style="padding:4px 10px" onclick="openMemberModal(\''+eh(m.provider||'')+'\',\''+eh(m.ext_id||'')+'\',\''+eh(m.ha_user_id||'')+'\',\''+eh(m.role||'member')+'\',\''+eh((m.allowed_areas||[]).join(','))+'\',\''+eh(m.label||'')+'\')"><ha-icon icon="mdi:pencil"></ha-icon></button>'
+      + '<button class="btn danger-ghost" style="padding:4px 10px" onclick="removeMember(\''+eh(m.provider||'')+'\',\''+eh(m.ext_id||'')+'\',\''+eh(m.ha_user_id||'')+'\')"><ha-icon icon="mdi:delete"></ha-icon></button></div>'
+      + '</div></div>';
+  });
+  return h;
+}
+function filterMemberList() {
+  var q = ($('memSearch')||{}).value || '';
+  q = q.trim().toLowerCase();
+  var grid = $('memGrid');
+  if (!grid) return;
+  if (!q) {
+    grid.querySelectorAll('.group-card').forEach(function(c){ c.style.display=''; });
+    return;
+  }
+  grid.querySelectorAll('.group-card').forEach(function(c){
+    var key = c.getAttribute('data-mem-key') || '';
+    c.style.display = key.toLowerCase().indexOf(q) >= 0 ? '' : 'none';
+  });
+}
+function openPersonaModal(provider, extId, haUserId) {
+  var userKey = haUserId || (provider + ':' + extId);
+  api({action:'get_mappings'}).then(function(){
+    // 尝试读取 persona（通过 workspace API 间接读取）
+    // persona_store 以 markdown 文件存储，没有专用面板 API
+    // 这里做一个轻量弹窗，提示用户 persona 的位置
+    var body = '<div class="fields" style="border:none;box-shadow:none;padding:0">'
+      + '<div class="hint" style="margin-bottom:10px">用户 Key: <code>'+eh(userKey)+'</code></div>'
+      + '<div class="hint">Persona（人设文件）存储在 <code>workspace/personas/</code> 目录下，以用户 Key 为文件名。</div>'
+      + '<div class="hint" style="margin-top:8px">可通过编辑 <code>USER.md</code> 工作文档或使用 AI 对话命令来管理该成员的人设信息。</div>'
+      + '<div class="hint" style="margin-top:8px;color:#FF9500">完整 persona 编辑功能即将上线，当前可先在「工作区文档 → USER」中设定全局用户信息。</div>'
+      + '</div>';
+    openModal('人设管理 ｜ '+eh(extId||userKey.slice(0,16)), body,
+      '<button class="btn" onclick="closeModal()">关闭</button>'
+      + '<button class="btn pri" onclick="closeModal();_path=[\'workspace_editor\'];renderTabs();selectSub(\'ws_user\')">编辑 USER.md</button>', true);
+  }).catch(function(){ toast('读取失败'); });
 }
 function renderApprovalsBlock() {
   var box = $('memApprovals'); if (!box) return;

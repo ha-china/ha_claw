@@ -1,5 +1,5 @@
 DOMAIN = "claw_assistant"
-VERSION = "9.4.0"
+VERSION = "9.5.0"
 
 # ── Entry types (single-domain dual-entry) ──
 CONF_ENTRY_TYPE = "entry_type"
