@@ -1,7 +1,7 @@
 {
   "domain": "claw_assistant",
   "name": "Claw Assistant",
-  "after_dependencies": ["assist_pipeline"],
+  "after_dependencies": ["assist_pipeline", "llm"],
   "codeowners": ["@knoop7"],
   "config_flow": true,
   "dependencies": [
