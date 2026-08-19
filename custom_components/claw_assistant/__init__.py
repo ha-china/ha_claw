@@ -340,6 +340,7 @@ _DELETE_TASK_SCHEMA = vol.Schema({
 _CREATE_TASK_SCHEMA = vol.Schema({
     vol.Required("title"): cv.string,
     vol.Optional("schedule", default=""): cv.string,
+    vol.Optional("objective", default=""): cv.string,
 })
 
 _GET_PENDING_INSIGHTS_SCHEMA = vol.Schema({})
@@ -601,6 +602,19 @@ async def _async_setup_dashboard_entry(hass: HomeAssistant, entry: ConfigEntry) 
     async def handle_get_members(call: ServiceCall) -> ServiceResponse:
         from .runtime.storage.user_mapping import MappingStore
         members = await hass.async_add_executor_job(MappingStore.load)
+        # 充实用户名称，让前端显示可读名称而非 raw UUID
+        _user_map = {}
+        try:
+            for u in await hass.auth.async_get_users():
+                _user_map[u.id] = u.name or u.id[:8]
+        except Exception:
+            pass
+        for m in members:
+            uid = m.get("ha_user_id", "")
+            if uid in _user_map:
+                m["ha_user_name"] = _user_map[uid]
+            else:
+                m["ha_user_name"] = uid[:8] if uid else "?"
         return {"members": members}
 
     hass.services.async_register(DOMAIN, _SERVICE_GET_MEMBERS, handle_get_members,
@@ -800,12 +814,13 @@ async def _async_setup_dashboard_entry(hass: HomeAssistant, entry: ConfigEntry) 
         )
         title = call.data["title"]
         schedule = call.data.get("schedule", "")
+        objective = call.data.get("objective", "") or title
         path = await async_upsert_heartbeat_task(
             hass,
             title=title,
             schedule=schedule,
-            objective=title,
-            steps=title,
+            objective=objective,
+            steps=objective,
         )
         tasks = await async_list_heartbeat_tasks(hass)
         return {"ok": True, "path": str(path), "tasks": tasks}
@@ -1361,6 +1376,7 @@ class ClawDashboardView(HomeAssistantView):
                     {
                         "title": body.get("title", ""),
                         "schedule": body.get("schedule", ""),
+                        "objective": body.get("objective", ""),
                     },
                     blocking=True, return_response=True,
                 )
@@ -1536,9 +1552,8 @@ class ClawDashboardView(HomeAssistantView):
                     "title": "Claw 配置",
                     "description": "配置 Claw Assistant 的各项能力",
                     "menu_options": {
-                        "agent_settings": "配置智能代理 ｜ 首要、后备、总结链路",
-                        "conversation_settings": "调整对话风格 ｜ 显示、流式与维度",
-                        "conversation_manager": "对话管理 ｜ 历史记录与统计",
+                        "ai_conversation": "AI 对话 ｜ 代理配置与对话风格",
+                        "conversation_manager": "对话历史管理 ｜ 历史记录与统计",
                         "workspace_editor": "编辑工作文档 ｜ 主提示词与技能资料",
                         "skill_editor": "管理安装技能 ｜ 动态查看与编辑",
                         "plugin_manager": "管理安装插件 ｜ Hermes 兼容插件",
@@ -1558,6 +1573,12 @@ class ClawDashboardView(HomeAssistantView):
                     "description": "查看 AI 发现的规律候选，确认后写入长期记忆。",
                     "data": {},
                 },
+                "ai_conversation": {"title": "AI 对话", "menu_options": {
+                    "agent_settings": "配置智能代理 ｜ 首要、后备、总结链路",
+                    "conv_dialog": "对话策略 ｜ 回复如何生成",
+                    "conv_display": "聊天体验 ｜ 窗口如何使用",
+                    "conv_runtime": "执行控制 ｜ 任务如何运行",
+                }},
                 "agent_settings": {
                     "title": "配置智能代理",
                     "description": "配置 AI 对话的调度链路，系统按顺序尝试各代理直到获得有效回复。",
@@ -1576,9 +1597,8 @@ class ClawDashboardView(HomeAssistantView):
                     "conv_dialog": "对话策略 ｜ 回复如何生成",
                     "conv_display": "聊天体验 ｜ 窗口如何使用",
                     "conv_runtime": "执行控制 ｜ 任务如何运行",
-                    "user_mapping": "用户关联 ｜ 已统一至成员与权限",
                 }},
-                "conversation_manager": {"title": "对话管理", "data": {}},
+                "conversation_manager": {"title": "对话历史管理", "data": {}},
                 "conv_dialog": {
                     "title": "回复策略",
                     "description": "设置 AI 生成回复时使用的策略。",
@@ -2179,6 +2199,40 @@ class ClawDashboardView(HomeAssistantView):
             except Exception as e:
                 return web.json_response({"error": str(e)})
 
+        # ── Conversation history settings ──
+        if action == "get_history_settings":
+            try:
+                from .conversation_utils import get_conversation_history
+                history = get_conversation_history()
+                return web.json_response({
+                    "ok": True,
+                    "max_age_hours": history.max_age_hours,
+                    "max_turns": history.max_turns,
+                })
+            except Exception as e:
+                return web.json_response({"error": str(e)})
+
+        if action == "set_history_settings":
+            try:
+                max_age_hours = float(body.get("max_age_hours", 8760))
+                max_turns = int(body.get("max_turns", 30))
+                if max_age_hours < 1 or max_age_hours > 87600:
+                    return web.json_response({"ok": False, "error": "max_age_hours must be between 1 and 87600"})
+                if max_turns < 5 or max_turns > 200:
+                    return web.json_response({"ok": False, "error": "max_turns must be between 5 and 200"})
+                from .conversation_utils import get_conversation_history
+                history = get_conversation_history()
+                history.set_max_age_hours(max_age_hours)
+                history.max_turns = max_turns
+                history._schedule_save()
+                return web.json_response({
+                    "ok": True,
+                    "max_age_hours": history.max_age_hours,
+                    "max_turns": history.max_turns,
+                })
+            except Exception as e:
+                return web.json_response({"error": str(e)})
+
         # ── Continue conversation (panel chat modal) ──
         if action == "conversation_resume":
             try:
@@ -2272,5 +2326,57 @@ class ClawDashboardView(HomeAssistantView):
                 return web.json_response({"ok": True})
             except Exception as e:
                 return web.json_response({"ok": False, "error": str(e)})
+
+        # ── Persona (人设) ──
+        if action == "get_persona":
+            user_key = body.get("user_key", "")
+            if not user_key:
+                return web.json_response({"ok": False, "error": "missing user_key"})
+            try:
+                from .runtime.storage.persona_store import PersonaStore
+                persona = await hass.async_add_executor_job(PersonaStore.get, user_key)
+                return web.json_response({"ok": True, "persona": persona, "user_key": user_key})
+            except Exception as e:
+                return web.json_response({"error": str(e)})
+
+        if action == "set_persona":
+            user_key = body.get("user_key", "")
+            data = body.get("data", {})
+            if not user_key or not isinstance(data, dict):
+                return web.json_response({"ok": False, "error": "invalid params"})
+            try:
+                from .runtime.storage.persona_store import PersonaStore
+                await hass.async_add_executor_job(PersonaStore.set, user_key, data)
+                return web.json_response({"ok": True})
+            except Exception as e:
+                return web.json_response({"error": str(e)})
+
+        if action == "delete_persona":
+            user_key = body.get("user_key", "")
+            if not user_key:
+                return web.json_response({"ok": False, "error": "missing user_key"})
+            try:
+                from .runtime.storage.persona_store import PersonaStore
+                await hass.async_add_executor_job(PersonaStore.delete, user_key)
+                return web.json_response({"ok": True})
+            except Exception as e:
+                return web.json_response({"error": str(e)})
+
+        # ── HA areas (区域列表，用于成员区域选择器) ──
+        if action == "get_areas":
+            try:
+                from homeassistant.helpers import area_registry as ar
+                area_reg = ar.async_get(hass)
+                areas = []
+                for area_entry in area_reg.areas.values():
+                    areas.append({
+                        "id": area_entry.id,
+                        "name": area_entry.name,
+                        "picture": area_entry.picture or "",
+                    })
+                areas.sort(key=lambda a: a["name"].lower())
+                return web.json_response({"ok": True, "areas": areas})
+            except Exception as e:
+                return web.json_response({"error": str(e)})
 
         return web.json_response({"error": "unknown_action"})

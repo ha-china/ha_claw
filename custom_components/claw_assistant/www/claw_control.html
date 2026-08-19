@@ -20,7 +20,12 @@
   --card-radius: 16px;
   --card-shadow: 0 1px 4px rgba(0,0,0,0.06);
   --card-shadow-hover: 0 2px 10px rgba(0,0,0,0.10);
+  --ha-color-scheme: light;
 }
+
+/* ── Dark mode: triggered by HA parent OR system preference ── */
+:root.ha-dark,
+:root[data-ha-theme="dark"],
 @media (prefers-color-scheme: dark) {
   :root {
     --bg: var(--primary-background-color, #0d0d0d);
@@ -31,8 +36,78 @@
     --div: var(--divider-color, rgba(255,255,255,0.12));
     --pri: var(--primary-color, #03a9f4);
     --pri-txt: var(--text-primary-color, #ffffff);
+    --ha-color-scheme: dark;
   }
 }
+
+/* Apply dark-specific component overrides when in dark mode */
+:root.ha-dark .btn{background:var(--side);color:var(--txt);border-color:var(--div)}
+:root.ha-dark .btn.pri{background:var(--pri);color:#fff;border-color:var(--pri)}
+:root.ha-dark .toolbar .tb-search .inp{background:var(--side);color:var(--txt);border-color:var(--div)}
+:root.ha-dark .toolbar .tb-search .inp::placeholder{color:var(--sec)}
+:root.ha-dark .inp{background:var(--side);color:var(--txt)}
+:root.ha-dark .sel{background:var(--side);color:var(--txt)}
+:root.ha-dark .group-card{background:var(--card);border-color:var(--div)}
+:root.ha-dark .gc-head{border-bottom:1px solid var(--div)}
+:root.ha-dark .gc-ic{background:color-mix(in srgb,var(--pri) 18%,transparent)}
+:root.ha-dark .pbadge.RUNNING{background:rgba(52,199,89,.18);color:#34C759}
+:root.ha-dark .pbadge.STOPPED{background:rgba(255,149,0,.18);color:#FF9500}
+:root.ha-dark .pbadge.FAILED{background:rgba(255,69,58,.18);color:#FF453A}
+:root.ha-dark .modal-mask{background:rgba(0,0,0,.65)}
+:root.ha-dark .modal-box{background:var(--card);border-color:var(--div)}
+:root.ha-dark .btn-tip[title]:hover::after{background:var(--side);color:var(--txt);border-color:var(--div)}
+:root.ha-dark .action-card{background:var(--card);border-color:var(--div)}
+:root.ha-dark .tabs{background:var(--card);border-color:var(--div)}
+:root.ha-dark .tab{color:var(--sec)}
+:root.ha-dark .tab:hover{color:var(--txt)}
+:root.ha-dark .tab.active{color:var(--pri)}
+:root.ha-dark .hint{color:var(--sec)}
+:root.ha-dark .field-help{color:var(--sec)}
+:root.ha-dark .empty-state{color:var(--sec)}
+:root.ha-dark .empty-state .es-ic{color:var(--sec)}
+:root.ha-dark .mini-btn{background:var(--side);color:var(--pri);border-color:var(--div)}
+:root.ha-dark .mini-btn:hover{border-color:var(--pri)}
+:root.ha-dark .bot{background:var(--card);border-color:var(--div)}
+:root.ha-dark .conv-list-item:hover{background:color-mix(in srgb,var(--pri) 6%,var(--bg))}
+:root.ha-dark .conv-list-item.conv-li-active{background:color-mix(in srgb,var(--pri) 12%,var(--bg))}
+:root.ha-dark .ed-head{background:var(--side)}
+:root.ha-dark .ed-bar{background:var(--side);border-color:var(--div)}
+:root.ha-dark .ed-btn{background:var(--card);color:var(--txt);border-color:var(--div)}
+:root.ha-dark .sk-card,
+:root.ha-dark .pl-card{background:var(--card);border-color:var(--div)}
+:root.ha-dark .rule-item{background:var(--card);border-color:var(--div)}
+:root.ha-dark .dimmed{color:var(--sec)}
+
+@media (prefers-color-scheme: dark) {
+  .btn{background:var(--side);color:var(--txt);border-color:var(--div)}
+  .btn.pri{background:var(--pri);color:#fff;border-color:var(--pri)}
+  .toolbar .tb-search .inp{background:var(--side);color:var(--txt);border-color:var(--div)}
+  .toolbar .tb-search .inp::placeholder{color:var(--sec)}
+  .inp{background:var(--side);color:var(--txt)}
+  .sel{background:var(--side);color:var(--txt)}
+  .group-card{background:var(--card);border-color:var(--div)}
+  .gc-head{border-bottom:1px solid var(--div)}
+  .gc-ic{background:color-mix(in srgb,var(--pri) 18%,transparent)}
+  .pbadge.RUNNING{background:rgba(52,199,89,.18);color:#34C759}
+  .pbadge.STOPPED{background:rgba(255,149,0,.18);color:#FF9500}
+  .pbadge.FAILED{background:rgba(255,69,58,.18);color:#FF453A}
+  .modal-mask{background:rgba(0,0,0,.65)}
+  .modal-box{background:var(--card);border-color:var(--div)}
+  .btn-tip[title]:hover::after{background:var(--side);color:var(--txt);border-color:var(--div)}
+  .action-card{background:var(--card);border-color:var(--div)}
+  .tabs{background:var(--card);border-color:var(--div)}
+  .tab{color:var(--sec)}
+  .tab:hover{color:var(--txt)}
+  .tab.active{color:var(--pri)}
+  .mini-btn{background:var(--side);color:var(--pri);border-color:var(--div)}
+  .mini-btn:hover{border-color:var(--pri)}
+}
+
+/* Smooth theme transitions for key surface elements */
+.hdr, .group-card, .inp, .sel, .btn, .tb-search, .modal-box, .action-card, .tabs, .mini-btn, .bot, .gc-head, .toolbar {
+  transition: background-color .3s ease, color .3s ease, border-color .3s ease;
+}
+body{transition:background-color .3s ease,color .3s ease}
 *{box-sizing:border-box;margin:0;padding:0}
 body{background:var(--bg);color:var(--txt);font-size:16px;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif}
 .cp{height:100vh;display:flex;flex-direction:column;overflow:hidden}
@@ -85,6 +160,7 @@ body{background:var(--bg);color:var(--txt);font-size:16px;font-family:-apple-sys
 .sub-title{display:flex;align-items:center;gap:8px;font-size:1rem;font-weight:600;color:var(--txt);cursor:pointer;user-select:none}
 .sub-title ha-icon{--mdc-icon-size:18px;color:var(--pri)}
 .sub-title .chev{margin-left:auto;color:var(--sec);transition:transform .2s}
+.sub-title.open .chev{transform:rotate(0deg)}
 .sub.collapsed .chev{transform:rotate(-90deg)}
 .sub.collapsed .sub-body{display:none}
 .fields{background:var(--card);border:1px solid var(--div);border-radius:var(--card-radius);box-shadow:var(--card-shadow);padding:16px 18px;display:flex;flex-direction:column;gap:16px;grid-column:1/-1}
@@ -132,6 +208,12 @@ body{background:var(--bg);color:var(--txt);font-size:16px;font-family:-apple-sys
 .toast{position:fixed;bottom:60px;left:50%;transform:translateX(-50%);padding:8px 20px;border-radius:10px;font-size:.82rem;font-weight:500;z-index:1000;transition:opacity .3s;pointer-events:none;background:rgba(0,0,0,.8);color:#fff}
 /* ── Modal ── */
 .modal-bg{position:fixed;inset:0;background:rgba(0,0,0,.42);z-index:999;display:flex;align-items:center;justify-content:center;padding:16px}
+.modal-mask{position:fixed;inset:0;background:rgba(0,0,0,.42);z-index:999;display:flex;align-items:center;justify-content:center;padding:16px}
+.modal-mask .modal-box{animation:modalFadeIn .18s ease-out}
+.modal-mask .modal-title{padding:16px 18px 8px;font-size:1rem;font-weight:600;color:var(--txt)}
+.modal-mask .modal-body{padding:4px 18px 12px;font-size:.88rem;color:var(--sec);line-height:1.5}
+.modal-mask .modal-actions{padding:8px 18px 16px;display:flex;justify-content:flex-end;gap:8px}
+@keyframes modalFadeIn{from{opacity:0;transform:translateY(-8px)}to{opacity:1;transform:translateY(0)}}
 .modal-box{background:var(--card);border-radius:var(--card-radius);width:90%;max-width:560px;max-height:86vh;display:flex;flex-direction:column;box-shadow:0 8px 32px rgba(0,0,0,.3)}
 .modal-box.wide{max-width:760px}
 /* 编辑器窗体：默认就近满屏（最大化展示内容），可拖拽标题栏移动、拖右下角缩放 */
@@ -220,6 +302,48 @@ body{background:var(--bg);color:var(--txt);font-size:16px;font-family:-apple-sys
   .conv-left{width:100%;border-right:none;border-bottom:1px solid var(--div);padding:12px 12px 0;max-height:260px}
   .conv-right{width:100%;padding:12px 12px 0;min-height:300px}
 }
+/* ── Design Tokens & Utility Classes ── */
+:root {
+  --fs-xs: 0.72rem;
+  --fs-sm: 0.76rem;
+  --fs-md: 0.82rem;
+  --fs-lg: 0.88rem;
+  --fs-xl: 1.0rem;
+  --sp-2: 4px;
+  --sp-3: 8px;
+  --sp-4: 12px;
+  --sp-5: 16px;
+}
+/* Empty state component */
+.empty-state{display:flex;flex-direction:column;align-items:center;justify-content:center;padding:32px 20px;gap:10px;text-align:center;grid-column:1/-1}
+.empty-state .es-icon{width:56px;height:56px;border-radius:50%;background:var(--side);display:flex;align-items:center;justify-content:center;color:var(--sec)}
+.empty-state .es-icon ha-icon{--mdc-icon-size:28px}
+.empty-state .es-title{font-size:1rem;font-weight:600;color:var(--txt)}
+.empty-state .es-desc{font-size:.82rem;color:var(--sec);max-width:280px;line-height:1.5}
+.empty-state .es-cta{margin-top:8px}
+/* Loading skeleton */
+.skel{background:linear-gradient(90deg,var(--side) 25%,var(--bg) 50%,var(--side) 75%);background-size:200% 100%;animation:skel 1.2s infinite;border-radius:8px}
+@keyframes skel{0%{background-position:200% 0}100%{background-position:-200% 0}}
+/* Toolbar */
+.toolbar{display:flex;align-items:center;gap:8px;margin-bottom:12px;flex-wrap:wrap}
+.toolbar .tb-search{flex:1;min-width:160px;display:flex;align-items:center;gap:6px}
+.toolbar .tb-actions{display:flex;gap:6px;flex-wrap:wrap}
+/* Compact button with tooltip */
+.btn-tip{position:relative}
+.btn-tip[title]:hover::after{content:attr(title);position:absolute;bottom:calc(100% + 6px);left:50%;transform:translateX(-50%);background:var(--card);border:1px solid var(--div);color:var(--txt);padding:4px 10px;border-radius:6px;font-size:.74rem;white-space:nowrap;box-shadow:0 4px 12px rgba(0,0,0,.15);z-index:100;pointer-events:none}
+/* Unified status badge sizes */
+.pbadge{font-size:.72rem;padding:2px 8px}
+/* Card action buttons - visible and clickable */
+.card-actions{display:flex;gap:6px;flex-shrink:0;flex-wrap:wrap}
+.card-actions .btn{padding:6px 12px;font-size:.82rem;min-width:36px;display:inline-flex;align-items:center;gap:4px}
+.card-actions .btn ha-icon{--mdc-icon-size:18px}
+/* Table/list responsive */
+@media(max-width:600px){
+  .card-actions{width:100%;justify-content:space-between}
+  .card-actions .btn{flex:1;font-size:.78rem;padding:5px 8px}
+  .tb-actions{flex-wrap:wrap}
+  .tb-actions .btn{font-size:.78rem;padding:5px 10px}
+}
 .ed-btn:hover{border-color:var(--pri);color:var(--pri)}
 .ed-btn ha-icon{--mdc-icon-size:15px}
 .ed-find{display:none;gap:6px;padding:8px 12px;background:var(--side);border-bottom:1px solid var(--div)}
@@ -247,35 +371,167 @@ body{background:var(--bg);color:var(--txt);font-size:16px;font-family:-apple-sys
 .pinfo{display:flex;flex-direction:column;gap:8px;margin-bottom:14px}
 .pinfo-row{font-size:.84rem;color:var(--sec);line-height:1.5}
 .pinfo-row b{color:var(--txt);font-weight:600}
-/* ── Wizard ── */
-.wz-step{display:flex;align-items:center;gap:8px;font-size:.82rem;color:var(--sec);margin-bottom:14px}
-.wz-dot{width:22px;height:22px;border-radius:50%;background:var(--div);color:var(--txt);display:flex;align-items:center;justify-content:center;font-size:.76rem;font-weight:700}
-.wz-dot.on{background:var(--pri);color:#fff}
-.wz-dot.done{background:rgba(52,199,89,.8);color:#fff}
-.dl{font-size:.85rem;font-weight:600;color:var(--txt);margin-bottom:5px;display:block}
+
 .inp{width:100%;padding:9px 10px;border-radius:8px;border:1px solid var(--div);background:var(--bg);color:var(--txt);font-size:.85rem;font-family:inherit}
 .hint{font-size:.76rem;color:var(--sec);margin-top:4px;line-height:1.4}
 .chk{display:flex;align-items:center;gap:8px;font-size:.84rem;color:var(--txt);cursor:pointer;margin-right:auto}
 .chk input{width:18px;height:18px;accent-color:var(--pri)}
+/* Dropdown menu */
+.dd{position:relative;display:inline-block}
+.dd-menu{position:absolute;top:100%;right:0;margin-top:4px;background:var(--card);border:1px solid var(--div);border-radius:10px;box-shadow:0 8px 24px rgba(0,0,0,.15);min-width:160px;z-index:9999;display:none;padding:6px}
+.dd-menu.show{display:block}
+.dd-item{display:flex;align-items:center;gap:10px;padding:8px 12px;border-radius:8px;cursor:pointer;font-size:.84rem;color:var(--txt);transition:background .15s}
+.dd-item:hover{background:var(--side)}
+.dd-item.active{background:var(--side);font-weight:600}
+.dd-item ha-icon{--mdc-icon-size:18px;color:var(--sec)}
+.dd-item.active ha-icon{color:var(--pri)}
+.dd-sep{height:1px;background:var(--div);margin:4px 8px}
 @media(max-width:1100px){.form{grid-template-columns:repeat(2,minmax(0,1fr))}}
 @media(max-width:768px){.hdr{padding:8px 12px}.ov-k{font-size:.66rem}.ov-v{font-size:.76rem}.si-clock{display:none}.form{grid-template-columns:1fr;padding:16px 12px 30px}.bot{flex-direction:column;gap:8px;padding:10px 14px}}
 </style>
 <script>
 /* Pull Home Assistant theme variables from the parent frame (same-origin panel)
-   so this panel visually matches the user's active HA theme. */
+   so this panel visually matches the user's active HA theme, and react to changes
+   in real-time when the user toggles dark/light mode. */
 (function(){
-  try {
-    var p = window.parent && window.parent.document && window.parent.document.documentElement;
-    if (!p) return;
-    var cs = getComputedStyle(p);
-    var names = ['--card-background-color','--primary-background-color','--secondary-background-color',
-                 '--primary-text-color','--secondary-text-color','--divider-color','--primary-color',
-                 '--text-primary-color','--accent-color','--error-color'];
-    for (var i=0;i<names.length;i++){
-      var v = cs.getPropertyValue(names[i]);
-      if (v) document.documentElement.style.setProperty(names[i], v.trim());
+  var THEME_VARS = [
+    '--card-background-color','--primary-background-color','--secondary-background-color',
+    '--primary-text-color','--secondary-text-color','--divider-color','--primary-color',
+    '--text-primary-color','--accent-color','--error-color',
+    '--font-family','--border-radius','--ha-card-border-radius'
+  ];
+  var root = document.documentElement;
+  var STORAGE_KEY = 'claw_assistant_theme';
+
+  function getSavedTheme() {
+    try { return localStorage.getItem(STORAGE_KEY) || 'auto'; }
+    catch(e) { return 'auto'; }
+  }
+
+  function saveTheme(mode) {
+    try { localStorage.setItem(STORAGE_KEY, mode); } catch(e) {}
+  }
+
+  function getEffectiveTheme() {
+    var saved = getSavedTheme();
+    if (saved === 'light' || saved === 'dark') return saved;
+    // auto mode: follow HA parent, fallback to system
+    try {
+      var p = window.parent && window.parent.document && window.parent.document.documentElement;
+      if (p) {
+        var cs = getComputedStyle(p);
+        var scheme = cs.getPropertyValue('color-scheme') || '';
+        if (scheme && scheme.indexOf('dark') >= 0) return 'dark';
+        if (p.classList && p.classList.contains('ha-dark')) return 'dark';
+      }
+    } catch(e) {}
+    try {
+      return window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+    } catch(e) { return 'light'; }
+  }
+
+  function applyThemeVars() {
+    try {
+      var p = window.parent && window.parent.document && window.parent.document.documentElement;
+      if (p) {
+        var cs = getComputedStyle(p);
+        for (var i = 0; i < THEME_VARS.length; i++) {
+          var v = cs.getPropertyValue(THEME_VARS[i]);
+          if (v && v.trim()) root.style.setProperty(THEME_VARS[i], v.trim());
+        }
+      }
+    } catch(e) {}
+    // Override with forced dark/light if not auto
+    var mode = getSavedTheme();
+    var effective = getEffectiveTheme();
+    root.classList.toggle('ha-dark', effective === 'dark');
+    root.classList.toggle('ha-light', effective === 'light');
+    root.style.setProperty('--ha-color-scheme', effective);
+    // Apply dark overrides
+    applyDarkOverrides(effective === 'dark');
+    updateThemeUI();
+  }
+
+  function applyDarkOverrides(isDark) {
+    if (isDark) {
+      // Dark mode: darken variables that HA may not provide for embedded panels
+      root.style.setProperty('--bg', root.style.getPropertyValue('--primary-background-color') || '#111111');
+      root.style.setProperty('--card', root.style.getPropertyValue('--card-background-color') || '#1c1c1e');
+      root.style.setProperty('--side', root.style.getPropertyValue('--secondary-background-color') || '#272729');
+      root.style.setProperty('--txt', root.style.getPropertyValue('--primary-text-color') || '#e1e1e1');
+      root.style.setProperty('--sec', root.style.getPropertyValue('--secondary-text-color') || '#9b9b9b');
+      root.style.setProperty('--div', 'rgba(255,255,255,0.12)');
+    } else {
+      root.style.setProperty('--bg', root.style.getPropertyValue('--primary-background-color') || '#f7f7f7');
+      root.style.setProperty('--card', root.style.getPropertyValue('--card-background-color') || '#ffffff');
+      root.style.setProperty('--side', root.style.getPropertyValue('--secondary-background-color') || '#f0f0f0');
+      root.style.setProperty('--txt', root.style.getPropertyValue('--primary-text-color') || '#212121');
+      root.style.setProperty('--sec', root.style.getPropertyValue('--secondary-text-color') || '#717171');
+      root.style.setProperty('--div', 'rgba(0,0,0,0.12)');
     }
-  } catch(e){}
+  }
+
+  function updateThemeUI() {
+    var mode = getSavedTheme();
+    var effective = getEffectiveTheme();
+    var btn = document.getElementById('themeBtn');
+    if (btn) {
+      var icon = mode === 'auto' ? 'mdi:theme-light-dark' : (effective === 'dark' ? 'mdi:weather-sunny' : 'mdi:moon-waning-crescent');
+      btn.innerHTML = '<ha-icon id="themeIcon" icon="'+icon+'"></ha-icon><span id="themeLabel">'+(mode === 'auto' ? '自动' : (effective === 'dark' ? '暗色' : '亮色'))+'</span><ha-icon icon="mdi:chevron-down" style="margin-left:2px;--mdc-icon-size:14px;color:var(--sec)"></ha-icon>';
+    }
+    // Update dropdown active state
+    var items = document.querySelectorAll('.dd-item[data-theme]');
+    items.forEach(function(item) {
+      if (item.getAttribute('data-theme') === mode) item.classList.add('active');
+      else item.classList.remove('active');
+    });
+  }
+
+  window.setTheme = function(mode) {
+    saveTheme(mode);
+    applyThemeVars();
+    hideThemeMenu();
+  };
+
+  window.toggleThemeMenu = function() {
+    var menu = document.getElementById('themeMenu');
+    if (menu) menu.classList.toggle('show');
+  };
+
+  window.hideThemeMenu = function() {
+    var menu = document.getElementById('themeMenu');
+    if (menu) menu.classList.remove('show');
+  };
+
+  // Close dropdown on outside click
+  document.addEventListener('click', function(e) {
+    var menu = document.getElementById('themeMenu');
+    var btn = document.getElementById('themeBtn');
+    if (menu && !menu.contains(e.target) && !btn.contains(e.target)) {
+      menu.classList.remove('show');
+    }
+  });
+
+  applyThemeVars();
+
+  // Watch for HA theme changes
+  setInterval(applyThemeVars, 5000);
+
+  try {
+    var parentDoc = window.parent && window.parent.document;
+    if (parentDoc && parentDoc.documentElement) {
+      var observer = new MutationObserver(function() { applyThemeVars(); });
+      observer.observe(parentDoc.documentElement, { attributes: true, attributeFilter: ['class', 'style'] });
+      observer.observe(parentDoc.head, { childList: true, subtree: true });
+    }
+  } catch(e) {}
+
+  try {
+    var mql = window.matchMedia('(prefers-color-scheme: dark)');
+    var listener = function() { if (getSavedTheme() === 'auto') applyThemeVars(); };
+    if (mql.addEventListener) mql.addEventListener('change', listener);
+    else if (mql.addListener) mql.addListener(listener);
+  } catch(e) {}
 })();
 </script>
 </head>
@@ -285,6 +541,14 @@ body{background:var(--bg);color:var(--txt);font-size:16px;font-family:-apple-sys
     <div class="logo-badge"><img src="/local/claw_icon.png" style="width:24px;height:24px;object-fit:contain"></div>
     <span style="font-size:1rem;font-weight:700;color:var(--txt)">Claw Assistant</span>
     <div class="si">
+      <div class="dd">
+        <button class="mini-btn si-ref" title="主题设置" onclick="event.stopPropagation();toggleThemeMenu()" id="themeBtn"><ha-icon id="themeIcon" icon="mdi:theme-light-dark"></ha-icon><span id="themeLabel">自动</span><ha-icon icon="mdi:chevron-down" style="margin-left:2px;--mdc-icon-size:14px;color:var(--sec)"></ha-icon></button>
+        <div class="dd-menu" id="themeMenu">
+          <div class="dd-item active" data-theme="auto" onclick="setTheme('auto')"><ha-icon icon="mdi:theme-light-dark"></ha-icon><span>跟随系统</span></div>
+          <div class="dd-item" data-theme="light" onclick="setTheme('light')"><ha-icon icon="mdi:weather-sunny"></ha-icon><span>亮色</span></div>
+          <div class="dd-item" data-theme="dark" onclick="setTheme('dark')"><ha-icon icon="mdi:moon-waning-crescent"></ha-icon><span>暗色</span></div>
+        </div>
+      </div>
       <span class="si-pill" id="sPill"><span class="si-dot"></span><span id="sTxt">连接中...</span></span>
       <span class="si-clock" id="sClock">--:--:--</span>
       <button class="mini-btn si-ref" onclick="refreshNow()"><ha-icon icon="mdi:refresh"></ha-icon><span>刷新</span></button>
@@ -320,12 +584,72 @@ var API = '/api/claw_assistant/dashboard';
 var _data = null;
 var _schema = null;
 var _agents = [];
-var _path = ['agent_settings'];
+var _path = ['ai_conversation'];
 
 function $(id) { return document.getElementById(id); }
 function b(v) { return v===true || v==='true' || v===1 || v==='1'; }
 function eh(s) { return String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;'); }
 function fmtSize(v) { if(!v)return'0B';if(v<1024)return v+'B';if(v<1048576)return(v/1024).toFixed(1)+'KB';return(v/1048576).toFixed(1)+'MB'; }
+
+// ── UI Helpers ──
+function emptyStateHtml(icon, title, desc, ctaLabel, ctaAction) {
+  var h = '<div class="empty-state"><div class="es-icon"><ha-icon icon="'+icon+'"></ha-icon></div>';
+  h += '<div class="es-title">'+eh(title)+'</div>';
+  if (desc) h += '<div class="es-desc">'+eh(desc)+'</div>';
+  if (ctaLabel && ctaAction) h += '<button class="btn es-cta" onclick="'+ctaAction+'">'+eh(ctaLabel)+'</button>';
+  h += '</div>';
+  return h;
+}
+function showLoadingSkeleton(containerId, rows) {
+  var el = $(containerId); if (!el) return;
+  var h = '';
+  for (var i=0; i<rows; i++) {
+    h += '<div style="display:flex;gap:8px;margin-bottom:10px">';
+    h += '<div class="skel" style="width:40px;height:40px"></div>';
+    h += '<div style="flex:1;display:flex;flex-direction:column;gap:6px">';
+    h += '<div class="skel" style="width:60%;height:12px"></div>';
+    h += '<div class="skel" style="width:35%;height:10px"></div>';
+    h += '</div></div>';
+  }
+  el.innerHTML = h;
+}
+function confirmDialog(title, message, onConfirm, confirmText, cancelText) {
+  var c = document.createElement('div');
+  c.className = 'modal-mask';
+  c.innerHTML = '<div class="modal-box" style="max-width:360px">';
+  c.innerHTML += '<div class="modal-title">'+eh(title)+'</div>';
+  c.innerHTML += '<div class="modal-body">'+eh(message)+'</div>';
+  c.innerHTML += '<div class="modal-actions" style="justify-content:flex-end;gap:8px">';
+  c.innerHTML += '<button class="btn" data-act="cancel">'+eh(cancelText||'取消')+'</button>';
+  c.innerHTML += '<button class="btn btn-pri" data-act="confirm">'+eh(confirmText||'确认')+'</button>';
+  c.innerHTML += '</div></div>';
+  document.body.appendChild(c);
+  function close(){ c.removeEventListener('click', onBg); document.body.removeChild(c); }
+  function onBg(e){ if (e.target===c) close(); }
+  c.addEventListener('click', onBg);
+  c.querySelectorAll('button[data-act]').forEach(function(b){
+    b.addEventListener('click', function(){
+      if (b.dataset.act==='confirm' && onConfirm) onConfirm();
+      close();
+    });
+  });
+  return c;
+}
+function toggleGroupCard(headerEl) {
+  var card = headerEl.closest('.group-card');
+  if (card) card.classList.toggle('open');
+}
+function timeAgo(ts) {
+  if (!ts) return '';
+  try {
+    var d = new Date(ts); var diff = (Date.now() - d.getTime()) / 1000;
+    if (diff < 60) return '刚刚';
+    if (diff < 3600) return Math.floor(diff/60) + ' 分钟前';
+    if (diff < 86400) return Math.floor(diff/3600) + ' 小时前';
+    if (diff < 2592000) return Math.floor(diff/86400) + ' 天前';
+    return d.getFullYear() + '-' + String(d.getMonth()+1).padStart(2,'0') + '-' + String(d.getDate()).padStart(2,'0');
+  } catch(e) { return ''; }
+}
 
 function agName(eid) {
   if (!eid) return '未设置';
@@ -373,7 +697,7 @@ function iconForOtype(otype) {
 
 // ── Tab/导航 ──
 var ICONS = {
-  agent_settings:'mdi:brain', conversation_settings:'mdi:cog',
+  ai_conversation:'mdi:chat-settings', agent_settings:'mdi:brain', conversation_settings:'mdi:cog',
   conv_dialog:'mdi:cog', conv_display:'mdi:monitor', conv_runtime:'mdi:tune-vertical',
   user_mapping:'mdi:account-group', um_pick_channel:'mdi:account-plus', um_remove:'mdi:account-minus',
   workspace_editor:'mdi:file-document-outline', ws_agents:'mdi:file-document-outline', ws_bootstrap:'mdi:rocket-launch',
@@ -389,7 +713,7 @@ var ICONS = {
 };
 function nodeIcon(k){ return ICONS[k] || 'mdi:tune'; }
 // 这些节点用「分组平铺 + 可折叠卡片」渲染，而非 drill 菜单
-var GROUP_PAGES = {'conversation_settings':true};
+var GROUP_PAGES = {'ai_conversation':true, 'conversation_settings':true};
 function findNode(key, nodes) {
   nodes = nodes || (_schema && _schema.menu_tree && _schema.menu_tree.children) || {};
   for (var k in nodes) {
@@ -546,7 +870,7 @@ function renderSections(node, o) {
   for (var i=0;i<secs.length;i++) {
     var s = secs[i];
     h += '<div class="sub">';
-    h += '<div class="sub-title" onclick="this.parentElement.classList.toggle(\'collapsed\')"><ha-icon icon="'+nodeIcon(s.key)+'"></ha-icon><span>'+eh(s.title||s.key)+'</span><ha-icon icon="mdi:chevron-down" class="chev"></ha-icon></div>';
+    h += '<div class="sub-title open" onclick="this.parentElement.classList.toggle(\'collapsed\');this.classList.toggle(\'open\')"><ha-icon icon="'+nodeIcon(s.key)+'"></ha-icon><span>'+eh(s.title||s.key)+'</span><ha-icon icon="mdi:chevron-down" class="chev"></ha-icon></div>';
     h += '<div class="sub-body">'+renderFields(s.fields, node.key, o)+'</div>';
     h += '</div>';
   }
@@ -602,7 +926,7 @@ function renderLeaf(node, o, preHtml) {
   var h = preHtml || '';
   // 这些特殊页渲染卡片列表，撑满网格更好看
   if (key === 'skill_editor' || key === 'plugin_manager' || key === 'conversation_manager' || key.indexOf('ws_') === 0 ||
-      key === 'rules_editor' || key === 'members' || key === 'dynamic' || key === 'um_pick_channel' || key === 'um_remove' || (node.fields||[]).indexOf('content') >= 0) {
+      key === 'rules_editor' || key === 'members' || key === 'dynamic' || key === 'um_pick_channel' || key === 'um_remove' || key === 'um_pick_identity' || key === 'um_pick_member' || (node.fields||[]).indexOf('content') >= 0) {
     gd.classList.remove('narrow'); gd.classList.remove('group');
   }
   if (key === 'skill_editor') { renderSkillsList(); return; }
@@ -614,7 +938,7 @@ function renderLeaf(node, o, preHtml) {
   if (key === 'learning') { renderLearningPage(); return; }
   if (key === 'dynamic') { renderDynamicPage(); return; }
   if (key.indexOf('ws_') === 0) { renderDocEditor(node, o); return; }
-  if (key === 'um_pick_channel' || key === 'um_remove') { gotoMembersFromUserMapping(); return; }
+  if (key === 'um_pick_channel' || key === 'um_remove' || key === 'um_pick_identity' || key === 'um_pick_member') { gotoMembersFromUserMapping(); return; }
   if ((node.fields||[]).indexOf('content') >= 0) { renderDocEditor(node, o); return; }
   // 带 section 的叶子（conv_dialog/conv_display/conv_runtime）
   if (_schema.sections && _schema.sections[key]) {
@@ -637,7 +961,7 @@ function renderNodeInner(node, o) {
     for (var k in node.children) {
       if (!node.children.hasOwnProperty(k)) continue;
       var c = node.children[k];
-      var onclick = (k==='um_pick_channel'||k==='um_remove')?'gotoMembersFromUserMapping()':'selectSub(\''+k+'\')';
+      var onclick = (k.indexOf('um_')===0)?'gotoMembersFromUserMapping()':'selectSub(\''+k+'\')';
       h += '<div class="action-card" onclick="'+onclick+'"><div class="ac-ic"><ha-icon icon="'+nodeIcon(k)+'"></ha-icon></div><div class="ac-tx"><div class="ac-t">'+eh(c.title||k)+'</div>'+(c.subtitle?'<div class="ac-d">'+eh(c.subtitle)+'</div>':'')+'</div><ha-icon icon="mdi:chevron-right" style="margin-left:auto;color:var(--sec)"></ha-icon></div>';
     }
     return pre + h + '</div>';
@@ -655,7 +979,7 @@ function renderGroupPage(node, o) {
     if (!kids.hasOwnProperty(k)) continue;
     var c = kids[k];
     h += '<div class="group-card open">';
-    h += '<div class="gc-head" onclick="this.parentElement.classList.toggle(\'open\')"><div class="gc-ic"><ha-icon icon="'+nodeIcon(k)+'"></ha-icon></div><div class="gc-tx"><div class="gc-t">'+eh(c.title||k)+'</div>'+(c.subtitle?'<div class="gc-d">'+eh(c.subtitle)+'</div>':'')+'</div><ha-icon icon="mdi:chevron-down" class="gc-chev"></ha-icon></div>';
+    h += '<div class="gc-head" onclick="toggleGroupCard(this)"><div class="gc-ic"><ha-icon icon="'+nodeIcon(k)+'"></ha-icon></div><div class="gc-tx"><div class="gc-t">'+eh(c.title||k)+'</div>'+(c.subtitle?'<div class="gc-d">'+eh(c.subtitle)+'</div>':'')+'</div><ha-icon icon="mdi:chevron-down" class="gc-chev"></ha-icon></div>';
     h += '<div class="gc-body">'+renderNodeInner(c, o)+'</div>';
     h += '</div>';
     first = false;
@@ -668,20 +992,48 @@ function renderGroupPage(node, o) {
 function renderSkillsList() {
   var gd = $('cardGrid');
   var node = nodeAtPath(_path);
-  gd.innerHTML = stepIntroHtml(node) + '<div class="menu-list" id="skList"><div class="action-card" style="cursor:default"><div class="ac-ic"><ha-icon icon="mdi:loading"></ha-icon></div><div class="ac-tx"><div class="ac-t">加载中...</div></div></div></div>';
+  gd.innerHTML = stepIntroHtml(node)
+    + '<div class="toolbar">'
+    + '<div class="tb-search"><ha-icon icon="mdi:magnify" style="color:var(--sec)"></ha-icon>'
+    + '<input id="skSearch" class="inp" placeholder="搜索技能名称或 slug..." oninput="filterSkillList()" style="flex:1"></div>'
+    + '<div class="tb-actions"><button class="btn btn-pri btn-tip" title="新建技能" onclick="openNewSkillModal()"><ha-icon icon="mdi:plus"></ha-icon> 新建技能</button></div></div>'
+    + '<div class="menu-list" id="skList"><div class="action-card" style="cursor:default"><div class="ac-ic"><ha-icon icon="mdi:loading"></ha-icon></div><div class="ac-tx"><div class="ac-t">加载中...</div></div></div></div>';
   api({action:'get_skills'}).then(function(d){
     var box = $('skList'); if (!box) return;
-    if (!d.ok || !d.skills.length) { box.innerHTML = '<div class="action-card" style="cursor:default"><div class="ac-tx"><div class="ac-t">暂无技能</div></div></div>'; return; }
+    if (!d.ok || !d.skills.length) {
+      box.innerHTML = emptyStateHtml('mdi:lightning-bolt','暂无技能','技能会注入 AI 的 system prompt，用于控制行为风格、知识边界等。','新建技能','openNewSkillModal()');
+      return;
+    }
+    window._skillData = d.skills;
     var h = '';
     d.skills.forEach(function(s){
       var ver = s.version ? ' · v'+s.version : '';
-      h += '<div class="action-card" onclick="editSkill(\''+eh(s.slug)+'\')"><div class="ac-ic"><ha-icon icon="mdi:lightning-bolt"></ha-icon></div>'
+      h += '<div class="action-card" data-sk-slug="'+eh(s.slug)+'" onclick="editSkill(\''+eh(s.slug)+'\')"><div class="ac-ic"><ha-icon icon="mdi:lightning-bolt"></ha-icon></div>'
         + '<div class="ac-tx"><div class="ac-t">'+eh(s.name)+ver+' <span style="color:var(--sec);font-weight:400;font-size:.76rem">'+eh(s.slug)+' · '+s.chars+'字</span></div>'
         + (s.description?'<div class="ac-d">'+eh(s.description)+'</div>':'')+'</div>'
         + '<ha-icon icon="mdi:pencil" style="margin-left:auto;color:var(--sec)"></ha-icon></div>';
     });
     box.innerHTML = h;
+    filterSkillList();
   });
+}
+var _skSearchTimer = null;
+function filterSkillList() {
+  if (_skSearchTimer) clearTimeout(_skSearchTimer);
+  _skSearchTimer = setTimeout(function(){
+    var q = ($('skSearch')||{}).value || '';
+    q = q.trim().toLowerCase();
+    var list = $('skList'); if (!list) return;
+    if (!q) {
+      list.querySelectorAll('.action-card').forEach(function(c){ c.style.display=''; });
+      return;
+    }
+    list.querySelectorAll('.action-card').forEach(function(c){
+      var slug = c.getAttribute('data-sk-slug') || '';
+      var name = (c.querySelector('.ac-t')||{}).textContent || '';
+      c.style.display = (slug.toLowerCase().indexOf(q)>=0 || name.toLowerCase().indexOf(q)>=0) ? '' : 'none';
+    });
+  }, 250);
 }
 function editSkill(slug) {
   api({action:'read_skill', slug:slug}).then(function(d){
@@ -713,11 +1065,18 @@ function saveSkill(slug) {
   var content = area ? area.value : '';
   var del = $('skDelete') && $('skDelete').checked;
   if (del) {
-    if (!confirm('确定删除该技能「'+slug+'」？此操作不可恢复。')) return;
-    api({action:'delete_skill', slug:slug}).then(function(r){
-      closeModal();
-      if (r.ok) { toast('技能已删除'); refreshNow(); } else toast('删除失败: '+(r.error||''));
-    });
+    confirmDialog(
+      '删除技能',
+      '确定删除该技能「'+slug+'」？此操作不可恢复。',
+      function(){
+        api({action:'delete_skill', slug:slug}).then(function(r){
+          closeModal();
+          if (r.ok) { toast('技能已删除'); refreshNow(); } else toast('删除失败: '+(r.error||''));
+        });
+      },
+      '删除',
+      '取消'
+    );
     return;
   }
   api({action:'save_skill', slug:slug, content:content}).then(function(r){
@@ -725,25 +1084,78 @@ function saveSkill(slug) {
     if (r.ok) { toast('已保存'); refreshNow(); } else toast('保存失败: '+(r.error||''));
   });
 }
+function openNewSkillModal() {
+  openModal('新建技能',
+    '<div class="fields" style="border:none;box-shadow:none;padding:0">'
+    + '<div class="field"><div class="field-label">技能名称（slug）</div><input class="inp" id="nsSlug" placeholder="例如：weather-briefing">'
+    + '<div class="field-help">字母、数字、连字符，作为技能的唯一标识。</div></div>'
+    + '<div class="field"><div class="field-label">技能简介</div><input class="inp" id="nsDesc" placeholder="简短描述技能用途">'
+    + '<div class="field-help">AI 根据简介匹配技能，请清晰描述。</div></div>'
+    + '<div class="field"><div class="field-label">技能内容（Markdown）</div><textarea class="inp" id="nsContent" rows="8" placeholder="以 Markdown 格式编写技能指令..."></textarea>'
+    + '<div class="field-help">技能会注入 AI 的 system prompt，内容格式参考已有技能。</div></div>'
+    + '</div>',
+    '<button class="btn" onclick="closeModal()">取消</button>'
+    + '<button class="btn pri" onclick="createNewSkill()">创建</button>', true);
+}
+function createNewSkill() {
+  var slug = $('nsSlug') ? $('nsSlug').value.trim() : '';
+  var desc = $('nsDesc') ? $('nsDesc').value.trim() : '';
+  var content = $('nsContent') ? $('nsContent').value.trim() : '';
+  if (!slug) { toast('请填写技能名称'); return; }
+  if (!content) { toast('请填写技能内容'); return; }
+  // 前面加上 YAML front matter 描述
+  var full = '---\nslug: ' + slug + '\nname: ' + slug + '\ndescription: ' + (desc || slug) + '\n---\n\n' + content;
+  api({action:'save_skill', slug:slug, content:full}).then(function(r){
+    closeModal();
+    if (r.ok) { toast('技能已创建'); refreshNow(); } else toast('创建失败: '+(r.error||''));
+  });
+}
 
 // ── 插件 ──
 function renderPluginsList() {
   var gd = $('cardGrid');
   var node = nodeAtPath(_path);
-  gd.innerHTML = stepIntroHtml(node) + '<div class="menu-list" id="pgList"><div class="action-card" style="cursor:default"><div class="ac-ic"><ha-icon icon="mdi:loading"></ha-icon></div><div class="ac-tx"><div class="ac-t">加载中...</div></div></div></div>';
+  gd.innerHTML = stepIntroHtml(node)
+    + '<div class="toolbar">'
+    + '<div class="tb-search"><ha-icon icon="mdi:magnify" style="color:var(--sec)"></ha-icon>'
+    + '<input id="pgSearch" class="inp" placeholder="搜索插件名称或 key..." oninput="filterPluginList()" style="flex:1"></div>'
+    + '<div class="tb-actions"><button class="btn btn-tip" title="安装插件" onclick="openInstallPluginModal()"><ha-icon icon="mdi:download"></ha-icon> 安装插件</button></div></div>'
+    + '<div class="menu-list" id="pgList"><div class="action-card" style="cursor:default"><div class="ac-ic"><ha-icon icon="mdi:loading"></ha-icon></div><div class="ac-tx"><div class="ac-t">加载中...</div></div></div></div>';
   api({action:'get_plugins'}).then(function(d){
     var box = $('pgList'); if (!box) return;
-    if (!d.ok || !d.plugins.length) { box.innerHTML = '<div class="action-card" style="cursor:default"><div class="ac-tx"><div class="ac-t">暂无插件</div></div></div>'; return; }
+    if (!d.ok || !d.plugins.length) {
+      box.innerHTML = emptyStateHtml('mdi:puzzle','暂无插件','插件扩展 AI 能力（自定义工具、数据源等）。','安装插件','openInstallPluginModal()');
+      return;
+    }
+    window._pluginData = d.plugins;
     var h = '';
     d.plugins.forEach(function(p){
       var ver = p.version ? ' v'+p.version : '';
-      h += '<div class="action-card" onclick="pluginDetail(\''+eh(p.key)+'\')"><div class="ac-ic"><ha-icon icon="mdi:puzzle"></ha-icon></div>'
+      h += '<div class="action-card" data-pg-key="'+eh(p.key)+'" onclick="pluginDetail(\''+eh(p.key)+'\')"><div class="ac-ic"><ha-icon icon="mdi:puzzle"></ha-icon></div>'
         + '<div class="ac-tx"><div class="ac-t">'+eh(p.name)+ver+' <span class="pbadge '+p.status+'" style="margin-left:6px">'+p.status+'</span></div>'
         + (p.description?'<div class="ac-d">'+eh(p.description)+'</div>':'')+'</div>'
         + '<ha-icon icon="mdi:chevron-right" style="margin-left:auto;color:var(--sec)"></ha-icon></div>';
     });
     box.innerHTML = h;
+    filterPluginList();
   });
+}
+var _pgSearchTimer = null;
+function filterPluginList() {
+  if (_pgSearchTimer) clearTimeout(_pgSearchTimer);
+  _pgSearchTimer = setTimeout(function(){
+    var q = ($('pgSearch')||{}).value || '';
+    q = q.trim().toLowerCase();
+    var list = $('pgList'); if (!list) return;
+    if (!q) {
+      list.querySelectorAll('.action-card').forEach(function(c){ c.style.display=''; });
+      return;
+    }
+    list.querySelectorAll('.action-card').forEach(function(c){
+      var key = c.getAttribute('data-pg-key') || '';
+      c.style.display = key.toLowerCase().indexOf(q) >= 0 ? '' : 'none';
+    });
+  }, 250);
 }
 function pluginDetail(key) {
   api({action:'get_plugins'}).then(function(d){
@@ -779,11 +1191,40 @@ function pluginToggle(key, isLoaded) {
   });
 }
 function pluginDelete(key) {
-  if (!confirm('确定删除该插件？将从磁盘移除插件目录。')) return;
-  api({action:'plugin_delete', key:key}).then(function(r){
+  confirmDialog(
+    '删除插件',
+    '确定删除该插件？将从磁盘移除插件目录。',
+    function(){
+      api({action:'plugin_delete', key:key}).then(function(r){
+        closeModal();
+        if (r.ok) { toast('插件已删除'); refreshNow(); }
+        else toast('删除失败: '+(r.error||''));
+      });
+    },
+    '删除',
+    '取消'
+  );
+}
+function openInstallPluginModal() {
+  openModal('安装插件',
+    '<div class="fields" style="border:none;box-shadow:none;padding:0">'
+    + '<div class="field"><div class="field-label">插件目录名</div><input class="inp" id="ipKey" placeholder="例如：my-plugin">'
+    + '<div class="field-help">插件必须已放置在 HA 的 plugins 目录下，此处填写目录名称即可。</div></div>'
+    + '<div class="field" style="margin-top:8px;padding:12px;background:var(--side);border-radius:8px;font-size:.82rem;color:var(--sec);line-height:1.6">'
+    + '💡 插件安装需要将插件文件部署到服务器。<br>'
+    + '你可以告诉 AI：「帮我安装 xxx 插件」来通过对话安装。<br>'
+    + '已存在的插件目录填写名称后点击「启用」即可加载。'
+    + '</div>'
+    + '</div>',
+    '<button class="btn" onclick="closeModal()">取消</button>'
+    + '<button class="btn pri" onclick="installPlugin()">启用插件</button>', true);
+}
+function installPlugin() {
+  var key = $('ipKey') ? $('ipKey').value.trim() : '';
+  if (!key) { toast('请填写插件目录名'); return; }
+  api({action:'plugin_enable', key:key}).then(function(r){
     closeModal();
-    if (r.ok) { toast('插件已删除'); refreshNow(); }
-    else toast('删除失败: '+(r.error||''));
+    if (r.ok) { toast('插件已启用'); refreshNow(); } else toast('启用失败: '+(r.error||''));
   });
 }
 
@@ -792,14 +1233,39 @@ function renderConversationList() {
   var gd = $('cardGrid');
   var node = nodeAtPath(_path);
   gd.innerHTML = stepIntroHtml(node) +
+    '<div class="group-card open" style="margin-bottom:14px"><div class="gc-head" onclick="toggleGroupCard(this)">' +
+    '  <div class="gc-ic"><ha-icon icon="mdi:history"></ha-icon></div>' +
+    '  <div class="gc-tx"><div class="gc-t">对话历史设置</div>' +
+    '    <div class="gc-d">调整对话保留天数和最大轮数</div></div>' +
+    '  <span class="card-actions" style="position:absolute;right:12px">' +
+    '    <button class="btn btn-pri btn-tip" title="保存设置" onclick="event.stopPropagation();saveHistorySettings()"><ha-icon icon="mdi:content-save"></ha-icon> 保存</button>' +
+    '    <button class="btn btn-tip" title="重载设置" onclick="event.stopPropagation();loadHistorySettings()"><ha-icon icon="mdi:refresh"></ha-icon> 重载</button>' +
+    '  </span>' +
+    '</div><div class="gc-body">' +
+    '  <div style="display:flex;gap:16px;flex-wrap:wrap;align-items:center">' +
+    '    <div style="flex:1;min-width:160px">' +
+    '      <div style="font-size:.78rem;color:var(--sec);margin-bottom:4px">保留天数</div>' +
+    '      <input id="histMaxAge" class="inp" type="number" min="1" max="3650" step="1" style="width:80px">' +
+    '    </div>' +
+    '    <div style="flex:1;min-width:160px">' +
+    '      <div style="font-size:.78rem;color:var(--sec);margin-bottom:4px">最大轮数</div>' +
+    '      <input id="histMaxTurns" class="inp" type="number" min="5" max="200" step="1" style="width:80px">' +
+    '    </div>' +
+    '  </div>' +
+    '  <div id="histSettingsHint" style="font-size:.76rem;color:var(--sec);margin-top:8px"></div>' +
+    '</div></div>' +
+    '<div class="toolbar" style="margin-bottom:8px">' +
+    '  <div class="tb-search"><ha-icon icon="mdi:magnify" style="color:var(--sec)"></ha-icon>' +
+    '    <input id="convSearch" class="inp" style="flex:1" placeholder="搜索对话 ID、标题或内容..." oninput="convFilter()">' +
+    '  </div>' +
+    '  <div class="tb-actions">' +
+    '    <button class="btn btn-tip" title="刷新对话列表" onclick="convRefresh()"><ha-icon icon="mdi:refresh"></ha-icon> 刷新</button>' +
+    '    <button class="btn btn-tip danger-ghost" title="清空全部对话" onclick="convClearAll()"><ha-icon icon="mdi:delete-sweep"></ha-icon> 清空</button>' +
+    '  </div>' +
+    '</div>' +
+    '<div id="convStats" style="font-size:.78rem;color:var(--sec);margin-bottom:8px"></div>' +
     '<div class="conv-split">' +
     '  <div class="conv-left">' +
-    '    <div style="margin-bottom:10px;display:flex;gap:6px;align-items:center;flex-wrap:wrap">' +
-    '      <input id="convSearch" class="inp" style="flex:1;min-width:140px" placeholder="搜索对话..." oninput="convFilter()">' +
-    '      <button class="mini-btn" onclick="convRefresh()" title="刷新"><ha-icon icon="mdi:refresh"></ha-icon></button>' +
-    '      <button class="mini-btn" style="color:var(--sec)" onclick="convClearAll()" title="清空全部"><ha-icon icon="mdi:delete-sweep"></ha-icon></button>' +
-    '    </div>' +
-    '    <div id="convStats" style="font-size:.78rem;color:var(--sec);margin-bottom:8px"></div>' +
     '    <div class="conv-list" id="convList"><div class="conv-list-item"><div class="conv-li-loading">加载中...</div></div></div>' +
     '  </div>' +
     '  <div class="conv-right" id="convDetail">' +
@@ -810,25 +1276,59 @@ function renderConversationList() {
     '  </div>' +
     '</div>';
   window._convSelectedId = null;
+  loadHistorySettings();
   convRefresh();
+}
+function loadHistorySettings() {
+  api({action:'get_history_settings'}).then(function(d){
+    if (d.ok) {
+      var ageEl = $('histMaxAge');
+      var turnsEl = $('histMaxTurns');
+      if (ageEl) ageEl.value = Math.round(d.max_age_hours / 24);
+      if (turnsEl) turnsEl.value = d.max_turns;
+      var hint = $('histSettingsHint');
+      if (hint) {
+        var days = Math.round(d.max_age_hours / 24);
+        hint.textContent = '当前设置：保留 ' + days + ' 天，最多 ' + d.max_turns + ' 轮/对话';
+      }
+    }
+  });
+}
+function saveHistorySettings() {
+  var days = parseInt($('histMaxAge').value) || 365;
+  var turns = parseInt($('histMaxTurns').value) || 30;
+  if (days < 1 || days > 3650) { toast('保留天数需在 1-3650 之间'); return; }
+  if (turns < 5 || turns > 200) { toast('最大轮数需在 5-200 之间'); return; }
+  api({action:'set_history_settings', max_age_hours: days * 24, max_turns: turns}).then(function(d){
+    if (d.ok) {
+      toast('设置已保存，超出保留期的对话已清理');
+      loadHistorySettings();
+      convRefresh();
+    } else {
+      toast('保存失败: ' + (d.error || ''));
+    }
+  });
 }
 function convRefresh() {
   api({action:'list_conversations'}).then(function(d){
     window._convData = d;
     var st = $('convStats');
     if (st && d.ok && d.stats) {
-      st.textContent = '共 ' + d.stats.total_conversations + ' 个对话 · ' + d.stats.total_turns + ' 轮 · 平均 ' + d.stats.average_turns + ' 轮/对话';
+      var days = Math.round((d.stats.max_age_hours || 8760) / 24);
+      st.textContent = '共 ' + d.stats.total_conversations + ' 个对话 · ' + d.stats.total_turns + ' 轮 · 平均 ' + d.stats.average_turns + ' 轮/对话 · 保留 ' + days + ' 天';
     }
     window._convAll = d.ok ? d.conversations : [];
     convFilter();
-    // 如果当前选中的对话还在列表中，保持选中
     if (window._convSelectedId) {
       var stillExists = window._convAll.some(function(c){ return c.id === window._convSelectedId; });
       if (!stillExists) { window._convSelectedId = null; $('convDetail').innerHTML = ''; }
     }
   });
 }
+var _convSearchTimer = null;
 function convFilter() {
+  if (_convSearchTimer) clearTimeout(_convSearchTimer);
+  _convSearchTimer = setTimeout(function(){
   var q = ($('convSearch') ? $('convSearch').value.trim().toLowerCase() : '');
   var list = (window._convAll || []).filter(function(c){
     if (!q) return true;
@@ -853,6 +1353,7 @@ function convFilter() {
       + '<div class="conv-li-preview">'+preview+'</div></div>';
   });
   box.innerHTML = h;
+  }, 250);
 }
 function convSelect(convId) {
   window._convSelectedId = convId;
@@ -871,8 +1372,8 @@ function convSelect(convId) {
     h += '<div class="conv-dh-top"><span class="conv-dh-title">'+title+'</span></div>';
     h += '<div class="conv-dh-meta">共 '+d.turn_count+' 轮 · ID: '+eh(d.conversation_id)+'</div>';
     h += '<div class="conv-dh-actions">';
-    h += '<button class="btn pri" onclick="convContinue(\''+eh(d.conversation_id)+'\')"><ha-icon icon="mdi:chat-plus-outline"></ha-icon><span>继续对话</span></button>';
-    h += '<button class="mini-btn" onclick="convDelete(\''+eh(d.conversation_id)+'\')"><ha-icon icon="mdi:delete"></ha-icon><span>删除</span></button>';
+    h += '<button class="btn btn-pri btn-tip" title="继续对话" onclick="convContinue(\''+eh(d.conversation_id)+'\')"><ha-icon icon="mdi:chat-plus-outline"></ha-icon><span>继续对话</span></button>';
+    h += '<button class="mini-btn btn-tip" title="删除对话" onclick="convDelete(\''+eh(d.conversation_id)+'\')"><ha-icon icon="mdi:delete"></ha-icon><span>删除</span></button>';
     h += '</div></div>';
     h += '<div class="conv-detail-turns">';
     (d.turns||[]).forEach(function(t, i){
@@ -909,7 +1410,51 @@ function convContinue(convId) {
     }
   } catch(e) {}
   var windowId = 'claw-panel-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 10);
-  openChatModal(convId, windowId, userId);
+  // 1) Resume：绑定对话到 window_id
+  api({action:'conversation_resume', conversation_id: convId, window_id: windowId}).then(function(r){
+    if (!r.ok) {
+      toast('历史已不存在或已删除');
+      convRefresh();
+      return;
+    }
+    // 2) 绑定成功，记录 _chat 状态
+    _chat = { convId: convId, windowId: windowId, userId: userId || '' };
+    // 3) 触发父窗口 HA 原生语音助手对话框
+    openAssistDialog();
+  });
+}
+function openAssistDialog() {
+  try {
+    if (!window.parent) { fallbackToChatModal(); return; }
+    var rootEl = window.parent.document.querySelector('home-assistant');
+    if (!rootEl) { fallbackToChatModal(); return; }
+    // 监听 Assist 对话框关闭事件，释放 resume 绑定
+    if (window._assistCloseHandler) {
+      try { window.parent.document.removeEventListener('dialog-closed', window._assistCloseHandler); } catch(e) {}
+    }
+    window._assistCloseHandler = function(e) {
+      var detail = e.detail || {};
+      if (detail.dialog === 'ha-voice-command-dialog' && _chat) {
+        chatReleaseIfOpen();
+      }
+    };
+    try { window.parent.document.addEventListener('dialog-closed', window._assistCloseHandler); } catch(e) {}
+    // 触发 HA Assist 对话框
+    rootEl.dispatchEvent(new CustomEvent('hass-action', {
+      bubbles: true, composed: true,
+      detail: {
+        config: { tap_action: { action: 'assist', pipeline_id: 'last_used', start_listening: false } },
+        action: 'tap'
+      }
+    }));
+  } catch(e) {
+    toast('无法打开语音助手: ' + e.message);
+    chatReleaseIfOpen();
+  }
+}
+function fallbackToChatModal() {
+  if (!_chat) return;
+  openChatModal(_chat.convId, _chat.windowId, _chat.userId);
 }
 function openChatModal(convId, windowId, userId) {
   var body = '<div class="chat-msgs" id="chatMsgs"><div class="chat-loading">加载历史对话...</div></div>'
@@ -1014,11 +1559,16 @@ function chatClose() {
   chatReleaseIfOpen();
   closeModal();
 }
-// 释放 resume 绑定（幂等）：所有关闭路径（X/遮罩/关闭按钮/切页/卸载）统一经过这里
+// 释放 resume 绑定（幂等）：所有关闭路径（X/遮罩/关闭按钮/切页/卸载/Assist关闭）统一经过这里
 function chatReleaseIfOpen() {
   if (!_chat) return;
   _chat = null;
   try { api({action:'conversation_release'}); } catch(e) {}
+  // 移除 Assist 对话框关闭监听器
+  if (window._assistCloseHandler) {
+    try { window.parent.document.removeEventListener('dialog-closed', window._assistCloseHandler); } catch(e) {}
+    window._assistCloseHandler = null;
+  }
   // 释放后刷新详情列表，保证轮数/状态最新
   if (window._convAll) convRefresh();
 }
@@ -1028,28 +1578,42 @@ function chatInputGrow(el) {
   el.style.height = Math.min(el.scrollHeight, 120) + 'px';
 }
 function convDelete(convId) {
-  if (!confirm('确定删除该对话？')) return;
-  api({action:'delete_conversation', conversation_id:convId}).then(function(r){
-    if (r.ok) {
-      toast('对话已删除');
-      if (window._convSelectedId === convId) {
-        window._convSelectedId = null;
-        $('convDetail').innerHTML = '<div class="conv-detail-placeholder"><ha-icon icon="mdi:chat-outline" style="--mdc-icon-size:48px;color:var(--sec);opacity:.3"></ha-icon><div style="color:var(--sec);font-size:.9rem;margin-top:8px">选择一个对话查看详情</div></div>';
-      }
-      convRefresh();
-    } else toast('删除失败: '+(r.error||''));
-  });
+  confirmDialog(
+    '删除对话',
+    '确定删除该对话？此操作不可恢复。',
+    function(){
+      api({action:'delete_conversation', conversation_id:convId}).then(function(r){
+        if (r.ok) {
+          toast('对话已删除');
+          if (window._convSelectedId === convId) {
+            window._convSelectedId = null;
+            $('convDetail').innerHTML = '<div class="conv-detail-placeholder"><ha-icon icon="mdi:chat-outline" style="--mdc-icon-size:48px;color:var(--sec);opacity:.3"></ha-icon><div style="color:var(--sec);font-size:.9rem;margin-top:8px">选择一个对话查看详情</div></div>';
+          }
+          convRefresh();
+        } else toast('删除失败: '+(r.error||''));
+      });
+    },
+    '删除',
+    '取消'
+  );
 }
 function convClearAll() {
-  if (!confirm('确定清空所有对话记录？此操作不可恢复。')) return;
-  api({action:'clear_all_conversations'}).then(function(r){
-    if (r.ok) {
-      toast('已清空 '+r.removed+' 轮对话');
-      window._convSelectedId = null;
-      $('convDetail').innerHTML = '<div class="conv-detail-placeholder"><ha-icon icon="mdi:chat-outline" style="--mdc-icon-size:48px;color:var(--sec);opacity:.3"></ha-icon><div style="color:var(--sec);font-size:.9rem;margin-top:8px">选择一个对话查看详情</div></div>';
-      convRefresh();
-    } else toast('操作失败: '+(r.error||''));
-  });
+  confirmDialog(
+    '清空全部对话',
+    '确定清空所有对话记录？此操作不可恢复。',
+    function(){
+      api({action:'clear_all_conversations'}).then(function(r){
+        if (r.ok) {
+          toast('已清空 '+r.removed+' 轮对话');
+          window._convSelectedId = null;
+          $('convDetail').innerHTML = '<div class="conv-detail-placeholder"><ha-icon icon="mdi:chat-outline" style="--mdc-icon-size:48px;color:var(--sec);opacity:.3"></ha-icon><div style="color:var(--sec);font-size:.9rem;margin-top:8px">选择一个对话查看详情</div></div>';
+          convRefresh();
+        } else toast('操作失败: '+(r.error||''));
+      });
+    },
+    '清空',
+    '取消'
+  );
 }
 
 // ── 工作文档 ──
@@ -1107,103 +1671,7 @@ function gotoMembersFromUserMapping() {
   renderCurrentArea();
 }
 
-// ── 用户关联（旧向导，保留但不再从 UI 入口调用）──
-function showAddMappingWizard() {
-  api({action:'get_mapping_options'}).then(function(d){
-    if (!d.ok) { toast('读取失败'); return; }
-    var pkeys = d.provider_keys || [];
-    if (!pkeys.length) {
-      openModal('添加 IM 用户关联',
-        '<div class="hint" style="color:#FF9500">未检测到已配置的 IM 通道。请先在「设置 → 设备与服务」安装并启用 <b>cn_im_hub</b>，并接入至少一个 IM 通道。</div>',
-        '<button class="btn" onclick="closeModal()">关闭</button>', true);
-      return;
-    }
-    var provOpts = '';
-    pkeys.forEach(function(pk){
-      var label = (selOpts('provider') && selOpts('provider')[pk]) ? selOpts('provider')[pk] : pk;
-      provOpts += '<option value="'+eh(pk)+'">'+eh(label)+'</option>';
-    });
-    var userOpts = '<option value="">选择 HA 用户...</option>';
-    (d.users||[]).forEach(function(u){ if (u.is_active) userOpts += '<option value="'+eh(u.id)+'">'+eh(u.name)+'</option>'; });
-    var body = '<div class="wz-step"><span class="wz-dot on">1</span><span class="wz-dot">2</span><span class="wz-dot">3</span><span style="margin-left:6px">第 1 步 / 共 3 步 · 选择通道平台</span></div>'
-      + '<label class="dl">通道平台</label><select id="wzProvider" class="inp" onchange="wzLoadIdentities()">'+provOpts+'</select>'
-      + '<div id="wzStep2" style="margin-top:14px;display:none"><div class="wz-step"><span class="wz-dot done">✓</span><span class="wz-dot on">2</span><span class="wz-dot">3</span><span style="margin-left:6px">第 2 步 / 共 3 步 · 选择外部用户</span></div>'
-      + '<label class="dl">外部用户</label><select id="wzExtId" class="inp" onchange="wzToggleManual()"></select>'
-      + '<div class="hint">从 cn_im_hub 与近期对话自动识别，仅显示该通道下的用户。</div>'
-      + '<div id="wzManualWrap" style="display:none;margin-top:10px"><label class="dl">手动填写 ID</label><input id="wzExtManual" class="inp" placeholder="微信 openid / 飞书 open_id / 钉钉 userId"></div></div>'
-      + '<div id="wzStep3" style="margin-top:14px;display:none"><div class="wz-step"><span class="wz-dot done">✓</span><span class="wz-dot done">✓</span><span class="wz-dot on">3</span><span style="margin-left:6px">第 3 步 / 共 3 步 · 关联到 HA 成员</span></div>'
-      + '<label class="dl">关联到</label><select id="wzUser" class="inp">'+userOpts+'</select>'
-      + '<div class="hint">选择家庭成员；仅显示已创建的 HA 用户账号。</div></div>';
-    openModal('添加 IM 用户关联', body,
-      '<button class="btn" onclick="closeModal()">取消</button>'
-      + '<button class="btn pri" id="wzSubmit" style="display:none" onclick="wzSubmit()">提交关联</button>', true);
-    window._wzData = d;
-  });
-}
-function wzLoadIdentities() {
-  var prov = $('wzProvider').value;
-  var d = window._wzData;
-  if (!prov) { $('wzStep2').style.display='none'; $('wzStep3').style.display='none'; $('wzSubmit').style.display='none'; return; }
-  var opts = d.ext_options || {};
-  if (!Object.keys(opts).length && d.targets && d.targets[prov]) {
-    // fallback: build from targets
-    opts = {};
-    var t = d.targets[prov]||{};
-    for (var k in t) opts[k]=t[k];
-  }
-  var h = '<option value="">选择外部用户...</option>';
-  for (var k2 in opts) {
-    if (!opts.hasOwnProperty(k2)) continue;
-    h += '<option value="'+eh(k2)+'">'+eh(opts[k2])+'</option>';
-  }
-  h += '<option value="__manual__">手动填写 ID</option>';
-  var sel = $('wzExtId'); sel.innerHTML = h;
-  $('wzStep2').style.display='';
-  $('wzStep3').style.display='none';
-  $('wzSubmit').style.display='none';
-}
-function wzToggleManual() {
-  var sel = $('wzExtId');
-  if (sel.value === '__manual__') { $('wzManualWrap').style.display=''; }
-  else { $('wzManualWrap').style.display='none'; }
-  $('wzStep3').style.display='';
-  $('wzSubmit').style.display='';
-}
-function wzSubmit() {
-  var prov = $('wzProvider').value;
-  var extSel = $('wzExtId').value;
-  var ext = (extSel === '__manual__') ? $('wzExtManual').value.trim() : extSel;
-  var user = $('wzUser').value;
-  if (!prov || !ext || !user) { toast('请完整填写通道、外部用户与 HA 成员'); return; }
-  api({action:'add_mapping', provider:prov, ext_id:ext, ha_user_id:user}).then(function(r){
-    closeModal();
-    if (r.ok) { toast('关联已添加'); refreshNow(); } else toast('添加失败: '+(r.error||''));
-  });
-}
-function renderRemoveList() {
-  var gd = $('cardGrid');
-  gd.innerHTML = '<div class="step-intro"><div class="step-title">删除通道绑定</div><div class="step-desc">解除映射后，该外部身份将不再关联到对应家庭成员。</div></div><div class="menu-list" id="rmList"><div class="action-card" style="cursor:default"><div class="ac-ic"><ha-icon icon="mdi:loading"></ha-icon></div><div class="ac-tx"><div class="ac-t">加载中...</div></div></div></div>';
-  api({action:'get_mappings'}).then(function(d){
-    var box = $('rmList'); if (!box) return;
-    var ms = d.mappings || [];
-    if (!ms.length) { box.innerHTML = '<div class="action-card" style="cursor:default"><div class="ac-tx"><div class="ac-t">暂无关联</div></div></div>'; return; }
-    var h = '';
-    ms.forEach(function(m){
-      var ext = m.ext_id || m.extId || '?';
-      h += '<div class="action-card" style="flex-direction:column;align-items:stretch;gap:0">'
-        + '<div style="display:flex;align-items:center;justify-content:space-between"><div style="font-size:.84rem"><b style="color:var(--txt)">'+eh(ext)+'</b> <span style="color:var(--sec)">'+(m.provider||'')+' → '+(m.ha_user_id||m.haUserId||'')+'</span></div>'
-        + '<button class="btn danger-ghost" style="padding:4px 12px" onclick="removeMapping(\''+eh(m.provider||'')+'\',\''+eh(ext)+'\')"><ha-icon icon="mdi:delete"></ha-icon> 删除</button></div></div>';
-    });
-    box.innerHTML = h;
-  });
-}
-function removeMapping(provider, extId) {
-  if (!confirm('确定删除该关联？')) return;
-  api({action:'remove_mapping', provider:provider, ext_id:extId}).then(function(r){
-    if (r.ok) { toast('关联已删除'); renderRemoveList(); refreshNow(); }
-    else toast('删除失败: '+(r.error||''));
-  });
-}
+// ── 用户关联（已统一到成员与权限，旧向导已移除）──
 
 // ── 硬边界规则 ──
 var RULE_CATS = [
@@ -1224,13 +1692,28 @@ function renderRulesList() {
   var gd = $('cardGrid');
   var node = nodeAtPath(_path);
   gd.innerHTML = stepIntroHtml(node)
-    + '<div style="display:flex;justify-content:flex-end;margin-bottom:14px"><button class="btn pri" onclick="openNewRuleModal()"><ha-icon icon="mdi:plus"></ha-icon> 新建规则</button></div>'
+    + '<div class="toolbar">'
+    + '<div class="tb-search"><ha-icon icon="mdi:magnify" style="color:var(--sec)"></ha-icon>'
+    + '<input id="ruleSearch" class="inp" placeholder="搜索规则内容或 ID..." oninput="filterRuleList()" style="flex:1"></div>'
+    + '<div class="tb-actions">'
+    + '<span id="ruleStats" style="display:inline-flex;gap:6px;align-items:center;font-size:.8rem;color:var(--sec);margin-right:8px"></span>'
+    + '<button class="btn btn-pri btn-tip" title="新建规则" onclick="openNewRuleModal()"><ha-icon icon="mdi:plus"></ha-icon> 新建规则</button>'
+    + '<button class="btn btn-tip" title="刷新规则" onclick="renderRulesList()"><ha-icon icon="mdi:refresh"></ha-icon> 刷新</button>'
+    + '</div></div>'
     + '<div class="group-grid" id="rulesBox"><div class="action-card" style="cursor:default;grid-column:1/-1"><div class="ac-ic"><ha-icon icon="mdi:loading"></ha-icon></div><div class="ac-tx"><div class="ac-t">加载中...</div></div></div></div>';
   api({action:'get_rules'}).then(function(d){
     var box = $('rulesBox'); if (!box) return;
     var rules = d.rules || [];
+    var statsEl = $('ruleStats');
+    if (statsEl) {
+      var enabledCount = 0;
+      rules.forEach(function(r){ if (r.enabled) enabledCount++; });
+      statsEl.innerHTML = '<span>📜 '+rules.length+' 规则</span>'
+        + '<span style="color:#4caf50">✓ '+enabledCount+' 启用</span>'
+        + '<span style="color:var(--sec)">✗ '+(rules.length-enabledCount)+' 停用</span>';
+    }
     if (!rules.length) {
-      box.innerHTML = '<div class="action-card" style="cursor:default;grid-column:1/-1"><div class="ac-ic"><ha-icon icon="mdi:shield-alert-outline"></ha-icon></div><div class="ac-tx"><div class="ac-t">暂无规则</div><div class="ac-d">点击右上角「新建规则」添加第一条硬边界规则。规则会注入 AI 的 system prompt，启用后立即生效。</div></div></div>';
+      box.innerHTML = emptyStateHtml('mdi:shield-alert-outline','暂无规则','规则是 AI 的安全边界，会注入 system prompt。点击新建规则添加第一条硬边界。','新建规则','openNewRuleModal()');
       return;
     }
     var groups = {}, order = [];
@@ -1240,28 +1723,59 @@ function renderRulesList() {
       groups[c].push(r);
     });
     order.sort(function(a,b){ return ruleCatOrder(a)-ruleCatOrder(b); });
-    var h = '';
-    order.forEach(function(cat){
-      var meta = ruleCatMeta(cat);
-      var items = groups[cat];
-      h += '<div class="group-card open"><div class="gc-head" onclick="this.parentElement.classList.toggle(\'open\')">'
-        + '<div class="gc-ic"><ha-icon icon="'+meta[2]+'"></ha-icon></div>'
-        + '<div class="gc-tx"><div class="gc-t">'+meta[1]+' <span style="color:var(--sec);font-weight:400;font-size:.76rem">'+items.length+' 条</span></div>'
-        + '<div class="gc-d">'+meta[3]+'</div></div>'
-        + '<ha-icon icon="mdi:chevron-down" class="gc-chev"></ha-icon></div>'
-        + '<div class="gc-body">';
-      items.forEach(function(r){
-        h += '<div style="display:flex;align-items:center;gap:12px;padding:10px 0;border-bottom:1px solid var(--div)">'
-          + '<div style="flex:1;min-width:0"><div style="font-size:.88rem;color:var(--txt);line-height:1.45;word-break:break-word">'+eh(r.description)+'</div>'
-          + '<div style="font-size:.7rem;color:var(--sec);margin-top:2px">'+eh(r.id)+'</div></div>'
-          + '<label class="tg" title="启用/停用"><input type="checkbox"'+(r.enabled?' checked':'')+' onchange="toggleRule(\''+eh(r.id)+'\', this.checked)"><span class="tg-sl"></span></label>'
-          + '<button class="btn danger-ghost" style="padding:4px 10px" title="删除规则" onclick="deleteRule(\''+eh(r.id)+'\')"><ha-icon icon="mdi:delete"></ha-icon></button>'
-          + '</div>';
-      });
-      h += '</div></div>';
-    });
-    box.innerHTML = h;
+    window._ruleGroups = {groups:groups, order:order};
+    renderRuleGroups(groups, order);
   });
+}
+function renderRuleGroups(groups, order) {
+  var box = $('rulesBox'); if (!box) return;
+  var h = '';
+  order.forEach(function(cat){
+    var meta = ruleCatMeta(cat);
+    var items = groups[cat];
+    h += '<div class="group-card open" data-rule-cat="'+eh(cat)+'"><div class="gc-head" onclick="toggleGroupCard(this)">'
+      + '<div class="gc-ic"><ha-icon icon="'+meta[2]+'"></ha-icon></div>'
+      + '<div class="gc-tx"><div class="gc-t">'+meta[1]+' <span style="color:var(--sec);font-weight:400;font-size:.76rem">'+items.length+' 条</span></div>'
+      + '<div class="gc-d">'+meta[3]+'</div></div>'
+      + '<ha-icon icon="mdi:chevron-down" class="gc-chev"></ha-icon></div>'
+      + '<div class="gc-body">';
+    items.forEach(function(r){
+      h += '<div style="display:flex;align-items:center;gap:12px;padding:10px 0;border-bottom:1px solid var(--div)" data-rule-desc="'+eh(r.description).toLowerCase()+'">'
+        + '<div style="flex:1;min-width:0"><div style="font-size:.88rem;color:var(--txt);line-height:1.45;word-break:break-word">'+eh(r.description)+'</div>'
+        + '<div style="font-size:.7rem;color:var(--sec);margin-top:2px">'+eh(r.id)+'</div></div>'
+        + '<label class="tg btn-tip" title="启用/停用"><input type="checkbox"'+(r.enabled?' checked':'')+' onchange="toggleRule(\''+eh(r.id)+'\', this.checked)"><span class="tg-sl"></span></label>'
+        + '<button class="btn btn-tip" style="padding:6px 12px" title="编辑规则" onclick="event.stopPropagation();editRule(\''+eh(r.id)+'\',\''+eh(r.category||'always')+'\',\''+eh(r.description.replace(/'/g,"\\'"))+'\')"><ha-icon icon="mdi:pencil"></ha-icon> 编辑</button>'
+        + '<button class="btn btn-tip danger-ghost" style="padding:6px 12px" title="删除规则" onclick="event.stopPropagation();deleteRule(\''+eh(r.id)+'\')"><ha-icon icon="mdi:delete"></ha-icon> 删除</button>'
+        + '</div>';
+    });
+    h += '</div></div>';
+  });
+  box.innerHTML = h;
+  filterRuleList();
+}
+var _ruleSearchTimer = null;
+function filterRuleList() {
+  if (_ruleSearchTimer) clearTimeout(_ruleSearchTimer);
+  _ruleSearchTimer = setTimeout(function(){
+    var q = ($('ruleSearch')||{}).value || '';
+    q = q.trim().toLowerCase();
+    var box = $('rulesBox'); if (!box) return;
+    if (!q) {
+      box.querySelectorAll('.group-card').forEach(function(c){ c.style.display=''; });
+      return;
+    }
+    box.querySelectorAll('.group-card').forEach(function(card){
+      var items = card.querySelectorAll('[data-rule-desc]');
+      var hasMatch = false;
+      items.forEach(function(item){
+        var desc = item.getAttribute('data-rule-desc') || '';
+        var match = desc.indexOf(q) >= 0;
+        item.style.display = match ? '' : 'none';
+        if (match) hasMatch = true;
+      });
+      card.style.display = hasMatch ? '' : 'none';
+    });
+  }, 250);
 }
 function toggleRule(ruleId, enabled) {
   api({action:'toggle_rule', rule_id:ruleId, enabled:enabled}).then(function(r){
@@ -1293,10 +1807,44 @@ function createRule() {
   });
 }
 function deleteRule(ruleId) {
-  if (!confirm('确定删除规则「'+ruleId+'」？此操作不可恢复。')) return;
-  api({action:'delete_rule', rule_id:ruleId}).then(function(r){
-    if (r.ok) { toast('规则已删除'); renderRulesList(); refreshNow(); }
-    else toast('删除失败: '+(r.error||''));
+  confirmDialog(
+    '删除规则',
+    '确定删除规则「'+ruleId+'」？此操作不可恢复。',
+    function(){
+      api({action:'delete_rule', rule_id:ruleId}).then(function(r){
+        if (r.ok) { toast('规则已删除'); renderRulesList(); refreshNow(); }
+        else toast('删除失败: '+(r.error||''));
+      });
+    },
+    '删除',
+    '取消'
+  );
+}
+function editRule(ruleId, category, description) {
+  var opts = '';
+  RULE_CATS.forEach(function(c){ opts += '<option value="'+c[0]+'"'+(c[0]===category?' selected':'')+'>'+c[1]+'</option>'; });
+  openModal('编辑规则',
+    '<div class="fields" style="border:none;box-shadow:none;padding:0">'
+    + '<div class="field"><div class="field-label">分类</div><select class="sel" id="erCat">'+opts+'</select>'
+    + '<div class="field-help">选择规则分类。</div></div>'
+    + '<div class="field"><div class="field-label">规则内容</div><textarea class="inp" id="erDesc" rows="3">'+eh(description)+'</textarea>'
+    + '<div class="field-help">修改规则内容，保存后立即生效。</div></div>'
+    + '</div>',
+    '<button class="btn" onclick="closeModal()">取消</button>'
+    + '<button class="btn danger-ghost" onclick="deleteRule(\''+eh(ruleId)+'\')">删除</button>'
+    + '<button class="btn pri" onclick="saveRuleEdit(\''+eh(ruleId)+'\')">保存</button>', true);
+}
+function saveRuleEdit(ruleId) {
+  var cat = $('erCat') ? $('erCat').value : 'always';
+  var desc = $('erDesc') ? $('erDesc').value.trim() : '';
+  if (!desc) { toast('请填写规则内容'); return; }
+  // 删除旧规则后创建新规则
+  api({action:'delete_rule', rule_id:ruleId}).then(function(){
+    api({action:'add_rule', category:cat, description:desc}).then(function(r){
+      closeModal();
+      if (r.ok) { toast('规则已更新'); renderRulesList(); refreshNow(); }
+      else toast('更新失败: '+(r.error||''));
+    });
   });
 }
 
@@ -1310,93 +1858,231 @@ function renderMembersPage() {
   var gd = $('cardGrid');
   var node = nodeAtPath(_path);
   var h = stepIntroHtml(node);
-  h += '<div style="display:flex;justify-content:flex-end;margin-bottom:14px;gap:8px;flex-wrap:wrap">'
-     + '<button class="btn" onclick="renderAuditSection()"><ha-icon icon="mdi:clipboard-text-clock"></ha-icon> 查看审计</button>'
-     + '<button class="btn" onclick="renderWhitelistSection()"><ha-icon icon="mdi:shield-check"></ha-icon> 白名单</button>'
-     + '<button class="btn pri" onclick="openMemberModal()"><ha-icon icon="mdi:account-plus"></ha-icon> 添加成员</button></div>';
+  h += '<div class="toolbar" style="margin-bottom:10px">'
+     + '<div class="tb-search"><ha-icon icon="mdi:magnify"></ha-icon>'
+     + '<input id="memSearch" class="inp" placeholder="搜索通道、用户 ID、HA 用户或备注..." oninput="filterMemberList()" style="flex:1"></div>'
+     + '<div class="tb-actions">'
+     + '<span id="memStats" style="display:inline-flex;gap:6px;align-items:center;font-size:.8rem;color:var(--sec);margin-right:8px"></span>'
+     + '<button class="btn btn-pri btn-tip" title="添加新成员" onclick="openMemberModal()"><ha-icon icon="mdi:account-plus"></ha-icon> 添加成员</button>'
+     + '<button class="btn btn-tip" title="刷新成员列表" onclick="renderMemberList()"><ha-icon icon="mdi:refresh"></ha-icon> 刷新</button>'
+     + '</div></div>';
   h += '<div id="memApprovals"></div>';
+  h += '<div id="memWhitelist"></div>';
+  h += '<div id="memAudit"></div>';
   h += '<div id="memList"><div class="action-card" style="cursor:default;grid-column:1/-1"><div class="ac-ic"><ha-icon icon="mdi:loading"></ha-icon></div><div class="ac-tx"><div class="ac-t">加载中...</div></div></div></div>';
   gd.innerHTML = h;
-  renderApprovalsBlock();
+  // 直接展开显示审计、白名单、待确认
+  renderApprovalsBlock(true);
+  renderWhitelistInline(true);
+  renderAuditInline(true);
   renderMemberList();
+}
+function renderApprovalsBlock(autoOpen) {
+  var box = $('memApprovals'); if (!box) return;
+  api({action:'get_pending_approvals'}).then(function(d){
+    var entries = d.approvals || [];
+    if (!entries.length) return; // 空则不显示该区块
+    var h = '<div class="group-card open" style="margin-bottom:10px"><div class="gc-head" onclick="toggleGroupCard(this)">'
+      + '<div class="gc-ic"><ha-icon icon="mdi:lock-outline"></ha-icon></div>'
+      + '<div class="gc-tx"><div class="gc-t">待确认操作 <span class="pbadge RUNNING" style="margin-left:4px">'+entries.length+' 条</span></div>'
+      + '<div class="gc-d">R2 系统变更需人工确认</div></div>'
+      + '<ha-icon icon="mdi:chevron-down" class="gc-chev"></ha-icon>'
+      + '</div><div class="gc-body">';
+    entries.forEach(function(a){
+      h += '<div style="display:flex;align-items:center;gap:10px;padding:10px 0;border-bottom:1px solid var(--div)">'
+        + '<div style="flex:1;min-width:0"><div style="font-size:.86rem;font-weight:600;color:var(--txt)">'+eh(a.description||a.action||'未知操作')+'</div>'
+        + '<div style="font-size:.72rem;color:var(--sec)">'+eh(a.user||'-')+' · '+eh(a.area||'-')+' · '+timeAgo(a.created_at)+'</div></div>'
+        + '<button class="btn btn-pri btn-tip" title="批准执行" onclick="event.stopPropagation();approveApproval(\''+eh(a.id)+'\')"><ha-icon icon="mdi:check"></ha-icon> 批准</button>'
+        + '<button class="btn btn-tip danger-ghost" title="拒绝操作" onclick="event.stopPropagation();rejectApproval(\''+eh(a.id)+'\')"><ha-icon icon="mdi:close"></ha-icon> 拒绝</button>'
+        + '</div>';
+    });
+    h += '</div></div>';
+    box.innerHTML = h;
+  });
+}
+function renderWhitelistInline(autoOpen) {
+  var box = $('memWhitelist'); if (!box) return;
+  api({action:'get_whitelist'}).then(function(d){
+    var entries = d.whitelist || [];
+    if (!entries.length) return;
+    var h = '<div class="group-card open" style="margin-bottom:10px"><div class="gc-head" onclick="toggleGroupCard(this)">'
+      + '<div class="gc-ic"><ha-icon icon="mdi:shield-check"></ha-icon></div>'
+      + '<div class="gc-tx"><div class="gc-t">信任白名单 <span class="pbadge RUNNING" style="margin-left:4px">'+entries.length+' 条</span></div>'
+      + '<div class="gc-d">命中 user+action 直接 ALLOW，跳过 R2 确认</div></div>'
+      + '<ha-icon icon="mdi:chevron-down" class="gc-chev"></ha-icon>'
+      + '</div><div class="gc-body">';
+    h += '<div style="margin-bottom:8px"><button class="btn btn-pri btn-tip" title="添加白名单" onclick="openWhitelistModal()"><ha-icon icon="mdi:plus"></ha-icon> 添加白名单</button></div>';
+    entries.forEach(function(w){
+      h += '<div style="display:flex;align-items:center;gap:10px;padding:8px 0;border-bottom:1px solid var(--div)">'
+        + '<div style="flex:1;min-width:0"><div style="font-size:.86rem;color:var(--txt)">'+eh(w.user||'-')+' · '+eh(w.action||'-')+'</div>'
+        + '<div style="font-size:.72rem;color:var(--sec)">'+eh(w.note||'')+'</div></div>'
+        + '<button class="btn btn-tip danger-ghost" title="删除白名单" onclick="event.stopPropagation();removeWhitelist(\''+eh(w.id)+'\')"><ha-icon icon="mdi:delete"></ha-icon> 删除</button>'
+        + '</div>';
+    });
+    h += '</div></div>';
+    box.innerHTML = h;
+  });
+}
+function renderAuditInline(autoOpen) {
+  var box = $('memAudit'); if (!box) return;
+  api({action:'get_audit_trail'}).then(function(d){
+    var entries = (d.entries||[]).slice(-20).reverse();
+    if (!entries.length) return;
+    var h = '<div class="group-card open" style="margin-bottom:10px"><div class="gc-head" onclick="toggleGroupCard(this)">'
+      + '<div class="gc-ic"><ha-icon icon="mdi:clipboard-text-clock"></ha-icon></div>'
+      + '<div class="gc-tx"><div class="gc-t">审计日志 <span class="pbadge RUNNING" style="margin-left:4px">'+entries.length+' 条</span></div>'
+      + '<div class="gc-d">最近 20 条决策记录</div></div>'
+      + '<ha-icon icon="mdi:chevron-down" class="gc-chev"></ha-icon>'
+      + '</div><div class="gc-body" style="max-height:400px;overflow-y:auto">';
+    entries.forEach(function(e){
+      var icon = e.decision==='ALLOW'?'mdi:check-circle':(e.decision==='DENY'?'mdi:cancel':'mdi:alert');
+      var color = e.decision==='ALLOW'?'#4caf50':(e.decision==='DENY'?'#f44336':'#ff9800');
+      h += '<div style="display:flex;align-items:flex-start;gap:10px;padding:8px 0;border-bottom:1px solid var(--div)">'
+        + '<ha-icon icon="'+icon+'" style="color:'+color+';--mdc-icon-size:20px;flex-shrink:0"></ha-icon>'
+        + '<div style="flex:1;min-width:0"><div style="font-size:.82rem;color:var(--txt)">'+eh(e.user||'-')+' · '+eh(e.action||'-')+'</div>'
+        + '<div style="font-size:.72rem;color:var(--sec)">决策: <b style="color:'+color+'">'+eh(e.decision||'-')+'</b>'+(e.reason?' · '+eh(e.reason):'')+' · '+timeAgo(e.timestamp)+'</div></div>'
+        + '</div>';
+    });
+    h += '</div></div>';
+    box.innerHTML = h;
+  });
 }
 function renderMemberList() {
   var box = $('memList'); if (!box) return;
-  box.innerHTML = '<div class="action-card" style="cursor:default;grid-column:1/-1"><div class="ac-ic"><ha-icon icon="mdi:loading"></ha-icon></div><div class="ac-tx"><div class="ac-t">加载中...</div></div></div>';
+  box.innerHTML = '';
   api({action:'get_members'}).then(function(d){
     var ms = d.members || [];
-    // 搜索框
-    var searchHtml = '<div style="margin-bottom:12px;display:flex;gap:8px;align-items:center;grid-column:1/-1">'
-      + '<ha-icon icon="mdi:magnify" style="color:var(--sec)"></ha-icon>'
-      + '<input id="memSearch" class="inp" style="flex:1" placeholder="搜索通道、用户 ID、HA 用户或备注..." oninput="filterMemberList()">'
-      + '</div>';
-    if (!ms.length) { box.innerHTML = '<div class="action-card" style="cursor:default;grid-column:1/-1"><div class="ac-ic"><ha-icon icon="mdi:account-group"></ha-icon></div><div class="ac-tx"><div class="ac-t">暂无成员</div><div class="ac-d">点击右上角「添加成员」绑定 IM 身份到 HA 用户并设置角色。</div></div></div>'; return; }
+    // 更新紧凑统计
+    var statsEl = $('memStats');
+    if (statsEl) {
+      var ownerCount = 0, memberCount = 0;
+      ms.forEach(function(m){ if (m.role==='owner') ownerCount++; else memberCount++; });
+      statsEl.innerHTML = '<span>👥 '+ms.length+' 成员</span>'
+        + '<span style="color:#4caf50">👑 '+ownerCount+' Owner</span>'
+        + '<span style="color:#ff9800">👤 '+memberCount+' Member</span>';
+    }
+    if (!ms.length) {
+      box.innerHTML = emptyStateHtml(
+        'mdi:account-group',
+        '暂无成员',
+        '点击「添加成员」绑定 IM 身份到 HA 用户并设置角色。',
+        '添加成员',
+        'openMemberModal()'
+      );
+      return;
+    }
     window._memberData = ms;
-    var h = searchHtml + '<div class="group-grid" id="memGrid">';
+    var h = '<div class="group-grid" id="memGrid">';
     h += renderMemberCards(ms);
     h += '</div>';
     box.innerHTML = h;
+    filterMemberList();
   });
 }
 function renderMemberCards(ms) {
   var h = '';
+  ms = ms.slice().sort(function(a,b){ return (b.created_at||'').localeCompare(a.created_at||''); });
   ms.forEach(function(m){
     var roleMeta = memberRoleMeta(m.role);
     var areas = (m.allowed_areas||[]).join('、') || '全部区域';
-    var label = m.label ? '<div style="font-size:.78rem;color:var(--sec)">'+eh(m.label)+'</div>' : '';
-    var created = m.created_at ? '<div style="font-size:.72rem;color:var(--sec)">创建于 '+eh(m.created_at.slice(0,10))+'</div>' : '';
-    h += '<div class="group-card open" data-mem-key="'+eh((m.provider||'')+'|'+(m.ext_id||'')+'|'+(m.ha_user_id||'')+'|'+(m.label||''))+'"><div class="gc-head">'
+    var label = m.label ? '<div style="font-size:.78rem;color:var(--sec);margin-top:4px">备注: '+eh(m.label)+'</div>' : '';
+    var created = m.created_at ? '<div style="font-size:.72rem;color:var(--sec);margin-top:2px">创建于 '+timeAgo(m.created_at)+'</div>' : '';
+    h += '<div class="group-card open" data-mem-key="'+eh((m.provider||'')+'|'+(m.ext_id||'')+'|'+(m.ha_user_id||'')+'|'+(m.label||''))+'"><div class="gc-head" onclick="toggleGroupCard(this)">'
       + '<div class="gc-ic"><ha-icon icon="mdi:account-circle"></ha-icon></div>'
       + '<div class="gc-tx"><div class="gc-t">'+eh(m.ext_id||'?')+' <span style="color:var(--sec);font-weight:400;font-size:.76rem">'+(m.provider||'')+'</span>'
       + ' <span class="pbadge '+(m.role==='owner'?'RUNNING':'STOPPED')+'" style="margin-left:4px">'+roleMeta[1]+'</span></div>'
-      + '<div class="gc-d">HA 用户: '+eh(m.ha_user_id||'')+'<br>允许区域: '+eh(areas)+'</div>'
+      + '<div class="gc-d">HA 用户: '+eh(m.ha_user_name||m.ha_user_id||'')+' · 允许区域: '+eh(areas)+'</div>'
       + label + created + '</div>'
-      + '<div style="display:flex;gap:4px;flex-shrink:0;flex-wrap:wrap">'
-      + '<button class="btn" style="padding:4px 10px" title="人设" onclick="openPersonaModal(\''+eh(m.provider||'')+'\',\''+eh(m.ext_id||'')+'\',\''+eh(m.ha_user_id||'')+'\')"><ha-icon icon="mdi:account-edit"></ha-icon></button>'
-      + '<button class="btn" style="padding:4px 10px" onclick="openMemberModal(\''+eh(m.provider||'')+'\',\''+eh(m.ext_id||'')+'\',\''+eh(m.ha_user_id||'')+'\',\''+eh(m.role||'member')+'\',\''+eh((m.allowed_areas||[]).join(','))+'\',\''+eh(m.label||'')+'\')"><ha-icon icon="mdi:pencil"></ha-icon></button>'
-      + '<button class="btn danger-ghost" style="padding:4px 10px" onclick="removeMember(\''+eh(m.provider||'')+'\',\''+eh(m.ext_id||'')+'\',\''+eh(m.ha_user_id||'')+'\')"><ha-icon icon="mdi:delete"></ha-icon></button></div>'
-      + '</div></div>';
+      + '<ha-icon icon="mdi:chevron-down" class="gc-chev"></ha-icon>'
+      + '</div>'
+      + '<div class="gc-body"><div style="display:flex;gap:6px;flex-wrap:wrap;padding:12px 16px;border-top:1px solid var(--div)">'
+      + '<button class="btn btn-tip" title="管理该成员的人设信息" onclick="event.stopPropagation();openPersonaModal(\''+eh(m.provider||'')+'\',\''+eh(m.ext_id||'')+'\',\''+eh(m.ha_user_id||'')+'\')"><ha-icon icon="mdi:account-edit"></ha-icon> 人设</button>'
+      + '<button class="btn btn-tip" title="编辑成员角色、区域等信息" onclick="event.stopPropagation();openMemberModal(\''+eh(m.provider||'')+'\',\''+eh(m.ext_id||'')+'\',\''+eh(m.ha_user_id||'')+'\',\''+eh(m.role||'member')+'\',\''+eh((m.allowed_areas||[]).join(','))+'\',\''+eh(m.label||'')+'\')"><ha-icon icon="mdi:pencil"></ha-icon> 编辑</button>'
+      + '<button class="btn btn-tip danger-ghost" title="删除该成员（不可恢复）" onclick="event.stopPropagation();removeMember(\''+eh(m.provider||'')+'\',\''+eh(m.ext_id||'')+'\',\''+eh(m.ha_user_id||'')+'\')"><ha-icon icon="mdi:delete"></ha-icon> 删除</button>'
+      + '</div></div>'
+      + '</div>';
   });
   return h;
 }
+var _memSearchTimer = null;
 function filterMemberList() {
-  var q = ($('memSearch')||{}).value || '';
-  q = q.trim().toLowerCase();
-  var grid = $('memGrid');
-  if (!grid) return;
-  if (!q) {
-    grid.querySelectorAll('.group-card').forEach(function(c){ c.style.display=''; });
-    return;
-  }
-  grid.querySelectorAll('.group-card').forEach(function(c){
-    var key = c.getAttribute('data-mem-key') || '';
-    c.style.display = key.toLowerCase().indexOf(q) >= 0 ? '' : 'none';
-  });
+  if (_memSearchTimer) clearTimeout(_memSearchTimer);
+  _memSearchTimer = setTimeout(function(){
+    var q = ($('memSearch')||{}).value || '';
+    q = q.trim().toLowerCase();
+    var grid = $('memGrid');
+    if (!grid) return;
+    if (!q) {
+      grid.querySelectorAll('.group-card').forEach(function(c){ c.style.display=''; });
+      return;
+    }
+    grid.querySelectorAll('.group-card').forEach(function(c){
+      var key = c.getAttribute('data-mem-key') || '';
+      c.style.display = key.toLowerCase().indexOf(q) >= 0 ? '' : 'none';
+    });
+  }, 250);
 }
 function openPersonaModal(provider, extId, haUserId) {
   var userKey = haUserId || (provider + ':' + extId);
-  api({action:'get_mappings'}).then(function(){
-    // 尝试读取 persona（通过 workspace API 间接读取）
-    // persona_store 以 markdown 文件存储，没有专用面板 API
-    // 这里做一个轻量弹窗，提示用户 persona 的位置
+  api({action:'get_persona', user_key: userKey}).then(function(d){
+    if (!d.ok && d.error) { toast('读取失败: '+(d.error||'')); return; }
+    var p = d.persona || {};
     var body = '<div class="fields" style="border:none;box-shadow:none;padding:0">'
       + '<div class="hint" style="margin-bottom:10px">用户 Key: <code>'+eh(userKey)+'</code></div>'
-      + '<div class="hint">Persona（人设文件）存储在 <code>workspace/personas/</code> 目录下，以用户 Key 为文件名。</div>'
-      + '<div class="hint" style="margin-top:8px">可通过编辑 <code>USER.md</code> 工作文档或使用 AI 对话命令来管理该成员的人设信息。</div>'
-      + '<div class="hint" style="margin-top:8px;color:#FF9500">完整 persona 编辑功能即将上线，当前可先在「工作区文档 → USER」中设定全局用户信息。</div>'
+      + '<div class="field"><div class="field-label">名称 (Name)</div><input class="inp" id="pName" value="'+eh(p.Name||'')+'" placeholder="例如：张三"></div>'
+      + '<div class="field"><div class="field-label">角色 (Role)</div><input class="inp" id="pRole" value="'+eh(p.Role||'')+'" placeholder="例如：家人、室友"></div>'
+      + '<div class="field"><div class="field-label">语气 (Tone)</div><input class="inp" id="pType" value="'+eh(p.Tone||'')+'" placeholder="例如：亲切、随和"></div>'
+      + '<div class="field"><div class="field-label">称呼 (Call me)</div><input class="inp" id="pCall" value="'+eh(p['Call me']||'')+'" placeholder="AI 如何称呼你"></div>'
+      + '<div class="field"><div class="field-label">偏好 (Preferences)</div><textarea class="inp" id="pPref" rows="3" placeholder="一行一个偏好，例如：喜欢听音乐">'+eh(p.Preferences||'')+'</textarea></div>'
+      + '<div class="field"><div class="field-label">时区 (Time zone)</div><input class="inp" id="pTz" value="'+eh(p['Time zone']||'')+'" placeholder="例如：Asia/Shanghai"></div>'
+      + '<div class="field"><div class="field-label">语言 (Language)</div><input class="inp" id="pLang" value="'+eh(p.Language||'')+'" placeholder="例如：中文"></div>'
       + '</div>';
     openModal('人设管理 ｜ '+eh(extId||userKey.slice(0,16)), body,
-      '<button class="btn" onclick="closeModal()">关闭</button>'
-      + '<button class="btn pri" onclick="closeModal();_path=[\'workspace_editor\'];renderTabs();selectSub(\'ws_user\')">编辑 USER.md</button>', true);
+      '<button class="btn" onclick="closeModal()">取消</button>'
+      + '<button class="btn danger-ghost" onclick="deletePersona(\''+eh(userKey)+'\')"><ha-icon icon="mdi:delete"></ha-icon> 删除人设</button>'
+      + '<button class="btn pri" onclick="savePersona(\''+eh(userKey)+'\')">保存人设</button>', true);
   }).catch(function(){ toast('读取失败'); });
+}
+function savePersona(userKey) {
+  var data = {};
+  var v = function(id){ var el=$('p'+id); return el?el.value.trim():''; };
+  data['Name'] = v('Name');
+  data['Role'] = v('Role');
+  data['Tone'] = v('Type');
+  data['Call me'] = v('Call');
+  data['Preferences'] = v('Pref');
+  data['Time zone'] = v('Tz');
+  data['Language'] = v('Lang');
+  // 只保存有值的字段
+  var clean = {};
+  for (var k in data) { if (data[k]) clean[k] = data[k]; }
+  api({action:'set_persona', user_key: userKey, data: clean}).then(function(r){
+    closeModal();
+    if (r.ok) { toast('人设已保存'); } else toast('保存失败: '+(r.error||''));
+  }).catch(function(){ toast('保存失败'); });
+}
+function deletePersona(userKey) {
+  confirmDialog('删除人设', '确定删除该人设？此操作不可恢复。', function(){
+    api({action:'delete_persona', user_key: userKey}).then(function(r){
+      closeModal();
+      if (r.ok) { toast('人设已删除'); } else toast('删除失败: '+(r.error||''));
+    }).catch(function(){ toast('删除失败'); });
+  }, '删除', '取消');
 }
 function renderApprovalsBlock() {
   var box = $('memApprovals'); if (!box) return;
-  box.innerHTML = '<div class="group-card open"><div class="gc-head" onclick="this.parentElement.classList.toggle(\'open\')"><div class="gc-ic"><ha-icon icon="mdi:lock-outline"></ha-icon></div><div class="gc-tx"><div class="gc-t">待确认操作</div><div class="gc-d">R2 系统变更需人工确认后才能执行</div></div><ha-icon icon="mdi:chevron-down" class="gc-chev"></ha-icon></div><div class="gc-body" id="approvalBody"><div style="padding:10px;color:var(--sec)">加载中...</div></div></div>';
+  box.innerHTML = '<div class="group-card"><div class="gc-head" onclick="toggleGroupCard(this)"><div class="gc-ic"><ha-icon icon="mdi:lock-outline"></ha-icon></div><div class="gc-tx"><div class="gc-t">待确认操作 <span id="approvalBadge" style="color:var(--sec);font-weight:400;font-size:.76rem"></span></div><div class="gc-d">R2 系统变更需人工确认后才能执行</div></div><ha-icon icon="mdi:chevron-down" class="gc-chev"></ha-icon></div><div class="gc-body" id="approvalBody"><div style="padding:10px;color:var(--sec)">加载中...</div></div></div>';
   api({action:'get_approvals'}).then(function(d){
     var body = $('approvalBody'); if (!body) return;
     var pending = d.pending || [];
-    if (!pending.length) { body.innerHTML = '<div style="padding:10px;color:var(--sec)">当前没有待确认的操作。</div>'; return; }
+    var badge = $('approvalBadge');
+    if (badge) badge.textContent = pending.length ? '('+pending.length+')' : '';
+    var tbCount = $('approvalCount');
+    if (tbCount) tbCount.textContent = pending.length ? '待确认 ('+pending.length+')' : '待确认';
+    if (!pending.length) {
+      body.innerHTML = emptyStateHtml('mdi:lock-check-outline','当前没有待确认的操作','当 AI 执行高风险操作时会出现在此处等待审批。',null,null);
+      return;
+    }
     var h = '';
     pending.forEach(function(p){
       var t = p.tool || '';
@@ -1408,23 +2094,139 @@ function renderApprovalsBlock() {
         + '<div style="font-size:.72rem;color:var(--sec);word-break:break-all">'+eh(p.approval_id)+'</div>'
         + (params?'<div style="font-size:.74rem;color:var(--sec);word-break:break-all">'+eh(params)+'</div>':'')
         + '</div>'
-        + '<button class="btn pri" style="padding:5px 12px" onclick="resolveApproval(\''+eh(p.approval_id)+'\',true)">批准</button>'
-        + '<button class="btn danger-ghost" style="padding:5px 12px" onclick="resolveApproval(\''+eh(p.approval_id)+'\',false)">拒绝</button>'
+        + '<button class="btn btn-pri btn-tip" style="padding:5px 12px" title="批准执行" onclick="resolveApproval(\''+eh(p.approval_id)+'\',true)"><ha-icon icon="mdi:check"></ha-icon> 批准</button>'
+        + '<button class="btn btn-tip danger-ghost" style="padding:5px 12px" title="拒绝操作" onclick="resolveApproval(\''+eh(p.approval_id)+'\',false)"><ha-icon icon="mdi:close"></ha-icon> 拒绝</button>'
         + '</div>';
     });
     body.innerHTML = h;
   });
 }
 function resolveApproval(approvalId, approved) {
-  if (!approved && !confirm('确定拒绝该操作？')) return;
-  api({action:'resolve_approval', approval_id:approvalId, approved:approved, approver:'panel'}).then(function(r){
-    if (r.ok) { toast(approved ? '已批准，操作将执行' : '已拒绝'); renderApprovalsBlock(); }
+  if (!approved) {
+    confirmDialog(
+      '拒绝操作',
+      '确定拒绝该操作？',
+      function(){
+        api({action:'resolve_approval', approval_id:approvalId, approved:false, approver:'panel'}).then(function(r){
+          if (r.ok) { toast('已拒绝'); renderApprovalsBlock(); }
+          else toast('操作失败: '+(r.error||''));
+        });
+      },
+      '拒绝',
+      '取消'
+    );
+    return;
+  }
+  api({action:'resolve_approval', approval_id:approvalId, approved:true, approver:'panel'}).then(function(r){
+    if (r.ok) { toast('已批准，操作将执行'); renderApprovalsBlock(); }
     else toast('操作失败: '+(r.error||''));
   });
 }
+function renderWhitelistInline() {
+  var box = $('memWhitelist'); if (!box) return;
+  box.innerHTML = '<div class="group-card"><div class="gc-head" onclick="toggleGroupCard(this)"><div class="gc-ic"><ha-icon icon="mdi:shield-check"></ha-icon></div><div class="gc-tx"><div class="gc-t">信任白名单 <span id="wlInlineBadge" style="color:var(--sec);font-weight:400;font-size:.76rem"></span></div><div class="gc-d">user + action 命中即放行，跳过 R2 确认</div></div><ha-icon icon="mdi:chevron-down" class="gc-chev"></ha-icon></div><div class="gc-body" id="wlInlineBody"><div style="padding:10px;color:var(--sec)">加载中...</div></div></div>';
+  var body = $('wlInlineBody');
+  api({action:'list_whitelist'}).then(function(d){
+    var entries = d.entries || [];
+    var badge = $('wlInlineBadge');
+    if (badge) badge.textContent = entries.length ? '('+entries.length+')' : '';
+    var tbCount = $('wlCount');
+    if (tbCount) tbCount.textContent = entries.length ? '白名单 ('+entries.length+')' : '白名单';
+    if (!entries.length) {
+      body.innerHTML = emptyStateHtml('mdi:shield-check','暂无白名单','白名单命中的 user+action 将直接 ALLOW，跳过 R2 确认。','添加白名单','openWhitelistModal()');
+      return;
+    }
+    window._wlEntries = entries;
+    var h = '<div style="margin-bottom:8px"><button class="btn btn-pri btn-tip" title="添加白名单" onclick="openWhitelistModal()"><ha-icon icon="mdi:plus"></ha-icon> 添加白名单</button></div>';
+    h += '<div class="tb-search" style="margin-bottom:8px"><ha-icon icon="mdi:magnify"></ha-icon><input id="wlInlineSearch" class="inp" placeholder="搜索用户 key、工具或实体..." oninput="filterWhitelistInline()" style="flex:1"></div>';
+    h += '<div id="wlInlineList">';
+    entries.forEach(function(e){
+      var target = e.entity_id ? ('entity='+e.entity_id) : (e.area ? ('area='+e.area) : '*');
+      h += '<div style="display:flex;align-items:center;gap:10px;padding:8px 0;border-bottom:1px solid var(--div)" data-wl-inline-search="'+eh(e.user_key||'').toLowerCase()+' '+eh(e.action||'').toLowerCase()+' '+eh(target).toLowerCase()+'">'
+        + '<div style="flex:1;min-width:0"><div style="font-size:.82rem"><b>'+eh(e.user_key||'')+'</b> → <b>'+eh(e.action||'')+'</b> <span style="color:var(--sec)">'+eh(target)+'</span></div></div>'
+        + '<button class="btn btn-tip danger-ghost" style="padding:4px 10px" title="删除" onclick="removeWhitelistEntry(\''+eh(e.user_key||'')+'\',\''+eh(e.action||'')+'\',\''+eh(e.entity_id||'')+'\',\''+eh(e.area||'')+'\')"><ha-icon icon="mdi:delete"></ha-icon></button></div>';
+    });
+    h += '</div>';
+    body.innerHTML = h;
+    filterWhitelistInline();
+  });
+}
+var _wlInlineSearchTimer = null;
+function filterWhitelistInline() {
+  if (_wlInlineSearchTimer) clearTimeout(_wlInlineSearchTimer);
+  _wlInlineSearchTimer = setTimeout(function(){
+    var q = ($('wlInlineSearch')||{}).value || '';
+    q = q.trim().toLowerCase();
+    var list = $('wlInlineList'); if (!list) return;
+    if (!q) {
+      list.querySelectorAll('[data-wl-inline-search]').forEach(function(c){ c.style.display=''; });
+      return;
+    }
+    list.querySelectorAll('[data-wl-inline-search]').forEach(function(item){
+      var key = item.getAttribute('data-wl-inline-search') || '';
+      item.style.display = key.indexOf(q) >= 0 ? '' : 'none';
+    });
+  }, 250);
+}
+function renderAuditInline() {
+  var box = $('memAudit'); if (!box) return;
+  box.innerHTML = '<div class="group-card"><div class="gc-head" onclick="toggleGroupCard(this)"><div class="gc-ic"><ha-icon icon="mdi:clipboard-text-clock"></ha-icon></div><div class="gc-tx"><div class="gc-t">审计日志 <span id="auditInlineBadge" style="color:var(--sec);font-weight:400;font-size:.76rem"></span></div><div class="gc-d">最近策略决策记录（ALLOW / CONFIRM / DENY）</div></div><ha-icon icon="mdi:chevron-down" class="gc-chev"></ha-icon></div><div class="gc-body" id="auditInlineBody"><div style="padding:10px;color:var(--sec)">加载中...</div></div></div>';
+  var body = $('auditInlineBody');
+  api({action:'list_audit', limit:100}).then(function(d){
+    var entries = d.entries || [];
+    var badge = $('auditInlineBadge');
+    if (badge) badge.textContent = entries.length ? '('+entries.length+')' : '';
+    var tbCount = $('auditCount');
+    if (tbCount) tbCount.textContent = entries.length ? '审计 ('+entries.length+')' : '审计';
+    if (!entries.length) {
+      body.innerHTML = emptyStateHtml('mdi:clipboard-text-clock','暂无审计记录','所有策略决策（ALLOW/CONFIRM/DENY）都会记录在此。',null,null);
+      return;
+    }
+    window._auditEntries = entries;
+    var h = '<div style="margin-bottom:8px;display:flex;gap:8px;align-items:center">'
+      + '<div class="tb-search" style="flex:1"><ha-icon icon="mdi:magnify"></ha-icon><input id="auditInlineSearch" class="inp" placeholder="搜索工具名、用户或结果..." oninput="filterAuditInline()" style="flex:1"></div>'
+      + '<button class="btn btn-tip" title="刷新" onclick="renderAuditInline()"><ha-icon icon="mdi:refresh"></ha-icon> 刷新</button>'
+      + '</div>';
+    h += '<div id="auditInlineList">';
+    entries.forEach(function(e){
+      var ts = e.ts ? new Date(e.ts*1000).toLocaleString('zh-CN',{hour12:false}) : '';
+      var decision = e.decision || '';
+      var badge = decision==='ALLOW' ? 'RUNNING' : (decision==='DENY' ? 'FAILED' : 'STOPPED');
+      h += '<div style="display:flex;align-items:flex-start;gap:10px;padding:8px 0;border-bottom:1px solid var(--div)" data-audit-inline-search="'+eh(e.tool||'').toLowerCase()+' '+eh(e.user_key||'').toLowerCase()+' '+eh(e.result||'').toLowerCase()+'">'
+        + '<div style="flex:1;min-width:0"><div style="font-size:.82rem"><span class="pbadge '+badge+'">'+eh(decision)+'</span> <b>'+eh(e.tool||'')+'</b> <span style="color:var(--sec)">R'+(e.risk==null?1:e.risk)+'</span></div>'
+        + '<div style="font-size:.72rem;color:var(--sec);word-break:break-all">'+eh(ts)+' · '+eh(e.user_key||'-')+(e.entity_id?' · '+eh(e.entity_id):'')+(e.approver?' · '+eh(e.approver):'')+'</div></div>'
+        + '<span style="font-size:.72rem;color:var(--sec);flex-shrink:0">'+eh(e.result||'')+'</span></div>';
+    });
+    h += '</div>';
+    body.innerHTML = h;
+    filterAuditInline();
+  });
+}
+var _auditInlineSearchTimer = null;
+function filterAuditInline() {
+  if (_auditInlineSearchTimer) clearTimeout(_auditInlineSearchTimer);
+  _auditInlineSearchTimer = setTimeout(function(){
+    var q = ($('auditInlineSearch')||{}).value || '';
+    q = q.trim().toLowerCase();
+    var list = $('auditInlineList'); if (!list) return;
+    if (!q) {
+      list.querySelectorAll('[data-audit-inline-search]').forEach(function(c){ c.style.display=''; });
+      return;
+    }
+    list.querySelectorAll('[data-audit-inline-search]').forEach(function(item){
+      var key = item.getAttribute('data-audit-inline-search') || '';
+      item.style.display = key.indexOf(q) >= 0 ? '' : 'none';
+    });
+  }, 250);
+}
 function openMemberModal(provider, extId, haUserId, role, areas, label) {
-  api({action:'get_mapping_options'}).then(function(d){
-    var isEdit = !!extId;
+  var isEdit = !!extId;
+  // 并行加载 mapping_options 和 areas
+  Promise.all([
+    api({action:'get_mapping_options'}),
+    api({action:'get_areas'})
+  ]).then(function(res){
+    var d = res[0], areasData = res[1];
     var provOpts = '';
     if (d.provider_keys && d.provider_keys.length) {
       d.provider_keys.forEach(function(pk){
@@ -1440,15 +2242,36 @@ function openMemberModal(provider, extId, haUserId, role, areas, label) {
     (d.users||[]).forEach(function(u){ if (u.is_active) userOpts += '<option value="'+eh(u.id)+'"'+(u.id===haUserId?' selected':'')+'>'+eh(u.name)+'</option>'; });
     var roleOpts = '';
     MEMBER_ROLES.forEach(function(rr){ roleOpts += '<option value="'+rr[0]+'"'+(rr[0]===(role||'member')?' selected':'')+'>'+rr[1]+'</option>'; });
+    // 构建区域多选
+    var areaList = areasData.areas || [];
+    var selectedAreas = areas ? areas.split(',').map(function(s){return s.trim();}).filter(function(s){return s;}) : [];
+    var areaHtml = '';
+    if (areaList.length) {
+      areaHtml = '<div style="display:flex;flex-wrap:wrap;gap:6px;margin-top:4px" id="areaChips">';
+      areaList.forEach(function(a){
+        var checked = selectedAreas.indexOf(a.id) >= 0 || selectedAreas.indexOf(a.name) >= 0;
+        areaHtml += '<label style="display:inline-flex;align-items:center;gap:4px;padding:4px 10px;border-radius:8px;border:1px solid var(--div);cursor:pointer;font-size:.82rem;background:'+(checked?'color-mix(in srgb,var(--pri) 12%,transparent)':'var(--card)')+';color:var(--txt)" data-area-id="'+eh(a.id)+'" data-area-name="'+eh(a.name)+'" onclick="toggleAreaChip(this)">'
+          + '<input type="checkbox" style="display:none" '+(checked?'checked':'')+'>'
+          + eh(a.name)+'</label>';
+      });
+      areaHtml += '</div>';
+    } else {
+      areaHtml = '<div class="field-help" style="color:#FF9500">未在 HA 中配置区域，可直接输入区域 ID。</div>';
+    }
+    // 编辑模式：provider 和 ext_id 只读
+    var provField = isEdit
+      ? '<div class="field"><div class="field-label">通道平台</div><div style="padding:8px 0;font-size:.92rem;color:var(--txt)">'+eh(provider||'')+'</div><input type="hidden" id="mmProvider" value="'+eh(provider||'')+'"></div>'
+      : '<div class="field"><div class="field-label">通道平台</div><select class="sel" id="mmProvider">'+provOpts+'</select></div>';
+    var extField = isEdit
+      ? '<div class="field"><div class="field-label">外部用户 ID</div><div style="padding:8px 0;font-size:.92rem;color:var(--txt)">'+eh(extId||'')+'</div><input type="hidden" id="mmExtId" value="'+eh(extId||'')+'"></div>'
+      : '<div class="field"><div class="field-label">外部用户 ID</div><input class="inp" id="mmExtId" value="'+eh(extId||'')+'" placeholder="微信 openid / 飞书 open_id / 钉钉 userId"><div class="field-help">绑定后，该 IM 身份将按所选角色执行 AI 操作。</div></div>';
     var body = '<div class="fields" style="border:none;box-shadow:none;padding:0">'
-      + '<div class="field"><div class="field-label">通道平台</div><select class="sel" id="mmProvider">'+provOpts+'</select></div>'
-      + '<div class="field"><div class="field-label">外部用户 ID</div><input class="inp" id="mmExtId" value="'+eh(extId||'')+'" placeholder="微信 openid / 飞书 open_id / 钉钉 userId">'
-      + '<div class="field-help">绑定后，该 IM 身份将按所选角色执行 AI 操作。</div></div>'
+      + provField + extField
       + '<div class="field"><div class="field-label">关联 HA 用户</div><select class="sel" id="mmUser">'+userOpts+'</select></div>'
       + '<div class="field"><div class="field-label">角色</div><select class="sel" id="mmRole">'+roleOpts+'</select>'
       + '<div class="field-help">owner 无感放行全部操作；member 的 R2 需人工确认、R3 默认拒绝。</div></div>'
-      + '<div class="field"><div class="field-label">允许区域</div><input class="inp" id="mmAreas" value="'+eh(areas||'')+'" placeholder="逗号分隔，例如 living,bedroom；留空=全部">'
-      + '<div class="field-help">仅对 R0/R1 可逆控制生效；R2/R3 始终需要确认/拒绝。</div></div>'
+      + '<div class="field"><div class="field-label">允许区域</div>'+areaHtml
+      + '<div class="field-help">点击选择/取消区域。仅对 R0/R1 可逆控制生效；留空=全部区域。</div></div>'
       + '<div class="field"><div class="field-label">备注</div><input class="inp" id="mmLabel" value="'+eh(label||'')+'" placeholder="成员备注（可选）"></div>'
       + '</div>';
     openModal(isEdit ? '编辑成员' : '添加成员', body,
@@ -1456,12 +2279,29 @@ function openMemberModal(provider, extId, haUserId, role, areas, label) {
       + '<button class="btn pri" onclick="saveMember('+(isEdit?'true':'false')+')">'+(isEdit?'保存':'添加')+'</button>', true);
   }).catch(function(){ toast('读取选项失败'); });
 }
+function toggleAreaChip(el) {
+  var cb = el.querySelector('input[type=checkbox]');
+  if (cb) { cb.checked = !cb.checked; }
+  el.style.background = cb&&cb.checked ? 'color-mix(in srgb,var(--pri) 12%,transparent)' : 'var(--card)';
+}
 function saveMember(isEdit) {
   var provider = $('mmProvider').value;
   var extId = $('mmExtId').value.trim();
   var user = $('mmUser').value;
   var role = $('mmRole').value;
-  var areas = $('mmAreas').value.split(',').map(function(s){return s.trim();}).filter(function(s){return s;});
+  // 从区域 chip 选择器收集选中的区域 ID
+  var areas = [];
+  var chipContainer = $('areaChips');
+  if (chipContainer) {
+    var chips = chipContainer.querySelectorAll('label');
+    chips.forEach(function(chip){
+      var cb = chip.querySelector('input[type=checkbox]');
+      if (cb && cb.checked) {
+        var aid = chip.getAttribute('data-area-id') || '';
+        if (aid) areas.push(aid);
+      }
+    });
+  }
   var label = $('mmLabel').value.trim();
   if (!provider || !extId) { toast('请填写通道与外部用户 ID'); return; }
   if (!isEdit && !user) { toast('请选择 HA 用户'); return; }
@@ -1480,53 +2320,116 @@ function saveMember(isEdit) {
   }
 }
 function removeMember(provider, extId, haUserId) {
-  if (!confirm('确定删除该成员？删除后该 IM 身份按 shadow 成员（member）处理。')) return;
-  api({action:'remove_member', provider:provider, ext_id:extId, ha_user_id:haUserId}).then(function(r){
-    if (r.ok) { toast('成员已删除'); renderMemberList(); refreshNow(); }
-    else toast('删除失败: '+(r.error||''));
-  });
+  confirmDialog(
+    '删除成员',
+    '确定删除该成员？删除后该 IM 身份按 shadow 成员（member）处理。\n\n同时会一并删除该成员的人设文件。',
+    function(){
+      var userKey = haUserId || (provider + ':' + extId);
+      api({action:'remove_member', provider:provider, ext_id:extId, ha_user_id:haUserId}).then(function(r){
+        if (r.ok) {
+          api({action:'delete_persona', user_key: userKey});
+          toast('成员已删除');
+          renderMemberList();
+          refreshNow();
+        } else toast('删除失败: '+(r.error||''));
+      });
+    },
+    '删除',
+    '取消'
+  );
 }
 function renderAuditSection() {
   var gd = $('cardGrid');
   gd.innerHTML = '<div class="crumb"><a class="cr-link" onclick="renderMembersPage()">成员与权限</a> <ha-icon icon="mdi:chevron-right" class="cr-sep"></ha-icon> <span class="cr-cur">审计日志</span></div>'
+    + '<div class="toolbar">'
+    + '<div class="tb-search"><ha-icon icon="mdi:magnify" style="color:var(--sec)"></ha-icon>'
+    + '<input id="auditSearch" class="inp" placeholder="搜索工具名、用户或结果..." oninput="filterAuditList()" style="flex:1"></div>'
+    + '<div class="tb-actions"><button class="btn btn-tip" title="刷新" onclick="renderAuditSection()"><ha-icon icon="mdi:refresh"></ha-icon> 刷新</button></div></div>'
     + '<div class="group-grid" id="auditBox"><div class="action-card" style="cursor:default;grid-column:1/-1"><div class="ac-ic"><ha-icon icon="mdi:loading"></ha-icon></div><div class="ac-tx"><div class="ac-t">加载中...</div></div></div></div>';
   api({action:'list_audit', limit:100}).then(function(d){
     var box = $('auditBox'); if (!box) return;
     var entries = d.entries || [];
-    if (!entries.length) { box.innerHTML = '<div class="action-card" style="cursor:default;grid-column:1/-1"><div class="ac-tx"><div class="ac-t">暂无审计记录</div></div></div>'; return; }
-    var h = '<div class="group-card open"><div class="gc-head" onclick="this.parentElement.classList.toggle(\'open\')"><div class="gc-ic"><ha-icon icon="mdi:clipboard-text-clock"></ha-icon></div><div class="gc-tx"><div class="gc-t">最近 '+entries.length+' 条审计</div><div class="gc-d">append-only JSONL，含全部策略决策</div></div><ha-icon icon="mdi:chevron-down" class="gc-chev"></ha-icon></div><div class="gc-body">';
+    if (!entries.length) {
+      box.innerHTML = emptyStateHtml('mdi:clipboard-text-clock','暂无审计记录','所有策略决策（ALLOW/CONFIRM/DENY）都会记录在此。','刷新','renderAuditSection()');
+      return;
+    }
+    window._auditEntries = entries;
+    var h = '<div class="group-card"><div class="gc-head" onclick="toggleGroupCard(this)"><div class="gc-ic"><ha-icon icon="mdi:clipboard-text-clock"></ha-icon></div><div class="gc-tx"><div class="gc-t">最近 '+entries.length+' 条审计</div><div class="gc-d">append-only JSONL，含全部策略决策</div></div><ha-icon icon="mdi:chevron-down" class="gc-chev"></ha-icon></div><div class="gc-body">';
     entries.forEach(function(e){
       var ts = e.ts ? new Date(e.ts*1000).toLocaleString('zh-CN',{hour12:false}) : '';
       var decision = e.decision || '';
       var badge = decision==='ALLOW' ? 'RUNNING' : (decision==='DENY' ? 'FAILED' : 'STOPPED');
-      h += '<div style="display:flex;align-items:flex-start;gap:10px;padding:8px 0;border-bottom:1px solid var(--div)">'
+      h += '<div style="display:flex;align-items:flex-start;gap:10px;padding:8px 0;border-bottom:1px solid var(--div)" data-audit-search="'+eh(e.tool||'').toLowerCase()+' '+eh(e.user_key||'').toLowerCase()+' '+eh(e.result||'').toLowerCase()+'">'
         + '<div style="flex:1;min-width:0"><div style="font-size:.82rem"><span class="pbadge '+badge+'">'+eh(decision)+'</span> <b>'+eh(e.tool||'')+'</b> <span style="color:var(--sec)">R'+(e.risk==null?1:e.risk)+'</span></div>'
         + '<div style="font-size:.72rem;color:var(--sec);word-break:break-all">'+eh(ts)+' · '+eh(e.user_key||'-')+(e.entity_id?' · '+eh(e.entity_id):'')+(e.approver?' · '+eh(e.approver):'')+'</div></div>'
         + '<span style="font-size:.72rem;color:var(--sec);flex-shrink:0">'+eh(e.result||'')+'</span></div>';
     });
     h += '</div></div>';
     box.innerHTML = h;
+    filterAuditList();
   });
+}
+var _auditSearchTimer = null;
+function filterAuditList() {
+  if (_auditSearchTimer) clearTimeout(_auditSearchTimer);
+  _auditSearchTimer = setTimeout(function(){
+    var q = ($('auditSearch')||{}).value || '';
+    q = q.trim().toLowerCase();
+    var box = $('auditBox'); if (!box) return;
+    if (!q) {
+      box.querySelectorAll('[data-audit-search]').forEach(function(c){ c.style.display=''; });
+      return;
+    }
+    box.querySelectorAll('[data-audit-search]').forEach(function(item){
+      var key = item.getAttribute('data-audit-search') || '';
+      item.style.display = key.indexOf(q) >= 0 ? '' : 'none';
+    });
+  }, 250);
 }
 function renderWhitelistSection() {
   var gd = $('cardGrid');
   gd.innerHTML = '<div class="crumb"><a class="cr-link" onclick="renderMembersPage()">成员与权限</a> <ha-icon icon="mdi:chevron-right" class="cr-sep"></ha-icon> <span class="cr-cur">信任白名单</span></div>'
-    + '<div style="display:flex;justify-content:flex-end;margin-bottom:14px"><button class="btn pri" onclick="openWhitelistModal()"><ha-icon icon="mdi:plus"></ha-icon> 添加白名单</button></div>'
+    + '<div class="toolbar">'
+    + '<div class="tb-search"><ha-icon icon="mdi:magnify" style="color:var(--sec)"></ha-icon>'
+    + '<input id="wlSearch" class="inp" placeholder="搜索用户 key、工具或实体..." oninput="filterWhitelist()" style="flex:1"></div>'
+    + '<div class="tb-actions"><button class="btn btn-pri btn-tip" title="添加白名单" onclick="openWhitelistModal()"><ha-icon icon="mdi:plus"></ha-icon> 添加白名单</button></div></div>'
     + '<div class="group-grid" id="wlBox"><div class="action-card" style="cursor:default;grid-column:1/-1"><div class="ac-ic"><ha-icon icon="mdi:loading"></ha-icon></div><div class="ac-tx"><div class="ac-t">加载中...</div></div></div></div>';
   api({action:'list_whitelist'}).then(function(d){
     var box = $('wlBox'); if (!box) return;
     var entries = d.entries || [];
-    if (!entries.length) { box.innerHTML = '<div class="action-card" style="cursor:default;grid-column:1/-1"><div class="ac-ic"><ha-icon icon="mdi:shield-check"></ha-icon></div><div class="ac-tx"><div class="ac-t">暂无白名单</div><div class="ac-d">白名单命中的 user+action 将直接 ALLOW，跳过 R2 确认。</div></div></div>'; return; }
-    var h = '<div class="group-card open"><div class="gc-head" onclick="this.parentElement.classList.toggle(\'open\')"><div class="gc-ic"><ha-icon icon="mdi:shield-check"></ha-icon></div><div class="gc-tx"><div class="gc-t">白名单（'+entries.length+' 条）</div><div class="gc-d">user + action 命中即放行</div></div><ha-icon icon="mdi:chevron-down" class="gc-chev"></ha-icon></div><div class="gc-body">';
+    if (!entries.length) {
+      box.innerHTML = emptyStateHtml('mdi:shield-check','暂无白名单','白名单命中的 user+action 将直接 ALLOW，跳过 R2 确认。','添加白名单','openWhitelistModal()');
+      return;
+    }
+    window._wlEntries = entries;
+    var h = '<div class="group-card"><div class="gc-head" onclick="toggleGroupCard(this)"><div class="gc-ic"><ha-icon icon="mdi:shield-check"></ha-icon></div><div class="gc-tx"><div class="gc-t">白名单（'+entries.length+' 条）</div><div class="gc-d">user + action 命中即放行</div></div><ha-icon icon="mdi:chevron-down" class="gc-chev"></ha-icon></div><div class="gc-body">';
     entries.forEach(function(e){
       var target = e.entity_id ? ('entity='+e.entity_id) : (e.area ? ('area='+e.area) : '*');
-      h += '<div style="display:flex;align-items:center;gap:10px;padding:8px 0;border-bottom:1px solid var(--div)">'
+      h += '<div style="display:flex;align-items:center;gap:10px;padding:8px 0;border-bottom:1px solid var(--div)" data-wl-search="'+eh(e.user_key||'').toLowerCase()+' '+eh(e.action||'').toLowerCase()+' '+eh(target).toLowerCase()+'">'
         + '<div style="flex:1;min-width:0"><div style="font-size:.82rem"><b>'+eh(e.user_key||'')+'</b> → <b>'+eh(e.action||'')+'</b> <span style="color:var(--sec)">'+eh(target)+'</span></div></div>'
-        + '<button class="btn danger-ghost" style="padding:4px 10px" onclick="removeWhitelistEntry(\''+eh(e.user_key||'')+'\',\''+eh(e.action||'')+'\',\''+eh(e.entity_id||'')+'\',\''+eh(e.area||'')+'\')"><ha-icon icon="mdi:delete"></ha-icon></button></div>';
+        + '<button class="btn btn-tip danger-ghost" style="padding:4px 10px" title="删除" onclick="removeWhitelistEntry(\''+eh(e.user_key||'')+'\',\''+eh(e.action||'')+'\',\''+eh(e.entity_id||'')+'\',\''+eh(e.area||'')+'\')"><ha-icon icon="mdi:delete"></ha-icon></button></div>';
     });
     h += '</div></div>';
     box.innerHTML = h;
+    filterWhitelist();
   });
+}
+var _wlSearchTimer = null;
+function filterWhitelist() {
+  if (_wlSearchTimer) clearTimeout(_wlSearchTimer);
+  _wlSearchTimer = setTimeout(function(){
+    var q = ($('wlSearch')||{}).value || '';
+    q = q.trim().toLowerCase();
+    var box = $('wlBox'); if (!box) return;
+    if (!q) {
+      box.querySelectorAll('[data-wl-search]').forEach(function(c){ c.style.display=''; });
+      return;
+    }
+    box.querySelectorAll('[data-wl-search]').forEach(function(item){
+      var key = item.getAttribute('data-wl-search') || '';
+      item.style.display = key.indexOf(q) >= 0 ? '' : 'none';
+    });
+  }, 250);
 }
 function openWhitelistModal() {
   var body = '<div class="fields" style="border:none;box-shadow:none;padding:0">'
@@ -1544,14 +2447,21 @@ function saveWhitelistEntry() {
   if (!user || !action) { toast('请填写用户 key 与工具名'); return; }
   api({action:'add_whitelist', user_key:user, action:action, entity_id:$('wlEntity').value.trim(), area:$('wlArea').value.trim()}).then(function(r){
     closeModal();
-    if (r.ok) { toast('白名单已添加'); renderWhitelistSection(); } else toast('添加失败: '+(r.error||''));
+    if (r.ok) { toast('白名单已添加'); renderWhitelistInline(); } else toast('添加失败: '+(r.error||''));
   });
 }
 function removeWhitelistEntry(user, action, entityId, area) {
-  if (!confirm('确定删除该白名单条目？')) return;
-  api({action:'remove_whitelist', user_key:user, action:action, entity_id:entityId, area:area}).then(function(r){
-    if (r.ok) { toast('白名单已删除'); renderWhitelistSection(); } else toast('删除失败: '+(r.error||''));
-  });
+  confirmDialog(
+    '删除白名单',
+    '确定删除该白名单条目？此操作不可恢复。',
+    function(){
+      api({action:'remove_whitelist', user_key:user, action:action, entity_id:entityId, area:area}).then(function(r){
+        if (r.ok) { toast('白名单已删除'); renderWhitelistInline(); } else toast('删除失败: '+(r.error||''));
+      });
+    },
+    '删除',
+    '取消'
+  );
 }
 
 // ── 定时任务（G2）──
@@ -1559,36 +2469,88 @@ function renderScheduledTasksPage() {
   var gd = $('cardGrid');
   var node = nodeAtPath(_path);
   var h = stepIntroHtml(node);
-  h += '<div style="display:flex;justify-content:flex-end;margin-bottom:14px;gap:8px;flex-wrap:wrap">'
-     + '<button class="btn pri" onclick="openNewTaskModal()"><ha-icon icon="mdi:plus"></ha-icon> 新建任务</button></div>';
+  h += '<div class="toolbar">'
+     + '<div class="tb-search"><ha-icon icon="mdi:magnify" style="color:var(--sec)"></ha-icon>'
+     + '<input id="taskSearch" class="inp" placeholder="搜索任务标题或周期..." oninput="filterTaskList()" style="flex:1"></div>'
+     + '<div class="tb-actions">'
+     + '<span id="taskStats" style="display:inline-flex;gap:6px;align-items:center;font-size:.8rem;color:var(--sec);margin-right:8px"></span>'
+     + '<button class="btn btn-pri btn-tip" title="新建定时任务" onclick="openNewTaskModal()"><ha-icon icon="mdi:plus"></ha-icon> 新建任务</button>'
+     + '<button class="btn btn-tip" title="刷新任务列表" onclick="renderTaskList()"><ha-icon icon="mdi:refresh"></ha-icon> 刷新</button>'
+     + '</div></div>';
   h += '<div id="taskList"><div class="action-card" style="cursor:default;grid-column:1/-1"><div class="ac-ic"><ha-icon icon="mdi:loading"></ha-icon></div><div class="ac-tx"><div class="ac-t">加载中...</div></div></div></div>';
   gd.innerHTML = h;
   renderTaskList();
 }
 function renderTaskList() {
   var box = $('taskList'); if (!box) return;
-  box.innerHTML = '<div class="action-card" style="cursor:default;grid-column:1/-1"><div class="ac-ic"><ha-icon icon="mdi:loading"></ha-icon></div><div class="ac-tx"><div class="ac-t">加载中...</div></div></div>';
+  box.innerHTML = '';
   api({action:'get_tasks'}).then(function(d){
     var tasks = d.tasks || [];
-    if (!tasks.length) { box.innerHTML = '<div class="action-card" style="cursor:default;grid-column:1/-1"><div class="ac-ic"><ha-icon icon="mdi:calendar-clock"></ha-icon></div><div class="ac-tx"><div class="ac-t">暂无定时任务</div><div class="ac-d">点击右上角「新建任务」创建第一条自动跟进任务。任务会由心跳 Ticker 按周期自动执行。</div></div></div>'; return; }
-    var h = '<div class="group-grid">';
-    tasks.forEach(function(t){
-      var statusBadge = t.enabled ? '<span class="pbadge RUNNING">运行中</span>' : '<span class="pbadge STOPPED">已暂停</span>';
-      var lastAt = t.last_checked_at ? new Date(t.last_checked_at).toLocaleString('zh-CN',{hour12:false}) : '从未';
-      var lastStatus = t.last_status || '-';
-      h += '<div class="group-card open"><div class="gc-head">'
-        + '<div class="gc-ic"><ha-icon icon="mdi:calendar-clock"></ha-icon></div>'
-        + '<div class="gc-tx"><div class="gc-t">'+eh(t.title||t.slug)+' '+statusBadge+'</div>'
-        + '<div class="gc-d">'+eh(t.schedule||'未设置周期')+' · 运行 '+eh(t.run_count||0)+' 次<br>上次执行: '+eh(lastAt)+' · '+eh(lastStatus)+'</div></div>'
-        + '<div style="display:flex;gap:4px;flex-shrink:0">'
-        + '<button class="btn" style="padding:4px 10px" title="立即运行" onclick="runTaskNow(\''+eh(t.slug)+'\')"><ha-icon icon="mdi:play"></ha-icon></button>'
-        + '<button class="btn" style="padding:4px 10px" title="'+(t.enabled?'暂停':'恢复')+'" onclick="toggleTaskEnabled(\''+eh(t.slug)+'\','+(t.enabled?'false':'true')+')"><ha-icon icon="'+(t.enabled?'mdi:pause':'mdi:play-circle-outline')+'"></ha-icon></button>'
-        + '<button class="btn danger-ghost" style="padding:4px 10px" title="删除任务" onclick="deleteTask(\''+eh(t.slug)+'\')"><ha-icon icon="mdi:delete"></ha-icon></button>'
-        + '</div></div></div>';
-    });
+    var statsEl = $('taskStats');
+    if (statsEl) {
+      var enabledCount = 0, totalRuns = 0;
+      tasks.forEach(function(t){ if (t.enabled) enabledCount++; totalRuns += (t.run_count||0); });
+      statsEl.innerHTML = '<span>📋 '+tasks.length+' 任务</span>'
+        + '<span style="color:#4caf50">▶ '+enabledCount+' 运行中</span>'
+        + '<span style="color:#ff9800">⏸ '+(tasks.length-enabledCount)+' 已暂停</span>';
+    }
+    if (!tasks.length) {
+      box.innerHTML = emptyStateHtml(
+        'mdi:calendar-clock',
+        '暂无定时任务',
+        '点击「新建任务」创建第一条自动跟进任务。',
+        '新建任务',
+        'openNewTaskModal()'
+      );
+      return;
+    }
+    window._taskData = tasks;
+    var h = '<div class="group-grid" id="taskGrid">';
+    h += renderTaskCards(tasks);
     h += '</div>';
     box.innerHTML = h;
+    filterTaskList();
   });
+}
+function renderTaskCards(tasks) {
+  var h = '';
+  tasks.forEach(function(t){
+    var statusBadge = t.enabled ? '<span class="pbadge RUNNING">运行中</span>' : '<span class="pbadge STOPPED">已暂停</span>';
+    var lastAt = t.last_checked_at ? timeAgo(t.last_checked_at) : '从未';
+    var lastStatus = t.last_status || '-';
+    var scheduleDisplay = t.schedule || '未设置周期';
+    h += '<div class="group-card open" data-task-key="'+eh(t.title||t.slug)+' '+eh(scheduleDisplay)+'"><div class="gc-head" onclick="toggleGroupCard(this)">'
+      + '<div class="gc-ic"><ha-icon icon="mdi:calendar-clock"></ha-icon></div>'
+      + '<div class="gc-tx"><div class="gc-t">'+eh(t.title||t.slug)+' '+statusBadge+'</div>'
+      + '<div class="gc-d">'+eh(scheduleDisplay)+' · 运行 '+eh(t.run_count||0)+' 次 · 上次: '+eh(lastAt)+'</div></div>'
+      + '<ha-icon icon="mdi:chevron-down" class="gc-chev"></ha-icon>'
+      + '</div>'
+      + '<div class="gc-body"><div style="display:flex;gap:6px;flex-wrap:wrap;padding:12px 16px;border-top:1px solid var(--div)">'
+      + '<button class="btn btn-tip" title="立即运行" onclick="event.stopPropagation();runTaskNow(\''+eh(t.slug)+'\')"><ha-icon icon="mdi:play"></ha-icon> 立即运行</button>'
+      + '<button class="btn btn-tip" title="'+(t.enabled?'暂停':'恢复')+'" onclick="event.stopPropagation();toggleTaskEnabled(\''+eh(t.slug)+'\','+(t.enabled?'false':'true')+')"><ha-icon icon="'+(t.enabled?'mdi:pause':'mdi:play-circle-outline')+'"></ha-icon> '+(t.enabled?'暂停':'恢复')+'</button>'
+      + '<button class="btn btn-tip danger-ghost" title="删除" onclick="event.stopPropagation();deleteTask(\''+eh(t.slug)+'\')"><ha-icon icon="mdi:delete"></ha-icon> 删除</button>'
+      + '</div></div>'
+      + '</div>';
+  });
+  return h;
+}
+var _taskSearchTimer = null;
+function filterTaskList() {
+  if (_taskSearchTimer) clearTimeout(_taskSearchTimer);
+  _taskSearchTimer = setTimeout(function(){
+    var q = ($('taskSearch')||{}).value || '';
+    q = q.trim().toLowerCase();
+    var grid = $('taskGrid');
+    if (!grid) return;
+    if (!q) {
+      grid.querySelectorAll('.group-card').forEach(function(c){ c.style.display=''; });
+      return;
+    }
+    grid.querySelectorAll('.group-card').forEach(function(c){
+      var key = c.getAttribute('data-task-key') || '';
+      c.style.display = key.toLowerCase().indexOf(q) >= 0 ? '' : 'none';
+    });
+  }, 250);
 }
 function toggleTaskEnabled(slug, enabled) {
   api({action:'set_task_enabled', slug:slug, enabled:enabled}).then(function(r){
@@ -1597,24 +2559,40 @@ function toggleTaskEnabled(slug, enabled) {
   });
 }
 function runTaskNow(slug) {
-  if (!confirm('立即运行该任务？')) return;
-  api({action:'run_task_now', slug:slug}).then(function(r){
-    if (r.ok) { toast('已触发立即运行'); renderTaskList(); }
-    else toast('触发失败: '+(r.error||''));
-  });
+  confirmDialog(
+    '立即运行',
+    '确定立即运行该任务？',
+    function(){
+      api({action:'run_task_now', slug:slug}).then(function(r){
+        if (r.ok) { toast('已触发立即运行'); renderTaskList(); }
+        else toast('触发失败: '+(r.error||''));
+      });
+    },
+    '运行',
+    '取消'
+  );
 }
 function deleteTask(slug) {
-  if (!confirm('确定删除任务「'+slug+'」？此操作不可恢复。')) return;
-  api({action:'delete_task', slug:slug}).then(function(r){
-    if (r.ok) { toast('任务已删除'); renderTaskList(); }
-    else toast('删除失败: '+(r.error||''));
-  });
+  confirmDialog(
+    '删除任务',
+    '确定删除任务「'+slug+'」？此操作不可恢复。',
+    function(){
+      api({action:'delete_task', slug:slug}).then(function(r){
+        if (r.ok) { toast('任务已删除'); renderTaskList(); }
+        else toast('删除失败: '+(r.error||''));
+      });
+    },
+    '删除',
+    '取消'
+  );
 }
 function openNewTaskModal() {
   openModal('新建定时任务',
     '<div class="fields" style="border:none;box-shadow:none;padding:0">'
     + '<div class="field"><div class="field-label">任务标题</div><input class="inp" id="ntTitle" placeholder="例如：每晚提醒我关客厅灯">'
     + '<div class="field-help">描述要自动跟进的事情。</div></div>'
+    + '<div class="field"><div class="field-label">操作内容</div><textarea class="inp" id="ntObjective" rows="3" placeholder="详细描述 AI 要执行的操作，例如：检查客厅灯是否开启，如果开启则关闭"></textarea>'
+    + '<div class="field-help">告诉 AI 具体要做什么，留空则使用任务标题。</div></div>'
     + '<div class="field"><div class="field-label">周期</div><input class="inp" id="ntSchedule" placeholder="例如：每天 22:00 / every 2h / 30 */2 * * *">'
     + '<div class="field-help">支持「每天 HH:MM」「every 30m」或 5 段 cron 表达式，留空表示尽快执行一次。</div></div>'
     + '</div>',
@@ -1622,9 +2600,10 @@ function openNewTaskModal() {
 }
 function createTask() {
   var title = $('ntTitle') ? $('ntTitle').value.trim() : '';
+  var objective = $('ntObjective') ? $('ntObjective').value.trim() : '';
   var schedule = $('ntSchedule') ? $('ntSchedule').value.trim() : '';
   if (!title) { toast('请填写任务标题'); return; }
-  api({action:'create_task', title:title, schedule:schedule}).then(function(r){
+  api({action:'create_task', title:title, objective:objective, schedule:schedule}).then(function(r){
     closeModal();
     if (r.ok) { toast('任务已创建'); renderTaskList(); refreshNow(); }
     else toast('创建失败: '+(r.error||''));
@@ -1636,8 +2615,13 @@ function renderLearningPage() {
   var gd = $('cardGrid');
   var node = nodeAtPath(_path);
   var h = stepIntroHtml(node);
-  h += '<div id="learnPending"><div class="group-card open"><div class="gc-head" onclick="this.parentElement.classList.toggle(\'open\')"><div class="gc-ic"><ha-icon icon="mdi:lightbulb-on-outline"></ha-icon></div><div class="gc-tx"><div class="gc-t">待确认规律</div><div class="gc-d">AI 观察到的重复行为候选，确认后写入长期记忆</div></div><ha-icon icon="mdi:chevron-down" class="gc-chev"></ha-icon></div><div class="gc-body" id="learnPendingBody"><div style="padding:10px;color:var(--sec)">加载中...</div></div></div></div>';
-  h += '<div id="learnLearned"><div class="group-card open"><div class="gc-head" onclick="this.parentElement.classList.toggle(\'open\')"><div class="gc-ic"><ha-icon icon="mdi:book-check-outline"></ha-icon></div><div class="gc-tx"><div class="gc-t">已学习</div><div class="gc-d">已确认写入长期记忆的规律</div></div><ha-icon icon="mdi:chevron-down" class="gc-chev"></ha-icon></div><div class="gc-body" id="learnLearnedBody"><div style="padding:10px;color:var(--sec)">加载中...</div></div></div></div>';
+  h += '<div class="toolbar">'
+     + '<div class="tb-actions">'
+     + '<span id="learnStats" style="display:inline-flex;gap:6px;align-items:center;font-size:.8rem;color:var(--sec);margin-right:8px"></span>'
+     + '<button class="btn btn-tip" title="刷新学习数据" onclick="renderLearningPending();renderLearningLearned()"><ha-icon icon="mdi:refresh"></ha-icon> 刷新</button>'
+     + '</div></div>';
+  h += '<div id="learnPending"><div class="group-card open"><div class="gc-head" onclick="toggleGroupCard(this)"><div class="gc-ic"><ha-icon icon="mdi:lightbulb-on-outline"></ha-icon></div><div class="gc-tx"><div class="gc-t">待确认规律</div><div class="gc-d">AI 观察到的重复行为候选，确认后写入长期记忆</div></div><ha-icon icon="mdi:chevron-down" class="gc-chev"></ha-icon></div><div class="gc-body" id="learnPendingBody"><div style="padding:10px;color:var(--sec)">加载中...</div></div></div></div>';
+  h += '<div id="learnLearned"><div class="group-card open"><div class="gc-head" onclick="toggleGroupCard(this)"><div class="gc-ic"><ha-icon icon="mdi:book-check-outline"></ha-icon></div><div class="gc-tx"><div class="gc-t">已学习</div><div class="gc-d">已确认写入长期记忆的规律</div></div><ha-icon icon="mdi:chevron-down" class="gc-chev"></ha-icon></div><div class="gc-body" id="learnLearnedBody"><div style="padding:10px;color:var(--sec)">加载中...</div></div></div></div>';
   gd.innerHTML = h;
   renderLearningPending();
   renderLearningLearned();
@@ -1647,7 +2631,20 @@ function renderLearningPending() {
   body.innerHTML = '<div style="padding:10px;color:var(--sec)">加载中...</div>';
   api({action:'get_pending_insights'}).then(function(d){
     var pending = d.pending || [];
-    if (!pending.length) { body.innerHTML = '<div style="padding:10px;color:var(--sec)">当前没有待确认的规律候选。日常对话中的重复提醒会自动生成候选。</div>'; return; }
+    var statsEl = $('learnStats');
+    if (statsEl) {
+      statsEl.innerHTML = '<span>💡 '+pending.length+' 待确认</span>'
+        + '<span id="learnLearnedCount" style="color:#4caf50">📖 -- 已学习</span>';
+    }
+    if (!pending.length) {
+      body.innerHTML = emptyStateHtml(
+        'mdi:lightbulb-on-outline',
+        '暂无待确认规律',
+        '日常对话中的重复提醒会自动生成候选，确认后可写入长期记忆。',
+        null, null
+      );
+      return;
+    }
     var h = '';
     pending.forEach(function(p){
       var cat = p.category || 'routine';
@@ -1656,10 +2653,11 @@ function renderLearningPending() {
       h += '<div style="display:flex;align-items:center;gap:10px;padding:10px 0;border-bottom:1px solid var(--div)">'
         + '<div style="flex:1;min-width:0"><div style="font-size:.86rem;font-weight:600">💡 '+eh(p.pattern)+' <span class="pbadge RUNNING" style="margin-left:4px">'+catLabel+'</span></div>'
         + '<div style="font-size:.72rem;color:var(--sec)">置信度 '+eh(conf)+' · 来源 '+eh(p.source||'-')+' · '+eh(p.id)+'</div></div>'
-        + '<button class="btn pri" style="padding:5px 12px" onclick="confirmInsight(\''+eh(p.id)+'\')">确认</button>'
-        + '<button class="btn" style="padding:5px 12px" onclick="dismissInsight(\''+eh(p.id)+'\')">忽略</button>'
-        + '<button class="btn danger-ghost" style="padding:5px 12px" onclick="blockInsight(\''+eh(p.id)+'\')">不再提示</button>'
-        + '</div>';
+        + '<div class="card-actions">'
+        + '<button class="btn btn-pri btn-tip" title="确认写入长期记忆" onclick="event.stopPropagation();confirmInsight(\''+eh(p.id)+'\')">确认</button>'
+        + '<button class="btn btn-tip" title="忽略此条" onclick="event.stopPropagation();dismissInsight(\''+eh(p.id)+'\')">忽略</button>'
+        + '<button class="btn btn-tip danger-ghost" title="不再提示" onclick="event.stopPropagation();blockInsight(\''+eh(p.id)+'\')">不再提示</button>'
+        + '</div></div>';
     });
     body.innerHTML = h;
   });
@@ -1669,7 +2667,19 @@ function renderLearningLearned() {
   body.innerHTML = '<div style="padding:10px;color:var(--sec)">加载中...</div>';
   api({action:'list_learned'}).then(function(d){
     var learned = d.learned || [];
-    if (!learned.length) { body.innerHTML = '<div style="padding:10px;color:var(--sec)">还没有确认过的规律。</div>'; return; }
+    var countEl = $('learnLearnedCount');
+    if (countEl) {
+      countEl.innerHTML = '<span style="color:#4caf50">📖 '+learned.length+' 已学习</span>';
+    }
+    if (!learned.length) {
+      body.innerHTML = emptyStateHtml(
+        'mdi:book-check-outline',
+        '还没有确认过的规律',
+        '确认「待确认规律」中的候选后，会出现在这里。',
+        null, null
+      );
+      return;
+    }
     var h = '';
     learned.forEach(function(p){
       var cat = p.category || 'routine';
@@ -1682,11 +2692,18 @@ function renderLearningLearned() {
   });
 }
 function confirmInsight(insightId) {
-  if (!confirm('确认学习该规律？将写入长期记忆。')) return;
-  api({action:'confirm_insight', insight_id:insightId, user_key:'panel'}).then(function(r){
-    if (r.ok) { toast('已确认，写入记忆'); renderLearningPending(); renderLearningLearned(); }
-    else toast('确认失败: '+(r.error||''));
-  });
+  confirmDialog(
+    '确认规律',
+    '确认学习该规律？将写入长期记忆。',
+    function(){
+      api({action:'confirm_insight', insight_id:insightId, user_key:'panel'}).then(function(r){
+        if (r.ok) { toast('已确认，写入记忆'); renderLearningPending(); renderLearningLearned(); }
+        else toast('确认失败: '+(r.error||''));
+      });
+    },
+    '确认',
+    '取消'
+  );
 }
 function dismissInsight(insightId) {
   api({action:'dismiss_insight', insight_id:insightId}).then(function(r){
@@ -1695,11 +2712,18 @@ function dismissInsight(insightId) {
   });
 }
 function blockInsight(insightId) {
-  if (!confirm('永久停用这类规律，不再提示？')) return;
-  api({action:'block_insight', insight_id:insightId}).then(function(r){
-    if (r.ok) { toast('已停用此类规律'); renderLearningPending(); }
-    else toast('停用失败: '+(r.error||''));
-  });
+  confirmDialog(
+    '停用规律',
+    '永久停用这类规律，不再提示？',
+    function(){
+      api({action:'block_insight', insight_id:insightId}).then(function(r){
+        if (r.ok) { toast('已停用此类规律'); renderLearningPending(); }
+        else toast('停用失败: '+(r.error||''));
+      });
+    },
+    '停用',
+    '取消'
+  );
 }
 
 // ── 动态（G6）：操作历史 / 审计日志 ──
@@ -1710,18 +2734,19 @@ function renderDynamicPage() {
   var gd = $('cardGrid');
   var node = nodeAtPath(_path);
   var h = stepIntroHtml(node);
-  h += '<div style="display:flex;justify-content:flex-end;margin-bottom:14px;gap:8px;flex-wrap:wrap;align-items:center">'
-     + '<span style="font-size:.84rem;color:var(--sec)">决策类型</span>'
+  h += '<div class="toolbar">'
+     + '<div class="tb-search" style="min-width:auto">'
+     + '<span style="font-size:.84rem;color:var(--sec);margin-right:4px">决策类型</span>'
      + '<select class="sel" id="auditFilter" style="width:auto;min-width:150px" onchange="auditApplyFilter()">'
      + '<option value="ALL">全部</option><option value="ALLOW">ALLOW</option><option value="CONFIRM">CONFIRM</option><option value="DENY">DENY</option>'
-     + '</select>'
-     + '<button class="btn" onclick="auditReload()"><ha-icon icon="mdi:refresh"></ha-icon> 刷新</button></div>';
-  h += '<div class="group-card open"><div class="gc-head" onclick="this.parentElement.classList.toggle(\'open\')">'
+     + '</select></div>'
+     + '<div class="tb-actions"><button class="btn btn-tip" title="刷新" onclick="auditReload()"><ha-icon icon="mdi:refresh"></ha-icon> 刷新</button></div></div>';
+  h += '<div class="group-card open"><div class="gc-head" onclick="toggleGroupCard(this)">'
      + '<div class="gc-ic"><ha-icon icon="mdi:history"></ha-icon></div>'
      + '<div class="gc-tx"><div class="gc-t">操作历史</div><div class="gc-d">最新在前，含 ALLOW / CONFIRM / DENY 全部策略决策与人工批准结果</div></div>'
      + '<ha-icon icon="mdi:chevron-down" class="gc-chev"></ha-icon></div>'
      + '<div class="gc-body" id="auditBody"><div style="padding:10px;color:var(--sec)">加载中...</div></div></div>';
-  h += '<div id="auditMoreWrap" style="display:none;justify-content:center;margin-top:14px"><button class="btn" onclick="auditLoadMore()"><ha-icon icon="mdi:chevron-down"></ha-icon> 加载更多</button></div>';
+  h += '<div id="auditMoreWrap" style="display:none;justify-content:center;margin-top:14px"><button class="btn btn-tip" title="加载更多" onclick="auditLoadMore()"><ha-icon icon="mdi:chevron-down"></ha-icon> 加载更多</button></div>';
   gd.innerHTML = h;
   _auditFilter = 'ALL';
   _auditLoaded = 0;
@@ -1751,7 +2776,8 @@ function auditLoad() {
     _auditLoaded = entries.length;
     var filtered = (_auditFilter === 'ALL') ? entries : entries.filter(function(e){ return (e.decision||'') === _auditFilter; });
     if (!filtered.length) {
-      body.innerHTML = '<div style="padding:10px;color:var(--sec)">' + (entries.length ? '当前筛选条件下没有记录。' : '暂无审计记录。AI 工具调用产生的策略决策会在这里生成记录。') + '</div>';
+      var msg = entries.length ? '当前筛选条件下没有记录。尝试切换筛选条件。' : '暂无审计记录。AI 工具调用产生的策略决策会在这里生成记录。';
+      body.innerHTML = emptyStateHtml('mdi:history','无记录',msg, entries.length ? '清除筛选' : null, entries.length ? 'auditFilter.value=\'ALL\';auditApplyFilter()' : null);
     } else {
       var h = '';
       filtered.forEach(function(e){
@@ -1872,7 +2898,19 @@ function edToggleFull(){
 }
 function tryCloseEditor(){
   var area=$('codeArea');
-  if(area && area.value!==(window.__edInitial||'') && !confirm('有未保存的修改，确定关闭？')) return;
+  if(area && area.value!==(window.__edInitial||'')){
+    confirmDialog(
+      '未保存的修改',
+      '有未保存的修改，确定关闭？',
+      function(){
+        chatReleaseIfOpen();
+        closeModal();
+      },
+      '关闭',
+      '取消'
+    );
+    return;
+  }
   chatReleaseIfOpen();
   closeModal();
 }
@@ -2118,7 +3156,13 @@ function toast(msg) {
 // ── Init ──
 // 面板 iframe 卸载时释放聊天 resume 绑定（尽力而为；agent 侧对失效绑定有自愈清理兜底）
 window.addEventListener('pagehide', function(){
-  if (_chat) { try { api({action:'conversation_release'}); } catch(e){} _chat = null; }
+  if (_chat) {
+    if (window._assistCloseHandler) {
+      try { window.parent.document.removeEventListener('dialog-closed', window._assistCloseHandler); } catch(e) {}
+      window._assistCloseHandler = null;
+    }
+    try { api({action:'conversation_release'}); } catch(e){} _chat = null;
+  }
 });
 function init() {
   api({action:'get_option_schema'}).then(function(d){
