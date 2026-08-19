@@ -1,5 +1,18 @@
 DOMAIN = "claw_assistant"
-VERSION = "9.2.0"
+VERSION = "9.5.0"
+
+# ── Entry types (single-domain dual-entry) ──
+CONF_ENTRY_TYPE = "entry_type"
+ENTRY_TYPE_CORE = "core"
+ENTRY_TYPE_DASHBOARD = "dashboard"
+
+# ── Dashboard constants ──
+DASHBOARD_DOMAIN = DOMAIN
+DASHBOARD_VFAB_URL = f"/api/{DOMAIN}/voice_fab.js"
+DASHBOARD_API_URL = f"/api/{DOMAIN}/dashboard"
+DASHBOARD_PANEL_URL = f"/api/{DOMAIN}/dashboard"
+DASHBOARD_PANEL_ICON = "mdi:robot-happy"
+DASHBOARD_PANEL_TITLE = "HA-Claw"
 
 IM_CHANNEL_NAMES: dict[str, str] = {
     "wechat:": "WeChat",

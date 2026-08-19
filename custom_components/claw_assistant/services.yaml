@@ -1,0 +1,466 @@
+set_option:
+  name: Set option
+  description: "Update a Claw Assistant configuration option"
+  fields:
+    key:
+      name: Key
+      description: Config option key
+      required: true
+      example: "enable_web_search"
+      selector:
+        text:
+          multiple: false
+          multiline: false
+    value:
+      name: Value
+      description: Config option value
+      required: true
+      selector:
+        text:
+
+list_workspace:
+  name: List workspace
+  description: "List skills, docs, and plugins in the Claw workspace"
+  fields:
+    category:
+      name: Category
+      description: "Category to list (skills, docs, plugins, or all)"
+      required: false
+      example: "all"
+      selector:
+        select:
+          options:
+            - "skills"
+            - "docs"
+            - "plugins"
+            - "all"
+
+read_workspace_file:
+  name: Read workspace file
+  description: "Read a file from the Claw workspace"
+  fields:
+    path:
+      name: Path
+      description: "Relative path within the workspace"
+      required: true
+      example: "SOUL.md"
+      selector:
+        text:
+
+write_workspace_file:
+  name: Write workspace file
+  description: "Write a file to the Claw workspace"
+  fields:
+    path:
+      name: Path
+      description: "Relative path within the workspace"
+      required: true
+      example: "SOUL.md"
+      selector:
+        text:
+          multiline: true
+    content:
+      name: Content
+      description: "File content to write"
+      required: true
+      selector:
+        text:
+          multiline: true
+
+get_rules:
+  name: Get hard boundary rules
+  description: "List all hard boundary rules (enabled and disabled) from the rules store"
+  fields: {}
+
+toggle_rule:
+  name: Toggle hard boundary rule
+  description: "Enable or disable a hard boundary rule by id"
+  fields:
+    rule_id:
+      name: Rule ID
+      description: "Rule identifier, e.g. rule_001"
+      required: true
+      example: "rule_001"
+      selector:
+        text:
+    enabled:
+      name: Enabled
+      description: "Whether the rule is enabled"
+      required: true
+      selector:
+        boolean:
+
+add_rule:
+  name: Add hard boundary rule
+  description: "Create a new enabled hard boundary rule"
+  fields:
+    category:
+      name: Category
+      description: "Rule category (always, never, reply, custom)"
+      required: true
+      example: "never"
+      selector:
+        select:
+          options:
+            - "always"
+            - "never"
+            - "reply"
+            - "custom"
+    description:
+      name: Description
+      description: "Rule text injected into the AI system prompt"
+      required: true
+      example: "不要删除或修改自动化规则"
+      selector:
+        text:
+          multiline: true
+
+delete_rule:
+  name: Delete hard boundary rule
+  description: "Remove a hard boundary rule by id"
+  fields:
+    rule_id:
+      name: Rule ID
+      description: "Rule identifier, e.g. rule_001"
+      required: true
+      example: "rule_001"
+      selector:
+        text:
+
+get_members:
+  name: Get members
+  description: "List all members with role, allowed areas and label"
+  fields: {}
+
+add_member:
+  name: Add member
+  description: "Bind an IM identity to an HA user with a role (owner/member)"
+  fields:
+    provider:
+      name: Provider
+      description: "IM channel provider (feishu/wechat/dingtalk/qq/wecom)"
+      required: true
+      selector:
+        text:
+    ext_id:
+      name: External ID
+      description: "External user id on the channel"
+      required: true
+      selector:
+        text:
+    ha_user_id:
+      name: HA user ID
+      description: "Home Assistant user id to bind"
+      required: true
+      selector:
+        text:
+    role:
+      name: Role
+      description: "owner or member"
+      required: false
+      default: "member"
+      selector:
+        select:
+          options:
+            - "owner"
+            - "member"
+    allowed_areas:
+      name: Allowed areas
+      description: "Area tokens the member may control (empty = unrestricted)"
+      required: false
+      selector:
+        text:
+    label:
+      name: Label
+      description: "Human-readable member label"
+      required: false
+      selector:
+        text:
+
+update_member:
+  name: Update member
+  description: "Update a member's role, allowed areas or label"
+  fields:
+    provider:
+      name: Provider
+      description: "IM channel provider (locator)"
+      required: false
+      selector:
+        text:
+    ext_id:
+      name: External ID
+      description: "External user id (locator)"
+      required: false
+      selector:
+        text:
+    ha_user_id:
+      name: HA user ID
+      description: "Home Assistant user id (locator)"
+      required: false
+      selector:
+        text:
+    role:
+      name: Role
+      description: "owner or member"
+      required: false
+      selector:
+        select:
+          options:
+            - "owner"
+            - "member"
+    allowed_areas:
+      name: Allowed areas
+      description: "Area tokens the member may control"
+      required: false
+      selector:
+        text:
+    label:
+      name: Label
+      description: "Human-readable member label"
+      required: false
+      selector:
+        text:
+
+remove_member:
+  name: Remove member
+  description: "Remove a member binding by provider+ext_id or ha_user_id"
+  fields:
+    provider:
+      name: Provider
+      description: "IM channel provider (locator)"
+      required: false
+      selector:
+        text:
+    ext_id:
+      name: External ID
+      description: "External user id (locator)"
+      required: false
+      selector:
+        text:
+    ha_user_id:
+      name: HA user ID
+      description: "Home Assistant user id (locator)"
+      required: false
+      selector:
+        text:
+
+get_approvals:
+  name: Get approvals
+  description: "List pending and recent approval queue entries"
+  fields: {}
+
+resolve_approval:
+  name: Resolve approval
+  description: "Approve or reject a pending approval"
+  fields:
+    approval_id:
+      name: Approval ID
+      description: "Pending approval identifier"
+      required: true
+      selector:
+        text:
+    approved:
+      name: Approved
+      description: "true to approve, false to reject"
+      required: true
+      selector:
+        boolean:
+    approver:
+      name: Approver
+      description: "Who resolved the approval (for audit)"
+      required: false
+      selector:
+        text:
+
+list_audit:
+  name: List audit
+  description: "List recent audit log entries"
+  fields:
+    limit:
+      name: Limit
+      description: "Max entries to return"
+      required: false
+      default: 100
+      selector:
+        number:
+          min: 1
+          max: 500
+
+list_whitelist:
+  name: List whitelist
+  description: "List trust-whitelist entries (user+action bypass confirmation)"
+  fields: {}
+
+add_whitelist:
+  name: Add whitelist entry
+  description: "Add a trust-whitelist entry so a user+action always ALLOWs"
+  fields:
+    user_key:
+      name: User key
+      description: "HA user id or provider:ext_id"
+      required: true
+      selector:
+        text:
+    action:
+      name: Action
+      description: "Tool name, e.g. HAControl"
+      required: true
+      selector:
+        text:
+    entity_id:
+      name: Entity ID
+      description: "Optional entity the entry applies to"
+      required: false
+      selector:
+        text:
+    area:
+      name: Area
+      description: "Optional area the entry applies to"
+      required: false
+      selector:
+        text:
+
+remove_whitelist:
+  name: Remove whitelist entry
+  description: "Remove a trust-whitelist entry"
+  fields:
+    user_key:
+      name: User key
+      description: "HA user id or provider:ext_id"
+      required: true
+      selector:
+        text:
+    action:
+      name: Action
+      description: "Tool name, e.g. HAControl"
+      required: true
+      selector:
+        text:
+    entity_id:
+      name: Entity ID
+      description: "Optional entity the entry applies to"
+      required: false
+      selector:
+        text:
+    area:
+      name: Area
+      description: "Optional area the entry applies to"
+      required: false
+      selector:
+        text:
+
+get_tasks:
+  name: Get scheduled tasks
+  description: "List all heartbeat scheduled tasks with their status and last execution"
+  fields: {}
+
+set_task_enabled:
+  name: Set task enabled
+  description: "Enable or disable a scheduled task by slug"
+  fields:
+    slug:
+      name: Slug
+      description: "Task identifier (slug)"
+      required: true
+      selector:
+        text:
+    enabled:
+      name: Enabled
+      description: "Whether the task is enabled"
+      required: true
+      selector:
+        boolean:
+
+run_task_now:
+  name: Run task now
+  description: "Trigger a scheduled task immediately (does not wait for the next tick)"
+  fields:
+    slug:
+      name: Slug
+      description: "Task identifier (slug)"
+      required: true
+      selector:
+        text:
+
+delete_task:
+  name: Delete scheduled task
+  description: "Delete a scheduled task by slug"
+  fields:
+    slug:
+      name: Slug
+      description: "Task identifier (slug)"
+      required: true
+      selector:
+        text:
+
+create_task:
+  name: Create scheduled task
+  description: "Create a simplified scheduled task with title and schedule"
+  fields:
+    title:
+      name: Title
+      description: "Task title / objective"
+      required: true
+      selector:
+        text:
+    schedule:
+      name: Schedule
+      description: "Cron expression or interval (e.g. every 2h, 30 */2 * * *)"
+      required: false
+      default: ""
+      selector:
+        text:
+
+get_pending_insights:
+  name: Get pending insights
+  description: "List pending passive-learning routine candidates and learned entries"
+  fields: {}
+
+confirm_insight:
+  name: Confirm insight
+  description: "Confirm a pending insight: write to memory (+ trust whitelist when entity/action present)"
+  fields:
+    insight_id:
+      name: Insight ID
+      description: "Pending insight identifier"
+      required: true
+      selector:
+        text:
+    user_key:
+      name: User key
+      description: "Optional user key used for the trust-whitelist entry"
+      required: false
+      default: ""
+      selector:
+        text:
+
+dismiss_insight:
+  name: Dismiss insight
+  description: "Dismiss a pending insight without learning it"
+  fields:
+    insight_id:
+      name: Insight ID
+      description: "Pending insight identifier"
+      required: true
+      selector:
+        text:
+
+block_insight:
+  name: Block insight
+  description: "Permanently stop proposing this insight pattern"
+  fields:
+    insight_id:
+      name: Insight ID
+      description: "Pending insight identifier"
+      required: true
+      selector:
+        text:
+
+list_learned:
+  name: List learned insights
+  description: "List confirmed (learned) insights"
+  fields: {}
+
+refresh_sensor:
+  name: Refresh config sensor
+  description: "Force refresh the Claw Config sensor state"

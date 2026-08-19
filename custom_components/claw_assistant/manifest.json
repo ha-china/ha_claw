@@ -1,7 +1,7 @@
 {
   "domain": "claw_assistant",
   "name": "Claw Assistant",
-  "after_dependencies": ["assist_pipeline"],
+  "after_dependencies": ["assist_pipeline", "llm"],
   "codeowners": ["@knoop7"],
   "config_flow": true,
   "dependencies": [
@@ -21,5 +21,5 @@
   "issue_tracker": "https://github.com/ha-china/ha_claw/issues",
   "requirements": ["trafilatura==2.0.0", "asyncssh>=2.17.0", "curl_cffi>=0.9.0", "browserforge>=1.2.0"],
   "single_config_entry": false,
-  "version": "9.2.0"
+  "version": "9.5.0"
 }

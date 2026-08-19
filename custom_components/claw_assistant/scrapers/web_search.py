@@ -6,11 +6,11 @@ from datetime import datetime
 import logging
 import random
 import re
+import threading
 from typing import Any, Dict, List, Optional
 from urllib.parse import urlparse
 
 from aiohttp import ClientSession, ClientTimeout, TCPConnector
-from curl_cffi.requests import Session as CffiSession
 from ._html_selector import Selector
 from urllib.parse import unquote
 
@@ -18,6 +18,17 @@ from .web_fetcher import WebPageFetcher
 from .web_formatter import format_search_results_text
 
 _LOGGER = logging.getLogger(__name__)
+
+
+def _get_cffi_session():
+    """Lazy import of curl_cffi.
+
+    Importing it triggers blocking site-packages metadata reads, so it must
+    never run inside the asyncio event loop - call it from a worker thread.
+    """
+    from curl_cffi.requests import Session as CffiSession
+
+    return CffiSession
 
 @dataclass
 class SearchResult:
@@ -51,19 +62,35 @@ def _default_engines(hass=None) -> list[str]:
     return ["bing", "google"]
 
 BLOCKED_DOMAINS = {"zhihu.com", "zhihu.cn"}
-try:
-    from browserforge.headers import Browser as _BfBrowser, HeaderGenerator as _BfHeaderGenerator
-    _HEADER_GEN = _BfHeaderGenerator(
-        browser=[
-            _BfBrowser(name="chrome", min_version=130, max_version=147),
-            _BfBrowser(name="firefox", min_version=130),
-            _BfBrowser(name="edge", min_version=130),
-        ],
-        os=("windows", "macos", "linux"),
-        device="desktop",
-    )
-except ImportError:
-    _HEADER_GEN = None
+_HEADER_GEN = None
+_HEADER_GEN_LOCK = threading.Lock()
+
+
+def _get_header_gen():
+    """Lazily build the browserforge header generator.
+
+    The constructor reads JSON files (browser-helper-file.json /
+    headers-order.json), which is blocking I/O - it must never run inside
+    the asyncio event loop. Warm it from a worker thread before first use.
+    """
+    global _HEADER_GEN
+    if _HEADER_GEN is None:
+        with _HEADER_GEN_LOCK:
+            if _HEADER_GEN is None:
+                try:
+                    from browserforge.headers import Browser as _BfBrowser, HeaderGenerator as _BfHeaderGenerator
+                    _HEADER_GEN = _BfHeaderGenerator(
+                        browser=[
+                            _BfBrowser(name="chrome", min_version=130, max_version=147),
+                            _BfBrowser(name="firefox", min_version=130),
+                            _BfBrowser(name="edge", min_version=130),
+                        ],
+                        os=("windows", "macos", "linux"),
+                        device="desktop",
+                    )
+                except ImportError:
+                    _HEADER_GEN = False
+    return _HEADER_GEN or None
 
 UA_LIST = [
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/136.0.0.0 Safari/537.36",
@@ -147,6 +174,7 @@ class WebSearch:
             return True
 
     async def __aenter__(self):
+        await asyncio.to_thread(_get_header_gen)
         if self.session is None or self.session.closed:
             self.connector = TCPConnector(limit=10, force_close=True, ssl=False)
             self.session = ClientSession(
@@ -170,8 +198,9 @@ class WebSearch:
         self.connector = None
 
     def _get_headers(self) -> Dict[str, str]:
-        if _HEADER_GEN is not None:
-            headers = dict(_HEADER_GEN.generate())
+        header_gen = _get_header_gen()
+        if header_gen is not None:
+            headers = dict(header_gen.generate())
             lang = "zh-CN,zh;q=0.9,en;q=0.8" if _is_cn(self._hass) else "en-US,en;q=0.9"
             headers["Accept-Language"] = lang
             return headers
@@ -219,7 +248,7 @@ class WebSearch:
         try:
             headers = self._get_headers()
             resp = await asyncio.to_thread(
-                lambda: CffiSession(impersonate="chrome").get(
+                lambda: _get_cffi_session()(impersonate="chrome").get(
                     url="https://html.duckduckgo.com/html/",
                     params={"q": query},
                     headers=headers,
