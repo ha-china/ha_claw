@@ -24,29 +24,14 @@
     "sensor": {
       "heartbeat": {
         "name": "心跳"
-      },
-      "claw_config": {
-        "name": "Claw 配置"
       }
     }
   },
   "config": {
     "step": {
       "user": {
-        "title": "选择安装类型",
-        "description": "选择要安装的组件：",
-        "menu_options": {
-          "core": "核心功能 - 完整 Claw Assistant 运行时",
-          "dashboard": "仪表盘 - 仅管理面板"
-        }
-      },
-      "core": {
-        "title": "Claw Assistant 核心",
-        "description": "安装完整的 Claw Assistant 运行时，包含 AI 代理编排、插件系统和工作区管理。"
-      },
-      "dashboard": {
-        "title": "Claw 仪表盘",
-        "description": "安装管理面板，包含语音悬浮按钮、配置传感器和工作区工具。"
+        "title": "初始化配置",
+        "description": "## 欢迎使用 Claw Assistant 集成\n\nHome Assistant 的 **AI 调度中枢与决策大脑**。\n\n**插件化架构** — 所安装的任何对话代理（OpenAI、Google AI、Ollama、本地模型等）均可作为能力插件接入，由 Claw Assistant 编排调度、智能容灾切换与深度能力增强。\n\n**自然语言驱动** — 将原本不可能的操作化为现实，赋予 AI 自主进化与持久记忆的能力。\n\n**零门槛使用** — 支持任何富有创造力的能力诉求，只需以最直白的语言与 AI 对话，它足以理解你的意图。\n\n**协同即进化** — 每项能力独立来看只是工具，协同运作时 AI 便化身为全天候智能家庭运维：审阅日志、追溯历史、修复自动化、重整仪表盘、沉淀经验教训，让每一次决策都比上一次更精准。\n\n---\n\n⚠️首次安装后请 **重启 Home Assistant**，点击 **提交** 开始配置。"
       },
       "agent_settings": {
         "title": "配置 AI 代理",
@@ -69,24 +54,8 @@
           "conversation_settings": "调整对话风格 ｜ 显示、流式与维度",
           "workspace_editor": "编辑工作文档 ｜ 主提示词与技能资料",
           "skill_editor": "管理安装技能 ｜ 动态查看与编辑",
-          "conversation_manager": "对话管理 ｜ 历史记录与统计",
-          "plugin_manager": "管理安装插件 ｜ Hermes 兼容插件",
-          "rules_editor": "硬边界规则 ｜ 强制约束与安全红线",
-          "members": "成员与权限 ｜ 角色分级与操作确认",
-          "scheduled_tasks": "定时任务 ｜ 自动跟进任务管理",
-          "learning": "学习 ｜ 被动学习与规律确认",
-          "dynamic": "动态 ｜ 操作历史与审计日志"
+          "plugin_manager": "管理安装插件 ｜ Hermes 兼容插件"
         }
-      },
-      "members": {
-        "title": "成员与权限",
-        "description": "**成员与权限**\nowner 无感放行全部操作；member/shadow 的 R0/R1 只读与可逆控制在允许区域内放行，R2 系统变更需人工确认，R3 破坏性操作默认拒绝。所有决策写入审计日志。",
-        "data": {}
-      },
-      "rules_editor": {
-        "title": "硬边界规则",
-        "description": "**硬边界规则**\n规则会注入 AI 的 system prompt，启用后 AI 必须无条件遵守。\n「始终遵循」是正向要求；「绝对禁止」是安全红线；「回复要求」约束回复格式。\n\n修改规则后立即生效，无需重启。\n\n与「学习」的区别：规则是手动设定的硬边界约束；「学习」页确认的是 AI 自动发现的规律候选，确认后写入长期记忆。",
-        "data": {}
       },
       "agent_settings": {
         "title": "对话代理设置",
@@ -107,7 +76,7 @@
           "conv_dialog": "对话策略 ｜ 回复如何生成",
           "conv_display": "聊天体验 ｜ 窗口如何使用",
           "conv_runtime": "执行控制 ｜ 任务如何运行",
-          "user_mapping": "用户关联 ｜ 已统一至成员与权限"
+          "user_mapping": "用户关联 ｜ 通道身份映射"
         }
       },
       "conv_dialog": {
@@ -274,9 +243,7 @@
       "ws_agents": {
         "title": "编辑 AGENTS.md",
         "description": "**文件角色与操作规范**\n定义各工作区文档的职责分工和 AI 的操作约束规则。\n类似于项目的 README，告诉 AI 每个文件是干什么的、什么该做什么不该做。\n\n使用 Markdown 格式，保存后立即生效。",
-        "data": {
-          "content": "Markdown 编辑器"
-        }
+        "data": { "content": "Markdown 编辑器" }
       },
       "ws_bootstrap": {
         "title": "编辑 BOOTSTRAP.md",
@@ -292,44 +259,32 @@
       "ws_heartbeat": {
         "title": "编辑 HEARTBEAT.md",
         "description": "**定时跟进任务**\n定义心跳机制的行为规则，AI 会按设定周期自动执行跟进任务。\n例如：定时检查设备状态、发送提醒、执行自动化等。\n\n使用 Markdown 格式，保存后立即生效。",
-        "data": {
-          "content": "Markdown 编辑器"
-        }
+        "data": { "content": "Markdown 编辑器" }
       },
       "ws_identity": {
         "title": "编辑 IDENTITY.md",
         "description": "**助手身份设定**\n定义 AI 助手的名称、生物类型、性格标签和代表 Emoji 等身份信息。\n这些信息会影响 AI 的自我认知和回复风格。\n\n格式示例：\n`- **Name:** 小助手`\n`- **Creature:** AI管家`\n`- **Vibe:** 冷静、高效、幽默`\n\n使用 Markdown 格式，保存后立即生效。",
-        "data": {
-          "content": "Markdown 编辑器"
-        }
+        "data": { "content": "Markdown 编辑器" }
       },
       "ws_memory": {
         "title": "编辑 MEMORY.md",
         "description": "**用户偏好记忆**\n存储 AI 需要长期记住的用户偏好和习惯，每行一条。\nAI 会在对话时根据上下文自动匹配相关记忆条目。\n\n格式示例：\n`- 用户喜欢简短回复，少废话`\n`- preferred_address: 老板`\n`- timezone: Asia/Shanghai`\n\n使用 Markdown 格式，保存后立即生效。",
-        "data": {
-          "content": "Markdown 编辑器"
-        }
+        "data": { "content": "Markdown 编辑器" }
       },
       "ws_soul": {
         "title": "编辑 SOUL.md",
         "description": "**语气与风格**\n定义 AI 助手的说话方式和性格基调。\n例如：冷静直接、幽默轻松、专业正式等。\n\n格式示例：\n`- Be calm, direct, practical, and concise.`\n`- Sound like a reliable operator, not a generic chatbot.`\n\n使用 Markdown 格式，保存后立即生效。",
-        "data": {
-          "content": "Markdown 编辑器"
-        }
+        "data": { "content": "Markdown 编辑器" }
       },
       "ws_tools": {
         "title": "编辑 TOOLS.md",
         "description": "**环境与工具备注**\n记录设备信息、服务名称等，AI 执行操作时自动参考。\n\n**访问令牌（可选）：** 若 AI 无法读日志/执行命令，添加长期令牌启用 REST 穿透。\n个人资料页底部创建令牌，格式：`ha_token: eyJ...`\n\n保存后立即生效。",
-        "data": {
-          "content": "Markdown 编辑器"
-        }
+        "data": { "content": "Markdown 编辑器" }
       },
       "ws_user": {
         "title": "编辑 USER.md",
         "description": "**用户基本信息**\n存储用户的基本资料，AI 会据此个性化回复。\n\n格式示例：\n`- **Name:** 张三`\n`- **What to call them:** 老板`\n`- **Timezone:** Asia/Shanghai`\n\n使用 Markdown 格式，保存后立即生效。",
-        "data": {
-          "content": "Markdown 编辑器"
-        }
+        "data": { "content": "Markdown 编辑器" }
       },
       "skill_editor": {
         "title": "已安装技能",
@@ -375,8 +330,8 @@
         }
       },
       "user_mapping": {
-        "title": "用户关联（已统一至成员与权限）",
-        "description": "**用户关联已统一到「成员与权限」页面**\n\n将飞书、微信、QQ 等 IM 通道里的外部身份，绑定到 HA 家庭成员。绑定后，每位成员拥有**独立的 persona 与对话记忆**，互不干扰。\n\n请在「成员与权限」页面进行添加、删除、角色和区域管理。\n\n{cn_im_hub_status}{mapping_status}",
+        "title": "用户关联",
+        "description": "**功能说明**\n将飞书、微信、QQ 等 IM 通道里的外部身份，绑定到 HA 家庭成员。绑定后，每位成员拥有**独立的 persona 与对话记忆**，互不干扰。\n\n**使用前准备**\n需先在「设置 → 设备与服务」中安装并启用 **cn_im_hub**，并至少接入一个 IM 通道。\n\n{cn_im_hub_status}{mapping_status}",
         "menu_options": {
           "um_pick_channel": "＋ 添加关联",
           "um_remove": "－ 删除关联"
@@ -408,39 +363,22 @@
       },
       "um_pick_member": {
         "title": "添加关联 ｜ 家庭成员",
-        "description": "**第 3 步 / 共 3 步**\n\n- 通道：**{provider}**\n- 外部用户：`{ext_id}`\n\n选择要绑定的 **HA 家庭成员**，点击**提交**即可保存关联。\n\n成员须已在「设置 → 用户」中创建登录账号。\n\n{role_hint}",
+        "description": "**第 3 步 / 共 3 步**\n\n- 通道：**{provider}**\n- 外部用户：`{ext_id}`\n\n选择要绑定的 **HA 家庭成员**，点击**提交**即可保存关联。\n\n成员须已在「设置 → 用户」中创建登录账号。",
         "data": {
           "ha_user": "关联到",
-          "role": "角色",
           "back": "返回"
         },
         "data_description": {
-          "ha_user": "选择家庭成员；仅显示已创建的 HA 用户账号",
-          "role": "owner 全部放行；member 分级确认。绑定后可到面板「成员与权限」完善"
+          "ha_user": "选择家庭成员；仅显示已创建的 HA 用户账号"
         }
       },
       "um_remove": {
         "title": "删除关联",
-        "description": "**删除通道绑定**\n\n解除映射后，该外部身份将不再关联到对应家庭成员，其 persona 文件仍保留。\n\n{mapping_status}\n\n{member_hint}\n\n选中要删除的映射并**提交**确认。",
+        "description": "**删除通道绑定**\n\n解除映射后，该外部身份将不再关联到对应家庭成员，其 persona 文件仍保留。\n\n{mapping_status}\n\n选中要删除的映射并**提交**确认。",
         "data": {
           "remove_key": "要删除的映射",
           "back": "返回"
         }
-      },
-      "scheduled_tasks": {
-        "title": "定时任务",
-        "description": "**定时任务**\n查看与管理自动跟进任务：暂停/恢复、立即运行、删除或新建。任务由心跳 Ticker 按周期自动执行，也可在面板上立即触发。",
-        "data": {}
-      },
-      "learning": {
-        "title": "学习",
-        "description": "**被动学习**\n查看 AI 从日常对话中发现的规律候选（如定时关灯），确认后写入长期记忆；含实体/操作的建议同时加入免确认白名单。\n\n与「规则」的区别：这里是 AI 自动发现的规律候选，确认后写入长期记忆；「规则」页是手动设定的硬边界约束。",
-        "data": {}
-      },
-      "dynamic": {
-        "title": "动态",
-        "description": "**操作历史与审计日志**\n记录每次 AI 工具调用的策略决策（ALLOW / CONFIRM / DENY）与人工批准结果，最新在前。\n可按决策类型筛选，用于追溯与安全审查。",
-        "data": {}
       }
     },
     "error": {

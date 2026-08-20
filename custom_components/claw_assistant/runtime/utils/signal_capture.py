@@ -182,10 +182,6 @@ async def async_capture_passive_signal(
         notify_channel=notify_ch,
     )
     LOGGER.debug("Captured passive heartbeat signal from conversation turn")
-    try:
-        await _observe_and_queue_habits(hass, signal)
-    except Exception:
-        LOGGER.debug("Habit observation hook failed (non-blocking)", exc_info=True)
     return {
         "kind": "heartbeat",
         "path": str(path),
@@ -193,25 +189,3 @@ async def async_capture_passive_signal(
         "schedule": signal.schedule,
         "delete_after_success": signal.delete_after_success,
     }
-
-
-async def _observe_and_queue_habits(hass: HomeAssistant, signal: PassiveSignal) -> None:
-    """Lightweight G3 hook: record the signal, detect routines, queue insights.
-
-    Uses the current local hour as the time bucket. New candidates above the
-    frequency/confidence threshold are pushed into the pending-insights queue
-    and surfaced via a persistent notification (confirm/dismiss/block).
-    """
-    from datetime import datetime
-
-    from ..utils.habit_learning import (
-        async_observe_signal_and_enqueue_insights,
-    )
-
-    await async_observe_signal_and_enqueue_insights(
-        hass,
-        key=(signal.title or signal.objective or signal.value)[:64],
-        hour=datetime.now().hour,
-        text=signal.objective or signal.value,
-        source="signal_capture",
-    )

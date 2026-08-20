@@ -24,29 +24,14 @@
     "sensor": {
       "heartbeat": {
         "name": "Heartbeat"
-      },
-      "claw_config": {
-        "name": "Claw Config"
       }
     }
   },
   "config": {
     "step": {
       "user": {
-        "title": "Choose installation type",
-        "description": "Select what to install:",
-        "menu_options": {
-          "core": "Core - Full Claw Assistant runtime",
-          "dashboard": "Dashboard - Management panel only"
-        }
-      },
-      "core": {
-        "title": "Claw Assistant Core",
-        "description": "Install the full Claw Assistant runtime with AI agent orchestration, plugin system, and workspace management."
-      },
-      "dashboard": {
-        "title": "Claw Dashboard",
-        "description": "Install the management panel with Voice FAB, config sensor, and workspace tools."
+        "title": "Initial Setup",
+        "description": "## Welcome to Claw Assistant\n\nThe **AI orchestration hub and decision-making brain** for Home Assistant.\n\n**Plugin Architecture** — Every conversation agent you install (OpenAI, Google AI, Ollama, local models, etc.) plugs in as a capability module, with Claw Assistant handling unified orchestration, intelligent failover, and deep capability enhancement.\n\n**Natural Language Driven** — Turns the previously impossible into reality, endowing AI with autonomous evolution and persistent memory.\n\n**Zero Barrier to Use** — Supports any creative capability you envision. Simply speak to AI in the most straightforward language, it is fully capable of grasping your intent.\n\n**Synergy as Evolution** — Each capability alone is merely a tool. In concert, AI becomes an around-the-clock intelligent home operator: auditing logs, tracing history, repairing automations, reorganizing dashboards, distilling lessons learned, making every decision sharper than the last.\n\n---\n\nPlease **restart Home Assistant** after first install. Click **Submit** to begin setup."
       },
       "agent_settings": {
         "title": "Configure AI Agents",
@@ -69,24 +54,8 @@
           "conversation_settings": "Tune Conversation Style | Display, streaming & dimensions",
           "workspace_editor": "Edit Workspace Docs | Master prompt & skill library",
           "skill_editor": "Manage Installed Skills | Live view & edit",
-          "conversation_manager": "Conversations | History & statistics",
-          "plugin_manager": "Manage Plugins | Hermes compatible plugins",
-          "rules_editor": "Hard Boundary Rules | Constraints & safety red lines",
-          "members": "Members & Permissions | Roles and operation confirmation",
-          "scheduled_tasks": "Scheduled Tasks | Manage follow-up tasks",
-          "learning": "Learning | Passive insights & confirmation",
-          "dynamic": "Activity | Operation history & audit log"
+          "plugin_manager": "Manage Plugins | Hermes compatible plugins"
         }
-      },
-      "members": {
-        "title": "Members & Permissions",
-        "description": "**Members & Permissions**\nOwner passes all operations without interruption; member/shadow users are allowed R0/R1 read & reversible control inside allowed areas, R2 system changes require human confirmation, and R3 destructive operations are denied by default. Every decision is written to the audit log.",
-        "data": {}
-      },
-      "rules_editor": {
-        "title": "Hard Boundary Rules",
-        "description": "**Hard Boundary Rules**\nRules are injected into the AI system prompt; once enabled, the AI must obey them unconditionally.\n\"Always\" are positive requirements; \"Never\" are safety red lines; \"Reply\" constrain response format.\n\nChanges take effect immediately without restarting.\n\nRelation to Learning: rules here are manually defined hard constraints; the Learning tab confirms AI-discovered routine candidates, which are then written to long-term memory.",
-        "data": {}
       },
       "agent_settings": {
         "title": "Agent Settings",
@@ -107,7 +76,7 @@
           "conv_dialog": "Conversation Strategy | How Replies Are Generated",
           "conv_display": "Chat Experience | How Chat Is Used",
           "conv_runtime": "Execution Control | How Tasks Run",
-          "user_mapping": "User Linking | Unified into Members & Permissions"
+          "user_mapping": "User Linking | Channel Identity Mapping"
         }
       },
       "conv_dialog": {
@@ -375,8 +344,8 @@
         }
       },
       "user_mapping": {
-        "title": "User Linking (Unified into Members & Permissions)",
-        "description": "**User linking has been unified into the Members & Permissions panel**\n\nLink external IM identities (Feishu, WeChat, QQ, etc.) to HA household members. Each member gets their **own persona and conversation memory**.\n\nPlease use the Members & Permissions panel to add, remove, and manage roles and areas.\n\n{cn_im_hub_status}{mapping_status}",
+        "title": "User Linking",
+        "description": "**What this does**\nLink external IM identities (Feishu, WeChat, QQ, etc.) to HA household members. Each member gets their **own persona and conversation memory**.\n\n**Before you start**\nInstall and enable **cn_im_hub** under Settings → Devices & services, and add at least one IM channel.\n\n{cn_im_hub_status}{mapping_status}",
         "menu_options": {
           "um_pick_channel": "＋ Add link",
           "um_remove": "－ Remove link"
@@ -408,39 +377,22 @@
       },
       "um_pick_member": {
         "title": "Add Link | Household Member",
-        "description": "**Step 3 of 3**\n\n- Channel: **{provider}**\n- External user: `{ext_id}`\n\nSelect an **HA household member** and click **Submit** to save the link.\n\nMembers must already have a login under Settings → Users.\n\n{role_hint}",
+        "description": "**Step 3 of 3**\n\n- Channel: **{provider}**\n- External user: `{ext_id}`\n\nSelect an **HA household member** and click **Submit** to save the link.\n\nMembers must already have a login under Settings → Users.",
         "data": {
           "ha_user": "Link to",
-          "role": "Role",
           "back": "Back"
         },
         "data_description": {
-          "ha_user": "Household member with an existing HA user account",
-          "role": "owner passes all; member tiered confirm. Refine later in Members & Permissions panel"
+          "ha_user": "Household member with an existing HA user account"
         }
       },
       "um_remove": {
         "title": "Remove Link",
-        "description": "**Remove a channel link**\n\nAfter removal, that external identity is no longer linked to the member. Persona files are kept.\n\n{mapping_status}\n\n{member_hint}\n\nSelect a link and click **Submit** to confirm.",
+        "description": "**Remove a channel link**\n\nAfter removal, that external identity is no longer linked to the member. Persona files are kept.\n\n{mapping_status}\n\nSelect a link and click **Submit** to confirm.",
         "data": {
           "remove_key": "Link to remove",
           "back": "Back"
         }
-      },
-      "scheduled_tasks": {
-        "title": "Scheduled Tasks",
-        "description": "**Scheduled Tasks**\nView and manage automatic follow-up tasks: pause/resume, run now, delete or create. Tasks run on the heartbeat ticker cycle and can be triggered immediately from the panel.",
-        "data": {}
-      },
-      "learning": {
-        "title": "Learning",
-        "description": "**Passive Learning**\nReview routine candidates discovered from daily conversations (e.g. turning off lights at night). Confirming writes them to long-term memory; suggestions with entity/action also join the no-confirmation whitelist.\n\nRelation to Rules: candidates here are AI-discovered and, once confirmed, written to long-term memory; the Rules tab holds manually defined hard constraints.",
-        "data": {}
-      },
-      "dynamic": {
-        "title": "Activity",
-        "description": "**Operation History & Audit Log**\nEvery AI tool-call policy decision (ALLOW / CONFIRM / DENY) and human approval outcome is recorded here, newest first.\nFilter by decision type for traceability and security review.",
-        "data": {}
       }
     },
     "error": {
