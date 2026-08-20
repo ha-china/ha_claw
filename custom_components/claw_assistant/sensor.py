@@ -14,7 +14,7 @@ from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.event import TrackTemplate, async_track_template_result
 from homeassistant.helpers.template import Template, TemplateError
 
-from .const import DOMAIN, VERSION, CONF_ENTRY_TYPE, ENTRY_TYPE_DASHBOARD
+from .const import DOMAIN, VERSION
 from .runtime.storage.custom_entity_store import get_custom_entities_by_platform
 from .runtime.storage.heartbeat_store import async_list_heartbeat_tasks, _next_due_seconds
 
@@ -33,15 +33,6 @@ async def async_setup_entry(
     entry: ConfigEntry,
     async_add_entities: AddEntitiesCallback,
 ) -> bool:
-    # ── Dashboard entry: config sensor only ──
-    if entry.data.get(CONF_ENTRY_TYPE) == ENTRY_TYPE_DASHBOARD:
-        sensor = ClawConfigSensor(hass)
-        async_add_entities([sensor])
-        hass.data.setdefault(DOMAIN, {})["claw_config_entity_id"] = sensor.entity_id
-        hass.data.setdefault(DOMAIN, {})['_dashboard_sensors'] = [sensor]
-        return True
-
-    # ── Core entry: heartbeat + custom sensors ──
     data = hass.data.setdefault(DOMAIN, {})
     data[_ADD_KEY] = async_add_entities
     data[_ENTRY_KEY] = entry
@@ -241,86 +232,4 @@ class DynamicSensor(SensorEntity):
             self._attr_native_value = None
         else:
             self._attr_native_value = result
-        self.async_write_ha_state()
-
-
-class ClawConfigSensor(SensorEntity):
-    """Expose Claw Assistant config options as sensor attributes for the dashboard."""
-
-    _attr_has_entity_name = True
-    _attr_icon = "mdi:robot-happy"
-    _attr_should_poll = False
-    _attr_entity_category = EntityCategory.DIAGNOSTIC
-    _attr_unique_id = "claw_config"
-    _attr_translation_key = "claw_config"
-
-    def __init__(self, hass: HomeAssistant) -> None:
-        self.hass = hass
-        self._attr_name = "Claw Config"
-
-    @property
-    def device_info(self) -> DeviceInfo:
-        return DeviceInfo(
-            identifiers={(DOMAIN, "claw_dashboard")},
-            name="Claw Dashboard",
-            manufacturer="Claw Assistant",
-            model="Management Panel",
-            sw_version=VERSION,
-        )
-
-    @property
-    def native_value(self) -> str:
-        # Return the number of active conversation agents
-        agents = [
-            e for e in self.hass.states.async_entity_ids("conversation")
-            if e != "conversation.home_assistant"
-        ]
-        return f"{len(agents)} agents"
-
-    @property
-    def extra_state_attributes(self) -> dict:
-        attrs = {}
-        # Read the core claw_assistant config entry
-        for entry in self.hass.config_entries.async_entries(DOMAIN):
-            if not entry.data.get(CONF_ENTRY_TYPE):
-                attrs.update(entry.options)
-                break
-        # Add skills/docs/plugins counts
-        try:
-            from .runtime.storage.skill_store import list_installed_skills, _INTERNAL_SKILL_SLUGS
-            skills = list_installed_skills()
-            attrs["skills"] = [s.get("name", s.get("slug", "?")) for s in skills
-                               if s.get("slug") not in _INTERNAL_SKILL_SLUGS]
-        except Exception:
-            attrs["skills"] = []
-        try:
-            from .runtime.storage.workspace_store import get_workspace_doc
-            doc_names = ["AGENTS", "BOOTSTRAP", "HEARTBEAT", "IDENTITY", "MEMORY", "SOUL", "TOOLS", "USER"]
-            docs = []
-            for name in doc_names:
-                doc = get_workspace_doc(name)
-                if doc.get("markdown", "").strip():
-                    docs.append(name)
-            attrs["docs"] = docs
-        except Exception:
-            attrs["docs"] = []
-        try:
-            from .runtime.storage.plugin_store import list_installed_plugins
-            plugins = list_installed_plugins()
-            attrs["plugins"] = [p.get("name", p.get("key", "?")) for p in plugins]
-        except Exception:
-            attrs["plugins"] = []
-        try:
-            from .runtime.storage.user_mapping import MappingStore
-            mappings = MappingStore.load()
-            attrs["user_mappings"] = mappings
-        except Exception:
-            attrs["user_mappings"] = []
-        attrs["skills_count"] = len(attrs.get("skills", []))
-        attrs["docs_count"] = len(attrs.get("docs", []))
-        attrs["plugins_count"] = len(attrs.get("plugins", []))
-        attrs["user_mappings_count"] = len(attrs.get("user_mappings", []))
-        return attrs
-
-    async def async_update(self) -> None:
         self.async_write_ha_state()

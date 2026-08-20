@@ -94,64 +94,46 @@ async def _tick_inner(hass: HomeAssistant) -> None:
 
     from ..core.state import get_runtime_store
 
+    from homeassistant.components.conversation import agent_manager
+
     runtime_store = get_runtime_store(hass)
     if not runtime_store.get("original_async_converse"):
         LOGGER.warning("Heartbeat ticker: runtime hook not ready")
         return
 
     for task in due_tasks:
-        await _run_single_task(hass, task)
-
-
-async def _run_single_task(hass: HomeAssistant, task: HeartbeatTask) -> None:
-    """Execute one heartbeat task and record its result.
-
-    Shared by the scheduled ticker and ``async_run_now`` (G2), so a manual
-    "run now" uses exactly the same execution path as a due tick.
-    """
-    from ..core.state import get_runtime_store
-
-    from homeassistant.components.conversation import agent_manager
-
-    runtime_store = get_runtime_store(hass)
-    if not runtime_store.get("original_async_converse"):
-        LOGGER.warning("Heartbeat run_now: runtime hook not ready")
-        return
-
-    LOGGER.info("Heartbeat due: %s — %s", task.slug, task.objective)
-    try:
-        text = _build_heartbeat_text(task)
-        result = await agent_manager.async_converse(
-            hass,
-            text,
-            f"heartbeat_{task.slug}",
-            hass.data.get("claw_assistant_context"),
-            None,
-            None,
-            None,
-            None,
-            _HEARTBEAT_SYSTEM_PROMPT,
-        )
-        speech = ""
-        if result.response.speech:
-            speech = (
-                result.response.speech.get("plain", {}).get("speech", "")
-                if isinstance(result.response.speech, dict)
-                else ""
+        LOGGER.info("Heartbeat due: %s — %s", task.slug, task.objective)
+        try:
+            text = _build_heartbeat_text(task)
+            result = await agent_manager.async_converse(
+                hass,
+                text,
+                f"heartbeat_{task.slug}",
+                hass.data.get("claw_assistant_context"),
+                None,
+                None,
+                None,
+                None,
+                _HEARTBEAT_SYSTEM_PROMPT,
             )
-        if speech and task.notify_channel:
-            await _push_reply_to_channel(hass, task.notify_channel, speech)
-        status = "success" if speech else "executed"
-        await async_record_heartbeat_result(
-            hass, slug=task.slug, status=status, note="auto-tick"
-        )
-    except Exception:
-        LOGGER.exception("Heartbeat tick failed for %s", task.slug)
-        await async_record_heartbeat_result(
-            hass, slug=task.slug, status="error", note="auto-tick failed"
-        )
-
-
+            speech = ""
+            if result.response.speech:
+                speech = (
+                    result.response.speech.get("plain", {}).get("speech", "")
+                    if isinstance(result.response.speech, dict)
+                    else ""
+                )
+            if speech and task.notify_channel:
+                await _push_reply_to_channel(hass, task.notify_channel, speech)
+            status = "success" if speech else "executed"
+            await async_record_heartbeat_result(
+                hass, slug=task.slug, status=status, note="auto-tick"
+            )
+        except Exception:
+            LOGGER.exception("Heartbeat tick failed for %s", task.slug)
+            await async_record_heartbeat_result(
+                hass, slug=task.slug, status="error", note="auto-tick failed"
+            )
 async def _push_to_channel(hass: HomeAssistant, channel: str, message: str) -> None:
     await async_send_im_payload(hass, channel, message=message)
 

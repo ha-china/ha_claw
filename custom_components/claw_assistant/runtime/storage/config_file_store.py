@@ -3,18 +3,23 @@
 from __future__ import annotations
 
 import json
+from datetime import UTC, datetime
 from pathlib import Path
 import shutil
 from typing import Any
+from uuid import uuid4
 
 from homeassistant.core import HomeAssistant
 
-from ..core.state import get_config_approval_state
-from . import approval_store
+from ..core.state import get_config_approval_state, get_task_loop_state
 
 _PREVIEW_LIMIT = 1200
 _READ_LIMIT = 20000
 _ACTIONS_REQUIRING_CONFIRMATION: frozenset[str] = frozenset({"delete"})
+
+
+def _now_iso() -> str:
+    return datetime.now(UTC).isoformat()
 
 
 def _config_root(hass: HomeAssistant) -> Path:
@@ -175,37 +180,31 @@ def stage_config_operation(
 ) -> dict[str, Any]:
     root = _config_root(hass)
     target = _resolve_config_path(hass, relative_path)
+    approval_id = uuid4().hex[:12]
     operation = {
+        "approval_id": approval_id,
         "action": action,
         "path": target.relative_to(root).as_posix() if target != root else ".",
         "content": content,
         "create_dirs": create_dirs,
+        "created_at": _now_iso(),
         "preview": _preview_text(content) if content else "",
         "exists": target.exists(),
         "is_dir": target.is_dir() if target.exists() else action == "mkdir",
     }
-    # Reuse the generic approval queue (kind=config_operation). The returned
-    # entry carries approval_id + the operation payload above.
-    return approval_store.create(
-        hass,
-        tool="ConfigFile",
-        params={
-            "action": action,
-            "path": operation["path"],
-        },
-        user_key=None,
-        risk=2,
-        kind=approval_store.KIND_CONFIG_OPERATION,
-        **operation,
-    )
+    state = get_config_approval_state(hass)
+    state.setdefault("pending", {})[approval_id] = operation
+
+    task_loop = get_task_loop_state(hass)
+    task_loop["waiting_choice"] = True
+    task_loop["last_choice"] = None
+
+    return operation
 
 
 def list_pending_operations(hass: HomeAssistant) -> list[dict[str, Any]]:
-    return [
-        entry
-        for entry in approval_store.list_pending(hass)
-        if entry.get("kind") == approval_store.KIND_CONFIG_OPERATION
-    ]
+    state = get_config_approval_state(hass)
+    return list(state.get("pending", {}).values())
 
 
 def apply_staged_operation_sync(
@@ -216,11 +215,11 @@ def apply_staged_operation_sync(
     consent_quote: str = "",
 ) -> dict[str, Any]:
     state = get_config_approval_state(hass)
-    operation = approval_store.get(hass, approval_id)
+    operation = state.get("pending", {}).get(approval_id)
     if not operation:
         raise ValueError(f"Pending approval not found: {approval_id}")
     if (
-        operation.get("action") in _ACTIONS_REQUIRING_CONFIRMATION
+        operation["action"] in _ACTIONS_REQUIRING_CONFIRMATION
         and not user_consent
     ):
         raise PermissionError(
@@ -230,10 +229,10 @@ def apply_staged_operation_sync(
             "for audit)."
         )
 
-    target = _resolve_config_path(hass, operation.get("path", ""))
+    target = _resolve_config_path(hass, operation["path"])
 
     old_content = ""
-    if operation.get("action") in ("write", "append") and target.is_file():
+    if operation["action"] in ("write", "append") and target.is_file():
         try:
             old_content = target.read_text("utf-8")
         except Exception:
@@ -241,20 +240,20 @@ def apply_staged_operation_sync(
 
     _apply_operation(
         target,
-        operation.get("action", ""),
+        operation["action"],
         operation.get("content", ""),
         create_dirs=bool(operation.get("create_dirs", False)),
     )
-    approval_store.resolve(hass, approval_id, True, approver="config_apply")
+    state["pending"].pop(approval_id, None)
     resolution: dict[str, Any] = {
         "approval_id": approval_id,
         "status": "applied",
-        "path": operation.get("path", ""),
-        "action": operation.get("action", ""),
+        "path": operation["path"],
+        "action": operation["action"],
     }
-    if operation.get("action") in _ACTIONS_REQUIRING_CONFIRMATION:
+    if operation["action"] in _ACTIONS_REQUIRING_CONFIRMATION:
         resolution["consent_quote"] = consent_quote.strip()
-    if operation.get("action") in ("write", "append"):
+    if operation["action"] in ("write", "append"):
         resolution["_old_content"] = old_content
         try:
             resolution["_new_content"] = target.read_text("utf-8")
@@ -301,32 +300,27 @@ async def async_apply_staged_operation(
 
 def cancel_staged_operation(hass: HomeAssistant, approval_id: str) -> dict[str, Any]:
     state = get_config_approval_state(hass)
-    operation = approval_store.get(hass, approval_id)
-    if not operation:
+    if approval_id not in state.get("pending", {}):
         raise ValueError(f"Pending approval not found: {approval_id}")
-    approval_store.cancel(hass, approval_id, approver="config_cancel")
+    operation = state["pending"].pop(approval_id)
     state["last_resolution"] = {
         "approval_id": approval_id,
         "status": "cancelled",
-        "path": operation.get("path", ""),
-        "action": operation.get("action", ""),
+        "path": operation["path"],
+        "action": operation["action"],
     }
     return {
         "approval_id": approval_id,
         "status": "cancelled",
-        "path": operation.get("path", ""),
-        "action": operation.get("action", ""),
+        "path": operation["path"],
+        "action": operation["action"],
     }
 
 
 def build_config_approval_prompt_block(hass: HomeAssistant) -> str:
 
     state = get_config_approval_state(hass)
-    pending = [
-        item
-        for item in state.get("pending", {}).values()
-        if item.get("kind") == approval_store.KIND_CONFIG_OPERATION
-    ]
+    pending = list(state.get("pending", {}).values())
     if not pending and not state.get("last_resolution"):
         return ""
 

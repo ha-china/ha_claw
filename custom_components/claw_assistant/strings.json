@@ -1,76 +1,8 @@
 {
-  "config": {
-    "step": {
-      "user": {
-        "title": "Choose installation type",
-        "description": "Select what to install:",
-        "menu_options": {
-          "core": "Core - Full Claw Assistant runtime",
-          "dashboard": "Dashboard - Management panel only"
-        }
-      },
-      "core": {
-        "title": "Claw Assistant Core",
-        "description": "Install the full Claw Assistant runtime with AI agent orchestration, plugin system, and workspace management."
-      },
-      "dashboard": {
-        "title": "Claw Dashboard",
-        "description": "Install the management panel with Voice FAB, config sensor, and workspace tools."
-      },
-      "agent_settings": {
-        "title": "Configure AI Agents",
-        "description": "Select the conversation agents to use. The system tries them in order until a valid response is received.",
-        "data": {
-          "primary_agent": "Primary AI entity",
-          "fallback_agent": "Fallback AI entity",
-          "secondary_fallback_agent": "Summary AI entity (optional)"
-        }
-      }
-    }
-  },
-  "options": {
-    "step": {
-      "um_pick_member": {
-        "title": "Add Link | Household Member",
-        "description": "**Step 3 of 3**\n\n- Channel: **{provider}**\n- External user: `{ext_id}`\n\nSelect an **HA household member** and click **Submit** to save the link.\n\nMembers must already have a login under Settings → Users.\n\n{role_hint}",
-        "data": {
-          "ha_user": "Link to",
-          "role": "Role",
-          "back": "Back"
-        },
-        "data_description": {
-          "ha_user": "Household member with an existing HA user account",
-          "role": "owner passes all; member tiered confirm. Refine later in Members & Permissions panel"
-        }
-      },
-      "um_remove": {
-        "title": "Remove Link",
-        "description": "**Remove a channel link**\n\nAfter removal, that external identity is no longer linked to the member. Persona files are kept.\n\n{mapping_status}\n\n{member_hint}\n\nSelect a link and click **Submit** to confirm.",
-        "data": {
-          "remove_key": "Link to remove",
-          "back": "Back"
-        }
-      },
-      "user_mapping": {
-        "title": "User Linking",
-        "description": "**User linking has been unified into the Members & Permissions panel.**\n\n{cn_im_hub_status}{mapping_status}",
-        "menu_options": {
-          "um_pick_channel": "＋ Add link",
-          "um_remove": "－ Remove link"
-        },
-        "data": {
-          "back": "Back to previous menu"
-        }
-      }
-    }
-  },
   "entity": {
     "sensor": {
       "heartbeat": {
         "name": "Heartbeat"
-      },
-      "claw_config": {
-        "name": "Claw Config"
       }
     }
   }

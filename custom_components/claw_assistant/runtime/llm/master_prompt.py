@@ -143,17 +143,6 @@ def build_master_prompt_sections(*, user_text: str = "") -> tuple[str, ...]:
             f"## Installed Plugin Index\n{plugin_catalog}\n\n{_PLUGIN_INDEX_GUIDANCE}"
         )
 
-    # Hard boundary rules (G1): enabled rules are appended as the final
-    # section so they are always visible to the model. Toggling rules in
-    # rules_store invalidates this cache, so changes take effect immediately.
-    try:
-        from ..storage.rules_store import render_rules_prompt
-        rules_prompt = render_rules_prompt()
-    except Exception:
-        rules_prompt = ""
-    if rules_prompt:
-        sections.append(rules_prompt)
-
     capability_overview = _build_capability_overview()
     if capability_overview:
         sections.insert(0, capability_overview)

@@ -97,25 +97,15 @@ class ConversationHistory:
     def __init__(
         self,
         max_turns: int = 30,
-        max_age_hours: float = 8760.0,
+        max_age_hours: float = 360.0,
     ):
         self._histories: Dict[str, List[ConversationTurn]] = {}
         self._last_touched: Dict[str, float] = {}
         self._in_progress: Dict[str, dict] = {}
         self.max_turns = max_turns
-        self._max_age_hours = max_age_hours
         self.max_age_seconds = max_age_hours * 3600
         self._store: Optional["Store"] = None
         self._context_engine: Any = None
-
-    @property
-    def max_age_hours(self) -> float:
-        return self._max_age_hours
-
-    def set_max_age_hours(self, hours: float) -> None:
-        self._max_age_hours = hours
-        self.max_age_seconds = hours * 3600
-        self.cleanup_all()
 
     def set_context_engine(self, engine: Any) -> None:
         self._context_engine = engine
@@ -299,10 +289,6 @@ class ConversationHistory:
             if turn.timestamp > cutoff
         ]
 
-        if not self._histories[conversation_id]:
-            del self._histories[conversation_id]
-            self._last_touched.pop(conversation_id, None)
-
     def cleanup_all(self) -> int:
 
         now = time.time()
@@ -410,7 +396,6 @@ class ConversationHistory:
             "average_turns": round(avg_turns, 1),
             "oldest_turn": time.strftime("%Y-%m-%d %H:%M", time.localtime(oldest)) if oldest else None,
             "newest_turn": time.strftime("%Y-%m-%d %H:%M", time.localtime(newest)) if newest else None,
-            "max_age_hours": self._max_age_hours,
         }
 
 
@@ -433,10 +418,6 @@ class ConversationHistory:
                 for conv_id, turns in self._histories.items()
             },
             "last_touched": dict(self._last_touched),
-            "settings": {
-                "max_age_hours": self._max_age_hours,
-                "max_turns": self.max_turns,
-            },
         }
 
     def _schedule_save(self) -> None:
@@ -450,13 +431,6 @@ class ConversationHistory:
     def load_from_dict(self, data: Dict[str, Any]) -> int:
         if not data:
             return 0
-        # Restore settings first
-        settings = data.get("settings") or {}
-        if "max_age_hours" in settings:
-            self._max_age_hours = float(settings["max_age_hours"])
-            self.max_age_seconds = self._max_age_hours * 3600
-        if "max_turns" in settings:
-            self.max_turns = int(settings["max_turns"])
         histories = data.get("histories") or {}
         last_touched = data.get("last_touched") or {}
         now = time.time()
@@ -517,7 +491,7 @@ async def async_setup_history_store(hass: "HomeAssistant") -> ConversationHistor
     if data:
         loaded = history.load_from_dict(data)
         _LOGGER.info(
-            "Restored %d conversation turns from storage (%.0fh retention)", loaded, history.max_age_hours
+            "Restored %d conversation turns from storage (15d retention)", loaded
         )
     history.attach_store(store)
     history.cleanup_all()

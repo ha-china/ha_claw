@@ -93,35 +93,9 @@ _DEFAULT_RESULT_FIELD_LIMIT = 1200
 _PATCH_SNAPSHOT_KEYS = (
     "assist_api_prompt",
     "assist_api_tools",
-    "assist_api_instance",
     "api_instance_call_tool",
     "chatlog_update",
 )
-
-
-def _get_assist_api_module():
-    """Resolve the module exposing AssistAPI across HA versions.
-
-    HA <= 2026.7 exposes ``AssistAPI`` on ``homeassistant.helpers.llm`` with a
-    legacy method surface (``_async_get_api_prompt`` / ``_async_get_tools`` /
-    ``async_get_api_instance``). HA 2026.8+ moved the class to the ``llm``
-    integration (``homeassistant.components.llm``) and reworked it to a
-    platform-based surface (only ``async_get_api_instance``, which aggregates
-    tools/prompt through ``async_get_tools``).
-
-    Returns ``(module, AssistAPI_class)`` or ``(None, None)`` when unavailable.
-    """
-    from homeassistant.helpers import llm as helpers_llm
-
-    try:
-        from homeassistant.components import llm as components_llm
-    except ImportError:
-        components_llm = None
-
-    for mod in (components_llm, helpers_llm):
-        if mod is not None and hasattr(mod, "AssistAPI"):
-            return mod, getattr(mod, "AssistAPI")
-    return None, None
 
 
 def _compact_result_summary(result: dict[str, Any]) -> dict[str, Any]:
@@ -161,20 +135,12 @@ def _build_runtime_prompt_kwargs(user_text: str = "") -> dict[str, str]:
 def _capture_patch_snapshot() -> dict[str, Callable[..., Any]]:
 
     from homeassistant.components.conversation import chat_log as chat_log_module
-    from homeassistant.helpers import llm as helpers_llm
+    from homeassistant.helpers import llm as llm_module
 
-    llm_module, AssistAPI = _get_assist_api_module()
     return {
-        "assist_api_prompt": (
-            getattr(AssistAPI, "_async_get_api_prompt", None) if AssistAPI is not None else None
-        ),
-        "assist_api_tools": (
-            getattr(AssistAPI, "_async_get_tools", None) if AssistAPI is not None else None
-        ),
-        "assist_api_instance": (
-            getattr(AssistAPI, "async_get_api_instance", None) if AssistAPI is not None else None
-        ),
-        "api_instance_call_tool": helpers_llm.APIInstance.async_call_tool,
+        "assist_api_prompt": llm_module.AssistAPI._async_get_api_prompt,
+        "assist_api_tools": llm_module.AssistAPI._async_get_tools,
+        "api_instance_call_tool": llm_module.APIInstance.async_call_tool,
         "chatlog_update": chat_log_module.ChatLog.async_update_llm_data,
     }
 
@@ -187,20 +153,12 @@ def _is_valid_patch_snapshot(snapshot: object) -> bool:
 def _restore_patch_snapshot(snapshot: dict[str, Callable[..., Any]]) -> None:
 
     from homeassistant.components.conversation import chat_log as chat_log_module
-    from homeassistant.helpers import llm as helpers_llm
+    from homeassistant.helpers import llm as llm_module
 
-    llm_module, AssistAPI = _get_assist_api_module()
-    if AssistAPI is not None:
-        if snapshot.get("assist_api_prompt") is not None:
-            AssistAPI._async_get_api_prompt = snapshot["assist_api_prompt"]
-        if snapshot.get("assist_api_tools") is not None:
-            AssistAPI._async_get_tools = snapshot["assist_api_tools"]
-        if snapshot.get("assist_api_instance") is not None:
-            AssistAPI.async_get_api_instance = snapshot["assist_api_instance"]
-    if snapshot.get("api_instance_call_tool") is not None:
-        helpers_llm.APIInstance.async_call_tool = snapshot["api_instance_call_tool"]
-    if snapshot.get("chatlog_update") is not None:
-        chat_log_module.ChatLog.async_update_llm_data = snapshot["chatlog_update"]
+    llm_module.AssistAPI._async_get_api_prompt = snapshot["assist_api_prompt"]
+    llm_module.AssistAPI._async_get_tools = snapshot["assist_api_tools"]
+    llm_module.APIInstance.async_call_tool = snapshot["api_instance_call_tool"]
+    chat_log_module.ChatLog.async_update_llm_data = snapshot["chatlog_update"]
 
 
 def _trim_prompt(text: str, *, max_chars: int = _MAX_SYSTEM_PROMPT_CHARS) -> str:
@@ -709,119 +667,84 @@ def async_unregister_enhanced_api() -> None:
 
 def _patch_assist_api_prompt(hass: HomeAssistant) -> None:
 
-    llm_module, AssistAPI = _get_assist_api_module()
-    if AssistAPI is None:
-        LOGGER.warning(
-            "AssistAPI not found in helpers.llm or components.llm; "
-            "skipping AssistAPI prompt/tool patch (internal LLM AssistAPI surface unavailable)"
-        )
-        return
+    from homeassistant.helpers import llm as llm_module
+
     if hasattr(llm_module, _PATCH_KEY):
         return
 
+    original_get_api_prompt = llm_module.AssistAPI._async_get_api_prompt
+    original_get_tools = llm_module.AssistAPI._async_get_tools
+    original_get_api_instance = llm_module.AssistAPI.async_get_api_instance
     APIInstance = llm_module.APIInstance
     selector_serializer = llm_module.selector_serializer
 
-    if hasattr(AssistAPI, "_async_get_api_prompt") and hasattr(AssistAPI, "_async_get_tools"):
-        # ---- HA <= 2026.7: legacy method surface (_async_get_api_prompt/_async_get_tools) ----
-        original_get_api_prompt = AssistAPI._async_get_api_prompt
-        original_get_tools = AssistAPI._async_get_tools
-        original_get_api_instance = AssistAPI.async_get_api_instance
+    @callback
+    def patched_get_api_prompt(self, llm_context, exposed_entities):
+        del llm_context
+        del exposed_entities
+        return build_assist_api_prompt(hass, "")
 
-        @callback
-        def patched_get_api_prompt(self, llm_context, exposed_entities):
-            del llm_context
-            del exposed_entities
-            return build_assist_api_prompt(hass, "")
+    @callback
+    def patched_get_tools(self, llm_context, exposed_entities):
+        original_tools = original_get_tools(self, llm_context, exposed_entities)
+        final_tools = build_assist_api_tools(hass, original_tools)
+        LOGGER.debug(
+            "Internal LLM tool mode: %s (%s -> %s)",
+            "native" if use_native_tool_surface(hass) else "runtime",
+            len(original_tools),
+            len(final_tools),
+        )
+        return final_tools
 
-        @callback
-        def patched_get_tools(self, llm_context, exposed_entities):
-            original_tools = original_get_tools(self, llm_context, exposed_entities)
-            final_tools = build_assist_api_tools(hass, original_tools)
-            LOGGER.debug(
-                "Internal LLM tool mode (legacy): %s (%s -> %s)",
-                "native" if use_native_tool_surface(hass) else "runtime",
-                len(original_tools),
-                len(final_tools),
-            )
-            return final_tools
+    async def patched_get_api_instance(self, llm_context):
+        api_prompt = self._async_get_api_prompt(llm_context, None)
+        tools = self._async_get_tools(llm_context, None)
+        _record_prefix_fingerprint(
+            hass,
+            api_prompt=api_prompt,
+            tools=tools,
+            source="assist_api",
+            tool_mode=_TOOL_MODE.get(),
+        )
+        return APIInstance(
+            api=self,
+            api_prompt=api_prompt,
+            llm_context=llm_context,
+            tools=tools,
+            custom_serializer=selector_serializer,
+        )
 
-        async def patched_get_api_instance(self, llm_context):
-            api_prompt = self._async_get_api_prompt(llm_context, None)
-            tools = self._async_get_tools(llm_context, None)
-            _record_prefix_fingerprint(
-                hass,
-                api_prompt=api_prompt,
-                tools=tools,
-                source="assist_api",
-                tool_mode=_TOOL_MODE.get(),
-            )
-            return APIInstance(
-                api=self,
-                api_prompt=api_prompt,
-                llm_context=llm_context,
-                tools=tools,
-                custom_serializer=selector_serializer,
-            )
-
-        AssistAPI._async_get_api_prompt = patched_get_api_prompt
-        AssistAPI._async_get_tools = patched_get_tools
-        AssistAPI.async_get_api_instance = patched_get_api_instance
-        setattr(AssistAPI, _ASSIST_PROMPT_ORIGINAL_KEY, original_get_api_prompt)
-        setattr(AssistAPI, _ASSIST_TOOLS_ORIGINAL_KEY, original_get_tools)
-        setattr(AssistAPI, _ASSIST_INSTANCE_ORIGINAL_KEY, original_get_api_instance)
-        LOGGER.debug("AssistAPI switched to the centralized internal LLM kernel (legacy surface)")
-    else:
-        # ---- HA 2026.8+: platform surface (only async_get_api_instance, tools/prompt aggregated) ----
-        original_get_api_instance = AssistAPI.async_get_api_instance
-
-        async def patched_get_api_instance(self, llm_context):
-            instance = await original_get_api_instance(self, llm_context)
-            api_prompt = build_assist_api_prompt(hass, instance.api_prompt or "")
-            final_tools = build_assist_api_tools(hass, instance.tools or [])
-            _record_prefix_fingerprint(
-                hass,
-                api_prompt=api_prompt,
-                tools=final_tools,
-                source="assist_api",
-                tool_mode=_TOOL_MODE.get(),
-            )
-            return APIInstance(
-                api=instance.api,
-                api_prompt=api_prompt,
-                llm_context=llm_context,
-                tools=final_tools,
-                custom_serializer=instance.custom_serializer,
-            )
-
-        AssistAPI.async_get_api_instance = patched_get_api_instance
-        setattr(AssistAPI, _ASSIST_INSTANCE_ORIGINAL_KEY, original_get_api_instance)
-        LOGGER.debug("AssistAPI switched to the centralized internal LLM kernel (2026.8+ platform surface)")
+    llm_module.AssistAPI._async_get_api_prompt = patched_get_api_prompt
+    llm_module.AssistAPI._async_get_tools = patched_get_tools
+    llm_module.AssistAPI.async_get_api_instance = patched_get_api_instance
+    setattr(llm_module.AssistAPI, _ASSIST_PROMPT_ORIGINAL_KEY, original_get_api_prompt)
+    setattr(llm_module.AssistAPI, _ASSIST_TOOLS_ORIGINAL_KEY, original_get_tools)
+    setattr(llm_module.AssistAPI, _ASSIST_INSTANCE_ORIGINAL_KEY, original_get_api_instance)
     setattr(llm_module, _PATCH_KEY, True)
+    LOGGER.debug("AssistAPI switched to the centralized internal LLM kernel")
 
 
 def _unpatch_assist_api_prompt() -> None:
 
-    llm_module, AssistAPI = _get_assist_api_module()
-    if AssistAPI is None:
+    from homeassistant.helpers import llm as llm_module
+
+    original_get_api_prompt = getattr(
+        llm_module.AssistAPI, _ASSIST_PROMPT_ORIGINAL_KEY, None
+    )
+    original_get_tools = getattr(llm_module.AssistAPI, _ASSIST_TOOLS_ORIGINAL_KEY, None)
+    original_get_api_instance = getattr(
+        llm_module.AssistAPI, _ASSIST_INSTANCE_ORIGINAL_KEY, None
+    )
+    if original_get_api_prompt is None or original_get_tools is None:
         return
 
-    original_get_api_prompt = getattr(AssistAPI, _ASSIST_PROMPT_ORIGINAL_KEY, None)
-    original_get_tools = getattr(AssistAPI, _ASSIST_TOOLS_ORIGINAL_KEY, None)
-    original_get_api_instance = getattr(AssistAPI, _ASSIST_INSTANCE_ORIGINAL_KEY, None)
-
-    if original_get_api_prompt is not None:
-        AssistAPI._async_get_api_prompt = original_get_api_prompt
-    if original_get_tools is not None:
-        AssistAPI._async_get_tools = original_get_tools
+    llm_module.AssistAPI._async_get_api_prompt = original_get_api_prompt
+    llm_module.AssistAPI._async_get_tools = original_get_tools
     if original_get_api_instance is not None:
-        AssistAPI.async_get_api_instance = original_get_api_instance
-        if hasattr(AssistAPI, _ASSIST_INSTANCE_ORIGINAL_KEY):
-            delattr(AssistAPI, _ASSIST_INSTANCE_ORIGINAL_KEY)
-    if hasattr(AssistAPI, _ASSIST_PROMPT_ORIGINAL_KEY):
-        delattr(AssistAPI, _ASSIST_PROMPT_ORIGINAL_KEY)
-    if hasattr(AssistAPI, _ASSIST_TOOLS_ORIGINAL_KEY):
-        delattr(AssistAPI, _ASSIST_TOOLS_ORIGINAL_KEY)
+        llm_module.AssistAPI.async_get_api_instance = original_get_api_instance
+        delattr(llm_module.AssistAPI, _ASSIST_INSTANCE_ORIGINAL_KEY)
+    delattr(llm_module.AssistAPI, _ASSIST_PROMPT_ORIGINAL_KEY)
+    delattr(llm_module.AssistAPI, _ASSIST_TOOLS_ORIGINAL_KEY)
     if hasattr(llm_module, _PATCH_KEY):
         delattr(llm_module, _PATCH_KEY)
     LOGGER.debug("AssistAPI prompt/tool patch restored")
