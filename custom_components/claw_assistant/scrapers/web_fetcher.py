@@ -170,7 +170,6 @@ class WebPageFetcher:
                         headers=headers,
                         timeout=30,
                         allow_redirects=True,
-                        verify=False,
                     )
                 final_url = str(response.url) if response.url else url
                 if final_url != url:
